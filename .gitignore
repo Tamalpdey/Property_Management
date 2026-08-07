@@ -1,0 +1,62 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Dependencies and build output
+/node_modules/
+**/node_modules/
+/dist/
+**/dist/
+/build/
+**/build/
+/target/
+**/target/
+/classes/
+**/classes/
+/generated-sources/
+**/generated-sources/
+/generated-test-sources/
+**/generated-test-sources/
+/.angular/
+**/.angular/
+/.gradle/
+**/.gradle/
+**/build/classes/
+**/build/reports/
+**/build/test-results/
+dist-ssr
+out-tsc/
+**/out-tsc/
+coverage/
+**/coverage/
+.cache/
+**/.cache/
+*.class
+*.jar
+*.war
+*.ear
+
+# Legacy/prototype workspace
+/Lorne/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+!**/.env.example
+!.env.local.example
+!**/.env.local.example
+
+# Editor and OS files
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

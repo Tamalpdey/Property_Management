@@ -1,0 +1,19 @@
+# Copy this file to flyway-supabase.properties and fill in your Supabase direct DB connection.
+# Use the direct database connection for migrations when possible, not the transaction pooler.
+#
+# Supabase direct JDBC format:
+# flyway.url=jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+#
+# Supabase pooler JDBC format if direct connection is unavailable:
+# flyway.url=jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+# flyway.user=postgres.<project-ref>
+
+flyway.url=jdbc:postgresql://db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+flyway.user=postgres
+flyway.password=replace-me
+flyway.schemas=public
+flyway.defaultSchema=public
+flyway.locations=filesystem:src/main/resources/db/migration/postgresql
+flyway.validateOnMigrate=true
+flyway.cleanDisabled=true
+flyway.baselineOnMigrate=false

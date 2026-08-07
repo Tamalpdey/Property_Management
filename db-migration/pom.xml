@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.lorne.platform</groupId>
+    <artifactId>lorne-db-migration</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+    <name>Lorne DB Migration</name>
+    <description>Standalone Flyway migration runner for the Lorne PostgreSQL database.</description>
+
+    <properties>
+        <flyway.version>10.20.1</flyway.version>
+        <postgresql.version>42.7.3</postgresql.version>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <version>${flyway.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.postgresql</groupId>
+                        <artifactId>postgresql</artifactId>
+                        <version>${postgresql.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-database-postgresql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configFiles>
+                        <configFile>flyway-postgresql.properties</configFile>
+                    </configFiles>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration/postgresql</location>
+                    </locations>
+                    <installedBy>lorne-db-migration</installedBy>
+                    <baselineOnMigrate>false</baselineOnMigrate>
+                    <validateOnMigrate>true</validateOnMigrate>
+                    <outOfOrder>false</outOfOrder>
+                    <cleanDisabled>true</cleanDisabled>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

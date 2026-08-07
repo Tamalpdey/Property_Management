@@ -1,0 +1,8 @@
+flyway.url=jdbc:postgresql://localhost:5432/lorne
+flyway.user=lorne
+flyway.password=change-me
+flyway.schemas=public
+flyway.defaultSchema=public
+flyway.locations=filesystem:src/main/resources/db/migration/postgresql
+flyway.validateOnMigrate=true
+flyway.cleanDisabled=true

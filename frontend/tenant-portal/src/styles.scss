@@ -1,0 +1,162 @@
+@import "primeicons/primeicons.css";
+
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(20, 184, 166, 0.07) 0, rgba(246, 248, 251, 0) 18rem),
+    #f6f8fb;
+  color: #162033;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.touch-action {
+  min-height: 3.25rem;
+}
+
+.p-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.p-card .p-card-body {
+  padding: 1.25rem;
+}
+
+.p-inputtext,
+.p-password-input,
+select,
+textarea {
+  border-radius: 8px;
+}
+
+.printable-work-order {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.45in;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    min-height: 0 !important;
+    background: #fff !important;
+    color: #111827 !important;
+  }
+
+  .screen-work-order-review {
+    display: none !important;
+  }
+
+  .printable-work-order {
+    display: block !important;
+    position: static;
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #111827;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+
+  .printable-work-order .print-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 24pt;
+    border-bottom: 2px solid #111827;
+    padding-bottom: 10pt;
+    margin-bottom: 10pt;
+  }
+
+  .printable-work-order .print-eyebrow {
+    margin: 0 0 3pt;
+    font-size: 8pt;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #0f766e;
+  }
+
+  .printable-work-order h1 {
+    margin: 0;
+    font-size: 22pt;
+    line-height: 1.1;
+  }
+
+  .printable-work-order h2 {
+    margin: 0 0 6pt;
+    font-size: 10pt;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #0f766e;
+  }
+
+  .printable-work-order p {
+    margin: 2pt 0;
+  }
+
+  .printable-work-order section {
+    break-inside: avoid;
+    border: 1px solid #d1d5db;
+    padding: 7pt;
+    margin-bottom: 7pt;
+  }
+
+  .printable-work-order .print-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7pt;
+  }
+
+  .printable-work-order .print-status {
+    min-width: 150pt;
+    text-align: right;
+  }
+
+  .printable-work-order .print-status strong {
+    display: block;
+    font-size: 12pt;
+    text-transform: uppercase;
+  }
+
+  .printable-work-order table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+  }
+
+  .printable-work-order th,
+  .printable-work-order td {
+    border: 1px solid #d1d5db;
+    padding: 5pt 6pt;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .printable-work-order th {
+    background: #f3f4f6;
+    font-weight: 800;
+  }
+}

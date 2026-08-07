@@ -1,0 +1,15 @@
+package com.lorne.platform.security;
+
+public enum LornePermission {
+    MANAGE_TENANTS,
+    MANAGE_PROPERTIES,
+    MANAGE_WORKERS,
+    CREATE_WORK_ORDERS,
+    ASSIGN_WORKERS,
+    APPROVE_WORK,
+    FIELD_WORK,
+    VIEW_FINANCE,
+    MANAGE_PAYROLL,
+    UPLOAD_JOB_PHOTOS,
+    VIEW_CUSTOMER_PORTAL
+}

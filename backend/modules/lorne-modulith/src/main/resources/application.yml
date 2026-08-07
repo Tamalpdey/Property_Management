@@ -1,0 +1,81 @@
+server:
+  port: ${SERVER_PORT:8091}
+  shutdown: graceful
+
+spring:
+  application:
+    name: lorne-modulith
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/lorne}
+    username: ${DB_USERNAME:lorne}
+    password: ${DB_PASSWORD:lorne}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:false}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+lorne:
+  bootstrap:
+    enabled: ${LORNE_BOOTSTRAP_ENABLED:false}
+  jwt:
+    secret: ${JWT_SECRET:lorne-local-development-secret-must-be-over-sixty-four-characters-change-in-production}
+    access-token-expiration-ms: ${JWT_ACCESS_TOKEN_EXPIRATION_MS:3600000}
+  security:
+    allowed-origins: ${LORNE_ALLOWED_ORIGINS:http://localhost:4500,http://localhost:4501,http://localhost:4502}
+  storage:
+    provider: ${LORNE_STORAGE_PROVIDER:r2}
+    bucket: ${LORNE_R2_BUCKET:${LORNE_S3_BUCKET:lorne-local-documents}}
+    endpoint: ${LORNE_R2_ENDPOINT:${LORNE_S3_ENDPOINT:}}
+    region: ${LORNE_R2_REGION:${AWS_REGION:auto}}
+    access-key-id: ${LORNE_R2_ACCESS_KEY_ID:${AWS_ACCESS_KEY_ID:}}
+    secret-access-key: ${LORNE_R2_SECRET_ACCESS_KEY:${AWS_SECRET_ACCESS_KEY:}}
+    upload-expires-seconds: ${LORNE_STORAGE_UPLOAD_EXPIRES_SECONDS:900}
+    max-image-bytes: ${LORNE_STORAGE_MAX_IMAGE_BYTES:10485760}
+  mail:
+    enabled: ${LORNE_MAIL_ENABLED:false}
+    from: ${LORNE_MAIL_FROM:no-reply@lorne.local}
+
+logging:
+  level:
+    com.lorne.platform: ${LOGGING_LEVEL_COM_LORNE_PLATFORM:INFO}
+    org.springframework.security: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY:INFO}

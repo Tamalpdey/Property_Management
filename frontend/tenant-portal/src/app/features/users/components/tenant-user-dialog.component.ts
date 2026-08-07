@@ -1,0 +1,201 @@
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, WorkerRecord } from '@lorne/contracts';
+import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
+import { InputTextModule } from 'primeng/inputtext';
+import { PasswordModule } from 'primeng/password';
+
+@Component({
+  selector: 'lorne-tenant-user-dialog',
+  standalone: true,
+  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, PasswordModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p-dialog [header]="title" [modal]="true" [visible]="visible" [style]="{ width: 'min(44rem, 94vw)' }" (visibleChange)="visibleChange.emit($event)">
+      <form class="grid gap-4" (ngSubmit)="submit()">
+        @if (linkedWorker) {
+          <div class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2">
+            <p class="text-xs font-bold uppercase tracking-wide text-teal-700">Linked worker profile</p>
+            <p class="mt-1 text-sm font-bold text-slate-950">{{ linkedWorker.displayName }}</p>
+            <p class="text-xs font-semibold text-slate-600">{{ linkedWorker.employeeNumber || 'No employee number' }}</p>
+          </div>
+        }
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Display name</span>
+            <input pInputText class="w-full" name="displayName" required [(ngModel)]="form.displayName" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Email</span>
+            <input pInputText class="w-full" name="email" type="email" required [(ngModel)]="form.email" />
+          </label>
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Phone</span>
+            <input pInputText class="w-full" name="phone" [(ngModel)]="form.phone" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Temporary password</span>
+            <p-password styleClass="w-full" inputStyleClass="w-full" name="temporaryPassword" [feedback]="false" [(ngModel)]="form.temporaryPassword" />
+          </label>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Tenant roles</p>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            @for (role of roles; track role.code) {
+              <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2" [class.opacity-70]="fieldWorkerLocked && role.code === 'FIELD_WORKER'">
+                <input
+                  class="mt-1 h-4 w-4"
+                  type="checkbox"
+                  [checked]="selectedRoles.has(role.code)"
+                  [disabled]="fieldWorkerLocked && role.code === 'FIELD_WORKER'"
+                  (change)="toggleRole(role.code, $event)"
+                />
+                <span>
+                  <span class="block text-sm font-bold text-slate-950">{{ role.displayName }}</span>
+                  <span class="block text-xs font-semibold text-slate-500">{{ roleDescription(role.code) }}</span>
+                </span>
+              </label>
+            }
+          </div>
+        </div>
+
+        @if (selectedRoles.has('FIELD_WORKER') && !linkedWorker) {
+          <label class="block">
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Linked worker profile</span>
+            <select class="w-full border border-slate-300 px-3 py-2" name="workerId" [(ngModel)]="form.workerId">
+              <option value="">Create linked worker profile</option>
+              @for (worker of workers; track worker.id) {
+                <option [value]="worker.id">{{ worker.displayName }} {{ worker.employeeNumber ? '(' + worker.employeeNumber + ')' : '' }}</option>
+              }
+            </select>
+            <span class="mt-1 block text-xs font-semibold text-slate-500">Leave this as create linked profile when the worker does not exist yet.</span>
+          </label>
+        }
+
+        @if (formError) {
+          <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ formError }}</p>
+        }
+
+        <div class="flex justify-end gap-2">
+          <button pButton type="button" severity="secondary" label="Cancel" (click)="visibleChange.emit(false)"></button>
+          <button pButton type="submit" icon="pi pi-user-plus" [loading]="saving" [label]="submitLabel"></button>
+        </div>
+      </form>
+    </p-dialog>
+  `
+})
+export class TenantUserDialogComponent implements OnChanges {
+  @Input() visible = false;
+  @Input() title = 'Add tenant user';
+  @Input() submitLabel = 'Create user';
+  @Input() saving = false;
+  @Input() roles: TenantRoleOption[] = [];
+  @Input() workers: WorkerRecord[] = [];
+  @Input() linkedWorker: WorkerRecord | null = null;
+  @Output() visibleChange = new EventEmitter<boolean>();
+  @Output() createUser = new EventEmitter<CreateTenantUserRequest>();
+
+  protected form: CreateTenantUserRequest = this.blankForm();
+  protected formError = '';
+  protected readonly selectedRoles = new Set<TenantAssignableRole>(['OPERATIONS']);
+
+  get fieldWorkerLocked(): boolean {
+    return !!this.linkedWorker;
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if ((changes['visible'] && this.visible) || (changes['linkedWorker'] && this.visible)) {
+      this.reset();
+    }
+  }
+
+  protected submit(): void {
+    this.formError = '';
+    if (!this.form.displayName.trim() || !this.form.email.trim()) {
+      this.formError = 'Name and email are required.';
+      return;
+    }
+    if (!this.form.temporaryPassword.trim() || this.form.temporaryPassword.trim().length < 8) {
+      this.formError = 'Temporary password must be at least 8 characters.';
+      return;
+    }
+    if (!this.selectedRoles.size) {
+      this.formError = 'Select at least one role.';
+      return;
+    }
+    this.createUser.emit({
+      displayName: this.form.displayName.trim(),
+      email: this.form.email.trim(),
+      phone: this.form.phone?.trim() || undefined,
+      temporaryPassword: this.form.temporaryPassword.trim(),
+      roles: [...this.selectedRoles],
+      workerId: this.selectedRoles.has('FIELD_WORKER') && this.form.workerId ? this.form.workerId : undefined
+    });
+  }
+
+  protected toggleRole(role: TenantAssignableRole, event: Event): void {
+    if (this.fieldWorkerLocked && role === 'FIELD_WORKER') {
+      return;
+    }
+    const checked = event.target instanceof HTMLInputElement && event.target.checked;
+    if (checked) {
+      this.selectedRoles.add(role);
+    } else {
+      this.selectedRoles.delete(role);
+      if (role === 'FIELD_WORKER') {
+        this.form.workerId = undefined;
+      }
+    }
+  }
+
+  protected roleDescription(role: TenantAssignableRole): string {
+    switch (role) {
+      case 'TENANT_ADMIN':
+        return 'Full tenant administration and setup.';
+      case 'OPERATIONS':
+        return 'Owners, properties, work orders, dispatch.';
+      case 'FINANCE':
+        return 'Invoices, payments, payroll visibility.';
+      case 'FIELD_WORKER':
+        return 'Mobile worker app and assigned jobs.';
+      case 'CUSTOMER':
+        return 'Future owner/customer portal access.';
+    }
+  }
+
+  private reset(): void {
+    this.form = this.blankForm();
+    this.selectedRoles.clear();
+    if (this.linkedWorker) {
+      this.selectedRoles.add('FIELD_WORKER');
+      this.form = {
+        ...this.form,
+        displayName: this.linkedWorker.displayName,
+        email: this.linkedWorker.email || '',
+        phone: this.linkedWorker.phone || '',
+        workerId: this.linkedWorker.id,
+        roles: ['FIELD_WORKER']
+      };
+    } else {
+      this.selectedRoles.add('OPERATIONS');
+    }
+    this.formError = '';
+  }
+
+  private blankForm(): CreateTenantUserRequest {
+    return {
+      displayName: '',
+      email: '',
+      phone: '',
+      temporaryPassword: 'Password123!',
+      roles: ['OPERATIONS'],
+      workerId: undefined
+    };
+  }
+}

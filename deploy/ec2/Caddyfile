@@ -1,0 +1,93 @@
+(security_headers_app) {
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    X-Frame-Options "SAMEORIGIN"
+    X-XSS-Protection "0"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
+    Cross-Origin-Opener-Policy "same-origin"
+    -Server
+  }
+  encode gzip zstd
+}
+
+(security_headers_worker) {
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    X-Frame-Options "SAMEORIGIN"
+    X-XSS-Protection "0"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
+    Cross-Origin-Opener-Policy "same-origin"
+    -Server
+  }
+  encode gzip zstd
+}
+
+(security_headers_admin) {
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    X-Frame-Options "SAMEORIGIN"
+    X-XSS-Protection "0"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Cross-Origin-Opener-Policy "same-origin"
+    -Server
+  }
+  encode gzip zstd
+}
+
+{$APP_DOMAIN} {
+  import security_headers_app
+
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    reverse_proxy tenant-portal:80
+  }
+}
+
+{$ADMIN_DOMAIN} {
+  import security_headers_admin
+
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    reverse_proxy admin-portal:80
+  }
+}
+
+{$WORKER_DOMAIN} {
+  import security_headers_worker
+
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    reverse_proxy worker-app:80
+  }
+}
+
+{$WS_DOMAIN} {
+  import security_headers_app
+
+  @ws path /ws/* /api/v1/ws/*
+  handle @ws {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    respond "Not found" 404
+  }
+}

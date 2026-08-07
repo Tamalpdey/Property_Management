@@ -1,0 +1,122 @@
+services:
+  edge:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+      args:
+        CADDYFILE: ${CADDYFILE:-Caddyfile}
+    restart: unless-stopped
+    env_file: .env.prod
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${TENANT_LOCAL_PORT:-8080}:8080"
+      - "${ADMIN_LOCAL_PORT:-8081}:8081"
+      - "${WORKER_LOCAL_PORT:-8082}:8082"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - tenant-portal
+      - admin-portal
+      - worker-app
+      - lorne-modulith
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lorne}
+      POSTGRES_USER: ${POSTGRES_USER:-lorne}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lorne}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lorne} -d $${POSTGRES_DB:-lorne}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  db-migration:
+    image: maven:3.9-eclipse-temurin-25
+    working_dir: /workspace/db-migration
+    profiles: ["migrate"]
+    volumes:
+      - ../../db-migration:/workspace/db-migration:ro
+    command:
+      - mvn
+      - -B
+      - flyway:migrate
+      - -Dflyway.url=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-lorne}
+      - -Dflyway.user=${POSTGRES_USER:-lorne}
+      - -Dflyway.password=${POSTGRES_PASSWORD:-lorne}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  lorne-modulith:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-lorne}
+      DB_USERNAME: ${POSTGRES_USER:-lorne}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-lorne}
+      SERVER_PORT: 8091
+      REDIS_HOST: redis
+      SPRING_FLYWAY_ENABLED: "false"
+      LORNE_BOOTSTRAP_ENABLED: ${LORNE_BOOTSTRAP_ENABLED:-true}
+      LOGGING_FILE_NAME: /app/logs/lorne-modulith.log
+    volumes:
+      - backend_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  tenant-portal:
+    build:
+      context: ../../frontend
+      dockerfile: tenant-portal/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - lorne-modulith
+
+  admin-portal:
+    build:
+      context: ../../frontend
+      dockerfile: admin-portal/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - lorne-modulith
+
+  worker-app:
+    build:
+      context: ../../frontend
+      dockerfile: worker-app/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - lorne-modulith
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+  backend_logs:
