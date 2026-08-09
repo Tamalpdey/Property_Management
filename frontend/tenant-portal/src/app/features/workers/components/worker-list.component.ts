@@ -54,10 +54,13 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                   <td class="px-3 py-3">
                     <div class="flex flex-wrap items-center gap-2">
                       <p class="font-bold text-slate-950">{{ worker.displayName }}</p>
-                      <p-tag [value]="worker.status" [severity]="worker.status === 'ACTIVE' ? 'success' : 'secondary'" />
+                      <p-tag [value]="worker.status" [severity]="worker.status === 'ACTIVE' ? 'success' : worker.status === 'ON_LEAVE' ? 'warn' : 'secondary'" />
                       <p-tag [value]="worker.appLoginEnabled ? 'App login' : 'No login'" [severity]="worker.appLoginEnabled ? 'info' : 'secondary'" />
                     </div>
                     <p class="mt-1 text-xs font-semibold text-slate-500">{{ worker.employeeNumber || 'No employee #' }}</p>
+                    @if (worker.status === 'ON_LEAVE') {
+                      <p class="mt-1 text-xs font-bold text-amber-700">{{ leaveLabel(worker) }}</p>
+                    }
                   </td>
                   <td class="px-3 py-3 text-slate-600">
                     <p>{{ worker.email || 'No email' }}</p>
@@ -125,7 +128,14 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class WorkerListComponent {
   readonly workers = input.required<WorkerRecord[]>();
+  readonly viewWorker = output<WorkerRecord>();
   readonly createAppLogin = output<WorkerRecord>();
+  readonly editWorker = output<WorkerRecord>();
+  readonly editWorkerSection = output<{ worker: WorkerRecord; tabIndex: number }>();
+  readonly updateWorkerStatus = output<{ worker: WorkerRecord; status: string }>();
+  readonly markWorkerOnLeave = output<WorkerRecord>();
+  readonly assignEquipment = output<WorkerRecord>();
+  readonly deleteWorker = output<WorkerRecord>();
   protected readonly selectedWorker = signal<WorkerRecord | null>(null);
   protected readonly workerMenuItems = signal<MenuItem[]>([]);
   protected readonly collection = new DenseCollectionState<WorkerRecord>(
@@ -160,22 +170,39 @@ export class WorkerListComponent {
     return days.length > 5 ? `${days.slice(0, 5).join(', ')} +${days.length - 5}` : days.join(', ');
   }
 
+  protected leaveLabel(worker: WorkerRecord): string {
+    const start = worker.leaveStartDate ? new Date(worker.leaveStartDate).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'start not set';
+    const end = worker.leaveEndDate ? new Date(worker.leaveEndDate).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'end not set';
+    return `On leave ${start} - ${end}`;
+  }
+
   protected openWorkerMenu(worker: WorkerRecord, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedWorker.set(worker);
     this.workerMenuItems.set([
+      {
+        label: 'View 360',
+        icon: 'pi pi-id-card',
+        command: () => this.viewWorker.emit(worker)
+      },
+      { separator: true },
       {
         label: worker.appLoginEnabled ? 'Reset app login' : 'Create app login',
         icon: 'pi pi-key',
         command: () => this.createAppLogin.emit(worker)
       },
       { separator: true },
-      { label: 'Update worker', icon: 'pi pi-pencil', disabled: true },
-      { label: 'Shift schedule', icon: 'pi pi-calendar-clock', disabled: true },
-      { label: 'Service skills', icon: 'pi pi-wrench', disabled: true },
-      { label: 'Certifications', icon: 'pi pi-verified', disabled: true },
-      { label: 'Assign equipment', icon: 'pi pi-briefcase', disabled: true },
+      { label: 'Update worker', icon: 'pi pi-pencil', command: () => this.editWorker.emit(worker) },
+      { label: 'Shift schedule', icon: 'pi pi-calendar-clock', command: () => this.editWorkerSection.emit({ worker, tabIndex: 2 }) },
+      { label: 'Service skills', icon: 'pi pi-wrench', command: () => this.editWorkerSection.emit({ worker, tabIndex: 1 }) },
+      { label: 'Safety and certifications', icon: 'pi pi-verified', command: () => this.editWorkerSection.emit({ worker, tabIndex: 3 }) },
+      { label: 'Assign equipment', icon: 'pi pi-briefcase', command: () => this.assignEquipment.emit(worker) },
       { separator: true },
-      { label: 'Deactivate worker', icon: 'pi pi-ban', disabled: true }
+      worker.status === 'ACTIVE'
+        ? { label: 'Deactivate worker', icon: 'pi pi-ban', command: () => this.updateWorkerStatus.emit({ worker, status: 'INACTIVE' }) }
+        : { label: 'Activate worker', icon: 'pi pi-check-circle', command: () => this.updateWorkerStatus.emit({ worker, status: 'ACTIVE' }) },
+      { label: 'Mark on leave', icon: 'pi pi-pause-circle', command: () => this.markWorkerOnLeave.emit(worker) },
+      { label: 'Terminate worker', icon: 'pi pi-times-circle', command: () => this.updateWorkerStatus.emit({ worker, status: 'TERMINATED' }) },
+      { label: 'Delete worker', icon: 'pi pi-trash', command: () => this.deleteWorker.emit(worker) }
     ]);
     menu.toggle(event);
   }

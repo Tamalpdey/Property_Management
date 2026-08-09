@@ -2,9 +2,13 @@ package com.lorne.platform.finance.internal.service;
 
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.finance.internal.dto.InvoiceDto;
+import com.lorne.platform.finance.internal.dto.InvoiceLineRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
+import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -69,6 +73,48 @@ public class InvoiceService {
                 "total", invoice.total()
         ));
         return invoicePdfService.generate(invoice);
+    }
+
+    @Transactional
+    public InvoiceDto addLine(UUID tenantId, UUID actorUserId, UUID invoiceId, InvoiceLineRequest request) {
+        requireDraftInvoice(tenantId, invoiceId);
+        var description = description(request);
+        var quantity = positiveMoney(request.quantity(), "Quantity must be greater than zero.");
+        var unitPrice = money(request.unitPrice());
+        var lineTotal = quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP);
+        var lineId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO invoice_lines (
+                    id, tenant_id, invoice_id, description, quantity, unit_price, line_total, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, lineId, tenantId, invoiceId, description, quantity, unitPrice, lineTotal, actorUserId, actorUserId);
+        recalculateTotals(tenantId, invoiceId, actorUserId);
+        auditWriter.record(tenantId, actorUserId, "INVOICE_LINE_ADDED", "INVOICE", invoiceId, Map.of(
+                "lineId", lineId.toString(),
+                "description", description,
+                "quantity", quantity,
+                "unitPrice", unitPrice,
+                "lineTotal", lineTotal
+        ));
+        return get(tenantId, invoiceId);
+    }
+
+    @Transactional
+    public InvoiceDto deleteLine(UUID tenantId, UUID actorUserId, UUID invoiceId, UUID lineId) {
+        requireDraftInvoice(tenantId, invoiceId);
+        var deleted = jdbcTemplate.update("""
+                DELETE FROM invoice_lines
+                WHERE tenant_id = ? AND invoice_id = ? AND id = ?
+                """, tenantId, invoiceId, lineId);
+        if (deleted == 0) {
+            throw new ResourceNotFoundException("Invoice line not found.");
+        }
+        recalculateTotals(tenantId, invoiceId, actorUserId);
+        auditWriter.record(tenantId, actorUserId, "INVOICE_LINE_DELETED", "INVOICE", invoiceId, Map.of(
+                "lineId", lineId.toString()
+        ));
+        return get(tenantId, invoiceId);
     }
 
     private LinkedHashMap<UUID, InvoiceDto> invoiceHeaders(UUID tenantId, UUID invoiceId) {
@@ -160,6 +206,56 @@ public class InvoiceService {
                 instant("created_at", rs),
                 lines
         );
+    }
+
+    private void requireDraftInvoice(UUID tenantId, UUID invoiceId) {
+        var status = jdbcTemplate.query("""
+                SELECT status::text
+                FROM invoices
+                WHERE tenant_id = ? AND id = ?
+                """, rs -> rs.next() ? rs.getString("status") : null, tenantId, invoiceId);
+        if (status == null) {
+            throw new ResourceNotFoundException("Invoice not found.");
+        }
+        if (!"DRAFT".equals(status)) {
+            throw new BadRequestException("Only draft invoices can be edited.");
+        }
+    }
+
+    private void recalculateTotals(UUID tenantId, UUID invoiceId, UUID actorUserId) {
+        var subtotal = jdbcTemplate.queryForObject("""
+                SELECT coalesce(sum(line_total), 0)
+                FROM invoice_lines
+                WHERE tenant_id = ? AND invoice_id = ?
+                """, BigDecimal.class, tenantId, invoiceId);
+        subtotal = money(subtotal);
+        var taxTotal = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        var total = subtotal.add(taxTotal).setScale(2, RoundingMode.HALF_UP);
+        jdbcTemplate.update("""
+                UPDATE invoices
+                SET subtotal = ?, tax_total = ?, total = ?, updated_by = ?, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """, subtotal, taxTotal, total, actorUserId, tenantId, invoiceId);
+    }
+
+    private String description(InvoiceLineRequest request) {
+        var description = request == null || request.description() == null ? "" : request.description().trim();
+        if (description.isBlank()) {
+            throw new BadRequestException("Line description is required.");
+        }
+        return description;
+    }
+
+    private BigDecimal positiveMoney(BigDecimal value, String message) {
+        var amount = money(value);
+        if (amount.signum() <= 0) {
+            throw new BadRequestException(message);
+        }
+        return amount;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
     }
 
     private LocalDate localDate(String column, ResultSet rs) throws SQLException {

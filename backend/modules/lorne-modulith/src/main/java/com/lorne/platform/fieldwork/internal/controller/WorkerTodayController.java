@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -106,7 +107,18 @@ class WorkerTodayController {
             @Valid @RequestBody PhotoUploadRequest request
     ) {
         workerShiftClockService.requireClockedIn(principal.tenantId(), principal.userId(), principal.email());
-        workerJobService.requireAssignedJob(principal.tenantId(), principal.userId(), principal.email(), workOrderId);
+        workerJobService.requireEvidenceUploadAllowed(principal.tenantId(), principal.userId(), principal.email(), workOrderId);
+        workerJobService.requireEvidenceLimitAvailable(principal.tenantId(), workOrderId, request.documentType(), request.photoType());
         return ApiResponse.ok(documentStorageService.createWorkOrderPhotoUpload(principal.tenantId(), principal.userId(), workOrderId, request));
+    }
+
+    @DeleteMapping("/jobs/{workOrderId}/documents/{documentId}")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<WorkerJobActionResponse> deleteEvidence(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID documentId
+    ) {
+        return ApiResponse.ok(workerJobService.deleteEvidence(principal.tenantId(), principal.userId(), principal.email(), workOrderId, documentId));
     }
 }

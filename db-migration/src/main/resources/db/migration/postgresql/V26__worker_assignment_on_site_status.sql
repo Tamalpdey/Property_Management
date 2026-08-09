@@ -1,0 +1,1 @@
+ALTER TYPE work_order_assignment_status ADD VALUE IF NOT EXISTS 'ON_SITE' AFTER 'ACCEPTED';

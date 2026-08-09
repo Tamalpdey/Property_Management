@@ -2,16 +2,38 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, effect, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
-import { WorkOrderAuditEntry, WorkOrderEvidence, WorkOrderReview, WorkOrderReviewActionRequest } from '@lorne/contracts';
+import {
+  WorkOrderAssignment,
+  WorkOrderAuditEntry,
+  WorkOrderCommunication,
+  WorkOrderEvidence,
+  WorkOrderReview,
+  WorkOrderReviewActionRequest,
+  WorkOrderReviewFieldNote,
+  WorkOrderTask,
+  WorkOrderTimeEntry
+} from '@lorne/contracts';
 
-export type WorkOrderReviewTab = 'SUMMARY' | 'EVIDENCE' | 'TIME' | 'AUDIT';
+export type WorkOrderReviewTab = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOURCES' | 'INVOICE' | 'COMMUNICATION' | 'TIME' | 'AUDIT';
 type AuditGroupTab = 'WORKER' | 'ADMIN';
+
+interface WorkOrderWorkerSummary {
+  assignment: WorkOrderAssignment;
+  notes: WorkOrderReviewFieldNote[];
+  evidence: WorkOrderEvidence[];
+  timeEntries: WorkOrderTimeEntry[];
+  tasks: WorkOrderTask[];
+  auditEntries: WorkOrderAuditEntry[];
+  materialEvents: WorkOrderAuditEntry[];
+  totalWorkMinutes: number;
+}
 
 @Component({
   selector: 'lorne-work-order-review',
   standalone: true,
-  imports: [ButtonModule, DatePipe, FormsModule, TagModule],
+  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host .lorne-review-tab-active {
@@ -49,7 +71,7 @@ type AuditGroupTab = 'WORKER' | 'ADMIN';
           </div>
           </div>
 
-          <div class="grid grid-cols-4 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+          <div class="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:grid-cols-4 xl:grid-cols-8">
           @for (tab of tabs; track tab.value) {
             <button
               pButton
@@ -156,23 +178,399 @@ type AuditGroupTab = 'WORKER' | 'ADMIN';
           </section>
         }
 
+        @if (activeTab() === 'WORKERS') {
+          <section class="grid gap-3">
+            @for (worker of workerSummaries(data); track worker.assignment.workerId) {
+              <article class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div class="min-w-0">
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ worker.assignment.leadWorker ? 'Lead worker' : 'Assigned worker' }}</p>
+                    <h3 class="mt-1 text-lg font-black text-slate-950">{{ worker.assignment.workerName }}</h3>
+                    <p class="text-xs font-bold text-slate-500">{{ worker.assignment.workerEmail || 'No login email linked' }}</p>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    @if (worker.assignment.leadWorker) {
+                      <p-tag value="lead" severity="info" />
+                    }
+                    <p-tag [value]="statusLabel(worker.assignment.assignmentStatus)" [severity]="assignmentSeverity(worker.assignment.assignmentStatus)" />
+                  </div>
+                </div>
+
+                <div class="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Work time</p>
+                    <p class="mt-1 text-base font-black text-slate-950">{{ minutesLabel(worker.totalWorkMinutes) }}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Checks</p>
+                    <p class="mt-1 text-base font-black text-slate-950">{{ completedTaskCount(worker.tasks) }}/{{ worker.tasks.length }}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Notes</p>
+                    <p class="mt-1 text-base font-black text-slate-950">{{ worker.notes.length }}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Evidence</p>
+                    <p class="mt-1 text-base font-black text-slate-950">{{ worker.evidence.length }}</p>
+                  </div>
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Events</p>
+                    <p class="mt-1 text-base font-black text-slate-950">{{ worker.auditEntries.length }}</p>
+                  </div>
+                </div>
+
+                <div class="mt-3 grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Worker timeline</p>
+                    <div class="mt-2 grid gap-2">
+                      @for (audit of worker.auditEntries.slice(0, 8); track audit.id) {
+                        <div class="grid grid-cols-[auto_1fr] gap-2 rounded-lg bg-white px-3 py-2">
+                          <span class="mt-0.5 grid h-7 w-7 place-items-center rounded-full bg-teal-50 text-teal-800">
+                            <i [class]="timelineIcon(audit.action)"></i>
+                          </span>
+                          <span class="min-w-0">
+                            <span class="block text-sm font-black text-slate-950">{{ actionLabel(audit.action) }}</span>
+                            <span class="block text-xs font-bold text-slate-500">{{ audit.createdAt | date:'MMM d, h:mm a' }}</span>
+                            <span class="mt-1 block text-sm font-semibold leading-5 text-slate-700">{{ auditSummary(audit) }}</span>
+                          </span>
+                        </div>
+                      } @empty {
+                        <p class="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-5 text-center text-sm font-semibold text-slate-500">No worker activity recorded.</p>
+                      }
+                    </div>
+                  </div>
+
+                  <div class="space-y-3">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p class="text-xs font-black uppercase tracking-wide text-teal-700">Field notes</p>
+                      <div class="mt-2 grid gap-2">
+                        @for (note of worker.notes; track note.id) {
+                          <div class="rounded-lg bg-white px-3 py-2">
+                            <p class="text-xs font-black text-slate-500">{{ note.updatedAt | date:'MMM d, h:mm a' }}</p>
+                            <p class="mt-1 whitespace-pre-wrap text-sm font-semibold leading-5 text-slate-700">{{ note.note }}</p>
+                          </div>
+                        } @empty {
+                          <p class="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-5 text-center text-sm font-semibold text-slate-500">No notes from this worker.</p>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p class="text-xs font-black uppercase tracking-wide text-teal-700">Evidence and materials</p>
+                      <div class="mt-2 grid grid-cols-2 gap-2">
+                        @for (item of worker.evidence.slice(0, 4); track item.documentId + item.createdAt) {
+                          <button type="button" class="overflow-hidden rounded-lg border border-slate-200 bg-white text-left" (click)="openEvidence(evidenceIndex(data, item))">
+                            <div class="h-16 bg-slate-100">
+                              @if (isImageEvidence(item) && item.viewUrl) {
+                                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="h-full w-full object-cover" loading="lazy" />
+                              } @else {
+                                <div class="grid h-full place-items-center text-slate-500"><i [class]="evidenceIcon(item)" class="text-xl"></i></div>
+                              }
+                            </div>
+                            <div class="p-2">
+                              <span class="block truncate text-xs font-black text-slate-950">{{ evidenceLabel(item) }}</span>
+                              <span class="block truncate text-xs font-semibold text-slate-500">{{ item.createdAt | date:'MMM d, h:mm a' }}</span>
+                            </div>
+                          </button>
+                        } @empty {
+                          <p class="col-span-2 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-5 text-center text-sm font-semibold text-slate-500">No evidence from this worker.</p>
+                        }
+                      </div>
+                      @if (worker.evidence.length > 4) {
+                        <p class="mt-2 text-xs font-bold text-slate-500">+{{ worker.evidence.length - 4 }} more evidence file(s) in the Evidence tab.</p>
+                      }
+                      <div class="mt-3 grid gap-1">
+                        @for (material of worker.materialEvents; track material.id) {
+                          <span class="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{{ workerMaterialLabel(material) }}</span>
+                        } @empty {
+                          <span class="text-xs font-semibold text-slate-500">No material usage recorded by this worker.</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            } @empty {
+              <p class="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-500">No workers assigned.</p>
+            }
+          </section>
+        }
+
         @if (activeTab() === 'EVIDENCE') {
-          <section class="grid gap-2 md:grid-cols-2">
-            @for (item of data.evidence; track item.documentId + item.createdAt) {
+          <section class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            @for (item of data.evidence; track item.documentId + item.createdAt; let index = $index) {
+              <button type="button" class="grid grid-cols-[5rem_1fr] overflow-hidden rounded-lg border border-slate-200 bg-white p-0 text-left shadow-sm transition hover:border-teal-300 hover:shadow-md" (click)="openEvidence(index)">
+                <div class="h-20 bg-slate-100">
+                  @if (isImageEvidence(item) && item.viewUrl) {
+                    <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="h-full w-full object-cover" loading="lazy" />
+                  } @else {
+                    <div class="grid h-full place-items-center text-slate-500">
+                      <span class="text-center">
+                        <i [class]="evidenceIcon(item)" class="text-3xl"></i>
+                      </span>
+                    </div>
+                  }
+                </div>
+                <div class="min-w-0 p-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <span class="min-w-0">
+                      <span class="block text-xs font-black uppercase tracking-wide text-teal-700">{{ evidenceLabel(item) }}</span>
+                      <span class="mt-1 block truncate text-sm font-black text-slate-950">{{ item.caption || fileName(item.objectKey) }}</span>
+                    </span>
+                    <p-tag [value]="evidenceTypeLabel(item)" severity="secondary" />
+                  </div>
+                  <p class="mt-2 text-xs font-bold text-slate-500">{{ item.createdByName || 'Field worker' }} · {{ item.createdAt | date:'MMM d, h:mm a' }}</p>
+                </div>
+              </button>
+            } @empty {
+              <p class="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-500 md:col-span-2 xl:col-span-3">No photos or receipts uploaded yet.</p>
+            }
+          </section>
+        }
+
+        @if (activeTab() === 'RESOURCES') {
+          <section class="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p class="text-xs font-black uppercase tracking-wide text-teal-700">Materials and inventory</p>
+                  <h3 class="mt-1 text-lg font-black text-slate-950">Planned, used, and billable items</h3>
+                </div>
+                <p-tag [value]="usedMaterialCount(data) + '/' + data.workOrder.materials.length + ' used'" severity="info" />
+              </div>
+              <div class="mt-3 overflow-hidden rounded-lg border border-slate-200">
+                <table class="w-full border-collapse text-sm">
+                  <thead class="bg-slate-50 text-left text-xs font-black uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th class="px-3 py-2">Item</th>
+                      <th class="px-3 py-2">Qty</th>
+                      <th class="px-3 py-2">Cost</th>
+                      <th class="px-3 py-2">Use</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100">
+                    @for (material of data.workOrder.materials; track material.id) {
+                      <tr>
+                        <td class="px-3 py-2">
+                          <p class="font-black text-slate-950">{{ material.itemName || material.description }}</p>
+                          <p class="mt-0.5 text-xs font-semibold text-slate-500">{{ material.description }}</p>
+                        </td>
+                        <td class="px-3 py-2 font-semibold text-slate-700">{{ material.quantity }} {{ material.unit || '' }}</td>
+                        <td class="px-3 py-2 font-semibold text-slate-700">{{ material.unitCost === undefined || material.unitCost === null ? '-' : currency(material.unitCost) }}</td>
+                        <td class="px-3 py-2"><p-tag [value]="material.used ? 'used' : 'planned'" [severity]="material.used ? 'success' : 'warn'" /></td>
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td colspan="4" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No materials recorded.</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="space-y-3">
               <div class="rounded-lg border border-slate-200 bg-white p-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
-                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ evidenceLabel(item) }}</p>
-                    <p class="mt-1 text-sm font-black text-slate-950">{{ item.caption || item.objectKey }}</p>
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Tools and equipment</p>
+                    <h3 class="mt-1 text-lg font-black text-slate-950">Assigned assets</h3>
                   </div>
-                  <p-tag [value]="item.contentType || 'file'" severity="secondary" />
+                  <p-tag [value]="data.workOrder.assets.length + ' assigned'" severity="secondary" />
                 </div>
-                <p class="mt-2 break-all text-xs font-semibold leading-5 text-slate-500">{{ item.objectKey }}</p>
-                <p class="mt-1 text-xs font-bold text-slate-500">{{ item.createdByName || 'Field worker' }} · {{ item.createdAt | date:'MMM d, h:mm a' }}</p>
+                <div class="mt-3 grid gap-2">
+                  @for (asset of data.workOrder.assets; track asset.assetId) {
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p class="text-sm font-black text-slate-950">{{ asset.name }}</p>
+                      <p class="mt-0.5 text-xs font-bold uppercase tracking-wide text-slate-500">{{ asset.assetType }}{{ asset.identifier ? ' · ' + asset.identifier : '' }}</p>
+                    </div>
+                  } @empty {
+                    <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">No tools or equipment assigned.</p>
+                  }
+                </div>
               </div>
-            } @empty {
-              <p class="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-500 md:col-span-2">No photos or receipts uploaded yet.</p>
-            }
+
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Purchase receipts</p>
+                <div class="mt-3 grid gap-2">
+                  @for (item of receiptEvidence(data); track item.documentId + item.createdAt) {
+                    <button type="button" class="grid grid-cols-[3.5rem_1fr] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-0 text-left" (click)="openEvidence(evidenceIndex(data, item))">
+                      <span class="grid h-14 place-items-center bg-white text-slate-600"><i class="pi pi-receipt text-xl"></i></span>
+                      <span class="min-w-0 p-2">
+                        <span class="block truncate text-sm font-black text-slate-950">{{ item.caption || fileName(item.objectKey) }}</span>
+                        <span class="block text-xs font-bold text-slate-500">{{ item.createdByName || 'Field worker' }} · {{ item.createdAt | date:'MMM d, h:mm a' }}</span>
+                      </span>
+                    </button>
+                  } @empty {
+                    <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">No purchase receipts uploaded.</p>
+                  }
+                </div>
+              </div>
+            </div>
+          </section>
+        }
+
+        @if (activeTab() === 'INVOICE') {
+          <section class="grid gap-3 lg:grid-cols-[1fr_18rem]">
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p class="text-xs font-black uppercase tracking-wide text-teal-700">Invoice</p>
+                  <h3 class="mt-1 text-lg font-black text-slate-950">Billing generated from approved work</h3>
+                  <p class="mt-1 text-xs font-semibold text-slate-500">Draft invoices use the service charge plus materials marked used. Email delivery is handled from the invoices workflow.</p>
+                </div>
+                @if (canGenerateInvoice(data) && data.invoices.length === 0) {
+                  <button pButton type="button" size="small" icon="pi pi-file-edit" label="Generate invoice" [loading]="busy()" (click)="generateInvoice.emit()"></button>
+                }
+              </div>
+
+              <div class="mt-3 grid gap-2">
+                @for (invoice of data.invoices; track invoice.id) {
+                  <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p class="text-sm font-black text-slate-950">{{ invoice.invoiceNumber }}</p>
+                        <p class="mt-1 text-xs font-bold text-slate-500">Issued {{ invoice.issuedOn || '-' }} · Due {{ invoice.dueOn || '-' }}</p>
+                      </div>
+                      <p-tag [value]="invoice.status.toLowerCase().replaceAll('_', ' ')" [severity]="invoice.status === 'PAID' ? 'success' : invoice.status === 'VOID' ? 'danger' : 'info'" />
+                    </div>
+                    <div class="mt-3 grid grid-cols-3 gap-2">
+                      <span class="rounded-lg bg-white px-3 py-2">
+                        <span class="block text-xs font-black uppercase tracking-wide text-slate-500">Subtotal</span>
+                        <span class="mt-1 block text-sm font-black text-slate-950">{{ currency(invoice.subtotal) }}</span>
+                      </span>
+                      <span class="rounded-lg bg-white px-3 py-2">
+                        <span class="block text-xs font-black uppercase tracking-wide text-slate-500">Tax</span>
+                        <span class="mt-1 block text-sm font-black text-slate-950">{{ currency(invoice.taxTotal) }}</span>
+                      </span>
+                      <span class="rounded-lg bg-white px-3 py-2">
+                        <span class="block text-xs font-black uppercase tracking-wide text-slate-500">Total</span>
+                        <span class="mt-1 block text-sm font-black text-slate-950">{{ currency(invoice.total) }}</span>
+                      </span>
+                    </div>
+                  </div>
+                } @empty {
+                  <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-10 text-center text-sm font-semibold text-slate-500">No invoice generated yet.</p>
+                }
+              </div>
+            </div>
+
+            <aside class="space-y-3">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Billing readiness</p>
+                <div class="mt-3 grid gap-2 text-sm font-semibold text-slate-700">
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Work approved
+                    <p-tag [value]="canGenerateInvoice(data) ? 'ready' : 'not ready'" [severity]="canGenerateInvoice(data) ? 'success' : 'warn'" />
+                  </span>
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Used materials
+                    <strong>{{ usedMaterialCount(data) }}</strong>
+                  </span>
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Receipts
+                    <strong>{{ receiptEvidence(data).length }}</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Owner</p>
+                <p class="mt-1 text-sm font-black text-slate-950">{{ data.workOrder.ownerName }}</p>
+                <p class="mt-1 text-xs font-semibold text-slate-500">{{ data.workOrder.requesterEmail || 'Use owner billing email from invoice workflow' }}</p>
+              </div>
+            </aside>
+          </section>
+        }
+
+        @if (activeTab() === 'COMMUNICATION') {
+          <section class="grid gap-3 lg:grid-cols-[1fr_18rem]">
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p class="text-xs font-black uppercase tracking-wide text-teal-700">Owner communication</p>
+                  <h3 class="mt-1 text-lg font-black text-slate-950">Completion notices and invoice emails</h3>
+                  <p class="mt-1 text-xs font-semibold text-slate-500">Every send is recorded here with recipient, status, provider response, and message preview.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    pButton
+                    type="button"
+                    size="small"
+                    icon="pi pi-send"
+                    label="Notify owner"
+                    [disabled]="!canNotifyOwner(data)"
+                    [loading]="busy()"
+                    (click)="notifyOwner.emit()"
+                  ></button>
+                  @if (data.invoices[0]; as invoice) {
+                    <button
+                      pButton
+                      type="button"
+                      size="small"
+                      severity="success"
+                      icon="pi pi-envelope"
+                      label="Send invoice"
+                      [loading]="busy()"
+                      (click)="sendInvoiceEmail.emit(invoice.id)"
+                    ></button>
+                  }
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-2">
+                @for (communication of data.communications; track communication.id) {
+                  <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <p class="text-sm font-black text-slate-950">{{ communicationLabel(communication) }}</p>
+                          @if (communication.invoiceNumber) {
+                            <span class="rounded-full bg-white px-2 py-1 text-xs font-bold text-slate-600">{{ communication.invoiceNumber }}</span>
+                          }
+                        </div>
+                        <p class="mt-1 text-xs font-bold text-slate-500">{{ communication.recipientEmail }} · {{ communication.createdAt | date:'MMM d, h:mm a' }}</p>
+                      </div>
+                      <p-tag [value]="communication.status.toLowerCase()" [severity]="communicationSeverity(communication.status)" />
+                    </div>
+                    <div class="mt-3 rounded-lg bg-white px-3 py-2">
+                      <p class="text-xs font-black uppercase tracking-wide text-slate-500">Subject</p>
+                      <p class="mt-1 text-sm font-black text-slate-950">{{ communication.subject }}</p>
+                      <p class="mt-3 text-xs font-black uppercase tracking-wide text-slate-500">Message preview</p>
+                      <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{{ communication.body }}</p>
+                    </div>
+                    @if (communication.providerMessage) {
+                      <p class="mt-2 text-xs font-semibold text-slate-500">{{ communication.providerMessage }}</p>
+                    }
+                  </article>
+                } @empty {
+                  <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-10 text-center text-sm font-semibold text-slate-500">No owner emails recorded for this work order yet.</p>
+                }
+              </div>
+            </div>
+
+            <aside class="space-y-3">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Delivery summary</p>
+                <div class="mt-3 grid gap-2 text-sm font-semibold text-slate-700">
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Completion notices
+                    <strong>{{ completionCommunications(data).length }}</strong>
+                  </span>
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Invoice emails
+                    <strong>{{ invoiceCommunications(data).length }}</strong>
+                  </span>
+                  <span class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    Failed
+                    <strong>{{ failedCommunications(data).length }}</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Template setup</p>
+                <p class="mt-1 text-sm font-semibold leading-6 text-slate-700">Completion and invoice email copy is tenant-specific. Update templates from the Email templates menu before sending live mail.</p>
+              </div>
+            </aside>
           </section>
         }
 
@@ -315,6 +713,33 @@ type AuditGroupTab = 'WORKER' | 'ADMIN';
             </div>
           </div>
         }
+        @if (canOverrideComplete(data)) {
+          <div class="rounded-lg border border-red-200 bg-red-50 p-3">
+            <label class="block">
+              <span class="mb-1 block text-sm font-black text-red-900">Override completion reason</span>
+              <textarea
+                class="w-full border border-red-200 px-3 py-2 text-sm"
+                rows="2"
+                name="reviewNote"
+                placeholder="Explain why operations is closing field work before all assigned workers submitted."
+                [(ngModel)]="reviewNote"
+              ></textarea>
+            </label>
+            <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-xs font-bold leading-5 text-red-800">This releases unfinished worker assignments and moves the work order to pending completion for review.</p>
+              <button
+                pButton
+                type="button"
+                severity="danger"
+                icon="pi pi-lock"
+                label="Override complete"
+                [disabled]="!reviewNote.trim()"
+                [loading]="busy()"
+                (click)="overrideComplete()"
+              ></button>
+            </div>
+          </div>
+        }
         </div>
 
         <section class="printable-work-order">
@@ -414,6 +839,44 @@ type AuditGroupTab = 'WORKER' | 'ADMIN';
           }
         </section>
       </section>
+
+      <p-dialog
+        header="Evidence preview"
+        [modal]="true"
+        [visible]="evidencePreviewOpen()"
+        [style]="{ width: 'min(46rem, 94vw)' }"
+        [contentStyle]="{ overflow: 'hidden' }"
+        (visibleChange)="!$event && closeEvidencePreview()"
+      >
+        @if (selectedEvidence(); as item) {
+          <section class="space-y-3">
+            <div class="grid h-[min(24rem,58vh)] place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+              @if (isImageEvidence(item) && item.viewUrl) {
+                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="max-h-full max-w-full object-contain" />
+              } @else if (item.viewUrl) {
+                <div class="grid h-full w-full place-items-center p-6 text-center text-slate-700">
+                  <span>
+                    <i [class]="evidenceIcon(item)" class="text-5xl"></i>
+                    <span class="mt-3 block text-lg font-black">{{ evidenceLabel(item) }}</span>
+                    <a [href]="item.viewUrl" target="_blank" rel="noopener" class="mt-4 inline-flex rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white no-underline">Open file</a>
+                  </span>
+                </div>
+              }
+            </div>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ evidencePreviewIndex() + 1 }} / {{ data.evidence.length }}</p>
+                <p class="text-sm font-black text-slate-950">{{ item.caption || fileName(item.objectKey) }}</p>
+                <p class="mt-1 text-xs font-bold text-slate-500">{{ evidenceLabel(item) }} · {{ item.createdByName || 'Field worker' }} · {{ item.createdAt | date:'MMM d, h:mm a' }}</p>
+              </div>
+              <div class="flex gap-2">
+                <button pButton type="button" severity="secondary" icon="pi pi-chevron-left" label="Prev" [disabled]="data.evidence.length < 2" (click)="moveEvidence(-1)"></button>
+                <button pButton type="button" severity="secondary" icon="pi pi-chevron-right" label="Next" [disabled]="data.evidence.length < 2" (click)="moveEvidence(1)"></button>
+              </div>
+            </div>
+          </section>
+        }
+      </p-dialog>
     } @else {
       <section class="rounded-lg border border-slate-200 bg-white p-8 text-center">
         <p class="text-sm font-bold text-slate-500">{{ loading() ? 'Loading review...' : 'Select a work order to review.' }}</p>
@@ -429,16 +892,25 @@ export class WorkOrderReviewComponent {
   readonly initialTab = input<WorkOrderReviewTab>('SUMMARY');
   readonly reviewAction = output<WorkOrderReviewActionRequest>();
   readonly generateInvoice = output<void>();
+  readonly notifyOwner = output<void>();
+  readonly sendInvoiceEmail = output<string>();
   readonly printWorkOrder = output<void>();
 
   protected readonly tabs: Array<{ value: WorkOrderReviewTab; label: string; icon: string }> = [
     { value: 'SUMMARY', label: 'Summary', icon: 'pi pi-file' },
+    { value: 'WORKERS', label: 'Workers', icon: 'pi pi-users' },
     { value: 'EVIDENCE', label: 'Evidence', icon: 'pi pi-camera' },
+    { value: 'RESOURCES', label: 'Resources', icon: 'pi pi-box' },
+    { value: 'INVOICE', label: 'Invoice', icon: 'pi pi-receipt' },
+    { value: 'COMMUNICATION', label: 'Comms', icon: 'pi pi-envelope' },
     { value: 'TIME', label: 'Timeline', icon: 'pi pi-clock' },
     { value: 'AUDIT', label: 'Audit', icon: 'pi pi-history' }
   ];
   protected readonly activeTab = signal<WorkOrderReviewTab>('SUMMARY');
   protected readonly auditGroupTab = signal<AuditGroupTab>('WORKER');
+  protected readonly evidencePreviewOpen = signal(false);
+  protected readonly evidencePreviewIndex = signal(0);
+  protected readonly selectedEvidence = signal<WorkOrderEvidence | null>(null);
   protected reviewNote = '';
 
   constructor() {
@@ -462,6 +934,10 @@ export class WorkOrderReviewComponent {
     this.reviewAction.emit({ action: 'SEND_BACK', note: this.reviewNote.trim() });
   }
 
+  protected overrideComplete(): void {
+    this.reviewAction.emit({ action: 'OVERRIDE_COMPLETE', note: this.reviewNote.trim() });
+  }
+
   protected tasksFor(data: WorkOrderReview, phase: 'PRE_START' | 'COMPLETION') {
     return data.workOrder.tasks.filter((task) => task.phase === phase);
   }
@@ -470,10 +946,148 @@ export class WorkOrderReviewComponent {
     return data.workOrder.materials.filter((material) => material.used).length;
   }
 
+  protected receiptEvidence(data: WorkOrderReview): WorkOrderEvidence[] {
+    return data.evidence.filter((item) => item.documentType === 'PURCHASE_RECEIPT');
+  }
+
+  protected completionCommunications(data: WorkOrderReview): WorkOrderCommunication[] {
+    return data.communications.filter((item) => item.communicationType === 'WORK_ORDER_COMPLETION');
+  }
+
+  protected invoiceCommunications(data: WorkOrderReview): WorkOrderCommunication[] {
+    return data.communications.filter((item) => item.communicationType === 'INVOICE_EMAIL');
+  }
+
+  protected failedCommunications(data: WorkOrderReview): WorkOrderCommunication[] {
+    return data.communications.filter((item) => item.status === 'FAILED');
+  }
+
+  protected communicationLabel(item: WorkOrderCommunication): string {
+    if (item.communicationType === 'INVOICE_EMAIL') {
+      return 'Invoice email';
+    }
+    if (item.communicationType === 'WORK_ORDER_COMPLETION') {
+      return 'Completion notice';
+    }
+    return 'Owner email';
+  }
+
+  protected communicationSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
+    if (status === 'SENT') {
+      return 'success';
+    }
+    if (status === 'FAILED') {
+      return 'danger';
+    }
+    if (status === 'RECORDED') {
+      return 'info';
+    }
+    return 'secondary';
+  }
+
+  protected canNotifyOwner(data: WorkOrderReview): boolean {
+    return ['APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED'].includes(data.workOrder.status);
+  }
+
+  protected workerSummaries(data: WorkOrderReview): WorkOrderWorkerSummary[] {
+    return data.workOrder.assignments.map((assignment) => {
+      const notes = data.fieldNotes.filter((note) =>
+        workerMatches(assignment, { workerId: note.workerId, email: note.workerEmail, name: note.workerName })
+      );
+      const evidence = data.evidence.filter((item) =>
+        workerMatches(assignment, { workerId: item.workerId, email: item.createdByEmail, name: item.createdByName })
+      );
+      const timeEntries = data.timeEntries.filter((entry) =>
+        workerMatches(assignment, { workerId: entry.workerId, name: entry.workerName })
+      );
+      const auditEntries = this.workerAuditEntries(data).filter((audit) =>
+        workerMatches(assignment, {
+          workerId: stringValue(audit.metadata?.['workerId']),
+          email: audit.actorEmail || stringValue(audit.metadata?.['workerEmail']),
+          name: audit.actorName || stringValue(audit.metadata?.['workerName'])
+        })
+      );
+      const tasks = data.workOrder.tasks.filter((task) => !task.assignedWorkerId || task.assignedWorkerId === assignment.workerId);
+      const materialEvents = auditEntries.filter((audit) => audit.action === 'WORKER_MATERIAL_USED');
+      const totalWorkMinutes = timeEntries
+        .filter((entry) => entry.entryType !== 'SHIFT_CLOCK')
+        .reduce((sum, entry) => sum + (entry.durationMinutes ?? 0), 0);
+      return { assignment, notes, evidence, timeEntries, tasks, auditEntries, materialEvents, totalWorkMinutes };
+    });
+  }
+
+  protected completedTaskCount(tasks: WorkOrderTask[]): number {
+    return tasks.filter((task) => task.completed).length;
+  }
+
+  protected minutesLabel(minutes: number): string {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+
+  protected workerMaterialLabel(audit: WorkOrderAuditEntry): string {
+    const metadata = audit.metadata ?? {};
+    const itemName = stringValue(metadata['itemName']) || stringValue(metadata['description']) || 'Material used';
+    const quantity = stringValue(metadata['quantity']);
+    const unit = stringValue(metadata['unit']);
+    return [itemName, [quantity, unit].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+  }
+
   protected evidenceLabel(item: WorkOrderEvidence): string {
     return item.documentType === 'PURCHASE_RECEIPT'
       ? 'Purchase receipt'
       : `${(item.photoType || 'OTHER').toLowerCase()} photo`;
+  }
+
+  protected evidenceTypeLabel(item: WorkOrderEvidence): string {
+    if (item.contentType?.includes('/')) {
+      return item.contentType.split('/').pop() || 'file';
+    }
+    return item.documentType === 'PURCHASE_RECEIPT' ? 'receipt' : 'photo';
+  }
+
+  protected isImageEvidence(item: WorkOrderEvidence): boolean {
+    return Boolean(item.contentType?.startsWith('image/'));
+  }
+
+  protected evidenceIcon(item: WorkOrderEvidence): string {
+    return item.documentType === 'PURCHASE_RECEIPT' ? 'pi pi-receipt' : 'pi pi-file';
+  }
+
+  protected fileName(objectKey: string): string {
+    return objectKey.split('/').pop() || objectKey;
+  }
+
+  protected openEvidence(index: number): void {
+    const evidence = this.review()?.evidence ?? [];
+    this.evidencePreviewIndex.set(index);
+    this.selectedEvidence.set(evidence[index] ?? null);
+    this.evidencePreviewOpen.set(true);
+  }
+
+  protected evidenceIndex(data: WorkOrderReview, item: WorkOrderEvidence): number {
+    const index = data.evidence.findIndex((candidate) => candidate.documentId === item.documentId && candidate.createdAt === item.createdAt);
+    return index >= 0 ? index : 0;
+  }
+
+  protected closeEvidencePreview(): void {
+    this.evidencePreviewOpen.set(false);
+    this.selectedEvidence.set(null);
+  }
+
+  protected moveEvidence(delta: number): void {
+    const evidence = this.review()?.evidence ?? [];
+    const count = evidence.length;
+    if (count <= 0) {
+      return;
+    }
+    const nextIndex = (this.evidencePreviewIndex() + delta + count) % count;
+    this.evidencePreviewIndex.set(nextIndex);
+    this.selectedEvidence.set(evidence[nextIndex] ?? null);
   }
 
   protected actionLabel(action: string): string {
@@ -614,11 +1228,28 @@ export class WorkOrderReviewComponent {
     return ['APPROVED', 'CUSTOMER_NOTIFIED'].includes(data.workOrder.status);
   }
 
+  protected canOverrideComplete(data: WorkOrderReview): boolean {
+    return !['PENDING_COMPLETION', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(data.workOrder.status);
+  }
+
   protected statusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
     if (status === 'APPROVED' || status === 'CUSTOMER_NOTIFIED' || status === 'COMPLETED' || status === 'PAID') {
       return 'success';
     }
     if (status === 'PENDING_COMPLETION' || status === 'ON_HOLD' || status === 'PAUSED') {
+      return 'warn';
+    }
+    if (status === 'CANCELLED') {
+      return 'danger';
+    }
+    return 'info';
+  }
+
+  protected assignmentSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
+    if (['COMPLETED', 'SUBMITTED', 'RELEASED'].includes(status)) {
+      return 'success';
+    }
+    if (['PAUSED', 'LEFT_EMERGENCY'].includes(status)) {
       return 'warn';
     }
     if (status === 'CANCELLED') {
@@ -725,6 +1356,7 @@ const ACTION_LABELS: Record<string, string> = {
   WORK_ORDER_OWNER_NOTIFICATION_FAILED: 'Owner notification failed',
   WORK_ORDER_CUSTOMER_NOTIFIED: 'Customer notified',
   WORK_ORDER_SENT_BACK: 'Sent back',
+  WORK_ORDER_OVERRIDE_COMPLETED: 'Override completed',
   WORK_ORDER_INVOICE_GENERATED: 'Invoice generated'
 };
 
@@ -747,6 +1379,16 @@ const WORKER_OPERATIONAL_TIMELINE_ACTIONS = new Set([
 
 function isWorkerOperationalTimelineAction(action: string): boolean {
   return WORKER_OPERATIONAL_TIMELINE_ACTIONS.has(action);
+}
+
+function workerMatches(assignment: WorkOrderAssignment, candidate: { workerId?: string; email?: string; name?: string }): boolean {
+  if (candidate.workerId && candidate.workerId === assignment.workerId) {
+    return true;
+  }
+  if (candidate.email && assignment.workerEmail && candidate.email.toLowerCase() === assignment.workerEmail.toLowerCase()) {
+    return true;
+  }
+  return Boolean(candidate.name && candidate.name === assignment.workerName);
 }
 
 function sentenceLabel(value: string): string {

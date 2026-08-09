@@ -66,6 +66,10 @@ export interface CreateTenantUserRequest {
   workerId?: string;
 }
 
+export interface UpdateTenantUserRequest extends Omit<CreateTenantUserRequest, 'temporaryPassword'> {
+  temporaryPassword?: string;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -171,6 +175,7 @@ export interface WorkerAssignedJob {
   materials: WorkerJobMaterial[];
   assets: WorkerJobAsset[];
   fieldNotes: WorkerFieldNote[];
+  evidence: WorkerJobEvidence[];
   executionEvents: WorkerExecutionEvent[];
 }
 
@@ -234,6 +239,19 @@ export interface WorkerFieldNote {
   canEdit: boolean;
 }
 
+export interface WorkerJobEvidence {
+  documentId: string;
+  documentType: 'WORK_PHOTO' | 'PURCHASE_RECEIPT';
+  photoType?: 'BEFORE' | 'AFTER' | 'ISSUE' | 'OTHER';
+  caption?: string;
+  viewUrl?: string;
+  contentType?: string;
+  byteSize?: number;
+  createdByName?: string;
+  createdAt: string;
+  canDelete: boolean;
+}
+
 export interface WorkerExecutionEvent {
   action: string;
   label: string;
@@ -293,6 +311,7 @@ export interface PropertyOwner {
   billingEmail?: string;
   notes?: string;
   propertyCount: number;
+  active: boolean;
 }
 
 export interface CreatePropertyOwnerRequest {
@@ -472,6 +491,9 @@ export interface WorkerRecord {
   maxWeeklyHours?: number;
   hourlyRate?: number;
   hireDate?: string;
+  leaveStartDate?: string;
+  leaveEndDate?: string;
+  leaveReason?: string;
   emergencyContact?: WorkerEmergencyContact;
   certifications: WorkerCertification[];
   serviceSkills: WorkerServiceSkill[];
@@ -525,6 +547,13 @@ export interface CreateWorkerRequest {
   shifts?: Array<Pick<WorkerShiftTemplate, 'dayOfWeek' | 'startTime' | 'endTime' | 'timezone'>>;
 }
 
+export interface UpdateWorkerStatusRequest {
+  status: 'ACTIVE' | 'INACTIVE' | 'ON_LEAVE' | 'TERMINATED' | string;
+  leaveStartDate?: string;
+  leaveEndDate?: string;
+  leaveReason?: string;
+}
+
 export interface WorkOrderRecord {
   id: string;
   workOrderNumber: string;
@@ -560,12 +589,15 @@ export interface WorkOrderReview {
   evidence: WorkOrderEvidence[];
   timeEntries: WorkOrderTimeEntry[];
   invoices: WorkOrderInvoice[];
+  communications: WorkOrderCommunication[];
   auditLogs: WorkOrderAuditEntry[];
 }
 
 export interface WorkOrderReviewFieldNote {
   id: string;
+  workerId?: string;
   workerName: string;
+  workerEmail?: string;
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -578,9 +610,12 @@ export interface WorkOrderEvidence {
   caption?: string;
   bucket: string;
   objectKey: string;
+  viewUrl?: string;
   contentType?: string;
   byteSize?: number;
+  workerId?: string;
   createdByName?: string;
+  createdByEmail?: string;
   capturedAt?: string;
   createdAt: string;
   metadata: Record<string, unknown>;
@@ -588,6 +623,7 @@ export interface WorkOrderEvidence {
 
 export interface WorkOrderTimeEntry {
   id: string;
+  workerId?: string;
   workerName: string;
   entryType: string;
   startedAt: string;
@@ -604,6 +640,24 @@ export interface WorkOrderInvoice {
   subtotal: string;
   taxTotal: string;
   total: string;
+}
+
+export interface WorkOrderCommunication {
+  id: string;
+  communicationType: 'WORK_ORDER_COMPLETION' | 'INVOICE_EMAIL' | 'OWNER_EMAIL';
+  invoiceId?: string;
+  invoiceNumber?: string;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  status: 'RECORDED' | 'SENT' | 'FAILED' | string;
+  providerMessage?: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface SendWorkOrderOwnerEmailRequest {
+  note?: string;
 }
 
 export interface InvoiceRecord {
@@ -634,6 +688,12 @@ export interface InvoiceLineRecord {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+}
+
+export interface InvoiceLineRequest {
+  description: string;
+  quantity: number;
+  unitPrice: number;
 }
 
 export interface EmailTemplateRecord {
@@ -676,7 +736,7 @@ export interface WorkOrderAuditEntry {
 }
 
 export interface WorkOrderReviewActionRequest {
-  action: 'APPROVE' | 'APPROVE_AND_INVOICE' | 'SEND_BACK';
+  action: 'APPROVE' | 'APPROVE_AND_INVOICE' | 'SEND_BACK' | 'OVERRIDE_COMPLETE';
   note?: string;
 }
 
@@ -739,6 +799,7 @@ export interface GeneratedRecurringDraft {
 export interface WorkOrderAssignment {
   workerId: string;
   workerName: string;
+  workerEmail?: string;
   leadWorker: boolean;
   assignmentStatus: string;
   assignmentRole?: string;
@@ -813,6 +874,12 @@ export interface CreateWorkOrderRequest {
   assetIds?: string[];
   tasks?: string[];
   taskItems?: CreateWorkOrderTaskRequest[];
+  allowAvailabilityOverride?: boolean;
+  allowAvailabilityOverrideReason?: string;
+}
+
+export interface CancelWorkOrderRequest {
+  reason: string;
 }
 
 export interface CreateWorkOrderMaterialRequest {

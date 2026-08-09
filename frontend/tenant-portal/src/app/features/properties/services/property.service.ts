@@ -20,6 +20,24 @@ export class PropertyService {
       .pipe(map((response) => response.data));
   }
 
+  update(propertyId: string, request: CreatePropertyRequest) {
+    return this.http
+      .patch<ApiResponse<PropertyRecord>>(`${environment.apiBaseUrl}/tenant/properties/${propertyId}`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  updateStatus(propertyId: string, active: boolean) {
+    return this.http
+      .patch<ApiResponse<PropertyRecord>>(`${environment.apiBaseUrl}/tenant/properties/${propertyId}/status`, { active })
+      .pipe(map((response) => response.data));
+  }
+
+  delete(propertyId: string) {
+    return this.http
+      .delete<ApiResponse<void>>(`${environment.apiBaseUrl}/tenant/properties/${propertyId}`)
+      .pipe(map((response) => response.data));
+  }
+
   updateServices(propertyId: string, request: UpdatePropertyServicesRequest) {
     return this.http
       .put<ApiResponse<PropertyRecord>>(`${environment.apiBaseUrl}/tenant/properties/${propertyId}/services`, request)

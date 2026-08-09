@@ -1,4 +1,4 @@
-FROM node:24-alpine AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /workspace/frontend/tenant-portal
 
@@ -9,7 +9,7 @@ RUN npm ci --legacy-peer-deps
 COPY tenant-portal/. .
 RUN npm run build -- --configuration production
 
-FROM nginx:1.27-alpine
+FROM nginx:1.27-bookworm
 
 RUN rm -rf /etc/nginx/conf.d/default.conf
 COPY tenant-portal/nginx.conf /etc/nginx/conf.d/default.conf

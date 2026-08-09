@@ -1,6 +1,7 @@
 package com.lorne.platform.finance.internal.controller;
 
 import com.lorne.platform.finance.internal.dto.InvoiceDto;
+import com.lorne.platform.finance.internal.dto.InvoiceLineRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
 import com.lorne.platform.finance.internal.service.InvoiceService;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -60,6 +62,26 @@ class InvoiceController {
                         .build()
                         .toString())
                 .body(pdf);
+    }
+
+    @PostMapping("/{invoiceId}/lines")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> addLine(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID invoiceId,
+            @RequestBody InvoiceLineRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.addLine(principal.tenantId(), principal.userId(), invoiceId, request));
+    }
+
+    @DeleteMapping("/{invoiceId}/lines/{lineId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> deleteLine(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID invoiceId,
+            @PathVariable UUID lineId
+    ) {
+        return ApiResponse.ok(invoiceService.deleteLine(principal.tenantId(), principal.userId(), invoiceId, lineId));
     }
 
     @PostMapping("/{invoiceId}/email")

@@ -9,6 +9,7 @@ public record PropertyOwnerDto(
         String phone,
         String billingEmail,
         String notes,
-        int propertyCount
+        int propertyCount,
+        boolean active
 ) {
 }

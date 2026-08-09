@@ -55,6 +55,7 @@ public class PropertyManagementService {
 
     @Transactional
     public PropertyDto create(UUID tenantId, UUID actorUserId, CreatePropertyRequest request) {
+        requireTenantOwner(tenantId, request.ownerId());
         var propertyId = jdbcTemplate.queryForObject("""
                 INSERT INTO properties (
                     tenant_id, customer_id, name, address_line1, address_line2, city,
@@ -103,6 +104,72 @@ public class PropertyManagementService {
                 true,
                 List.of()
         );
+    }
+
+    @Transactional
+    public PropertyDto update(UUID tenantId, UUID actorUserId, UUID propertyId, CreatePropertyRequest request) {
+        requireProperty(tenantId, propertyId);
+        requireTenantOwner(tenantId, request.ownerId());
+        var updated = jdbcTemplate.update("""
+                UPDATE properties
+                SET customer_id = ?, name = ?, address_line1 = ?, address_line2 = ?, city = ?,
+                    province_code = ?, postal_code = ?, country_code = COALESCE(?, 'CA'),
+                    service_notes = ?, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """,
+                request.ownerId(),
+                request.name(),
+                request.addressLine1(),
+                request.addressLine2(),
+                request.city(),
+                request.provinceCode(),
+                request.postalCode(),
+                request.countryCode(),
+                request.serviceNotes(),
+                actorUserId,
+                tenantId,
+                propertyId
+        );
+        if (updated != 1) {
+            throw new ResourceNotFoundException("Property not found.");
+        }
+        var property = property(tenantId, propertyId);
+        auditWriter.record(tenantId, actorUserId, "PROPERTY_UPDATED", "PROPERTY", propertyId, Map.of(
+                "name", property.name(),
+                "ownerId", property.ownerId().toString(),
+                "ownerName", property.ownerName(),
+                "city", property.city()
+        ));
+        return property;
+    }
+
+    @Transactional
+    public PropertyDto updateStatus(UUID tenantId, UUID actorUserId, UUID propertyId, boolean active) {
+        requireProperty(tenantId, propertyId);
+        var updated = jdbcTemplate.update("""
+                UPDATE properties
+                SET active = ?, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """, active, actorUserId, tenantId, propertyId);
+        if (updated != 1) {
+            throw new ResourceNotFoundException("Property not found.");
+        }
+        auditWriter.record(tenantId, actorUserId, active ? "PROPERTY_ACTIVATED" : "PROPERTY_DEACTIVATED", "PROPERTY", propertyId, Map.of(
+                "active", active
+        ));
+        return property(tenantId, propertyId);
+    }
+
+    @Transactional
+    public void delete(UUID tenantId, UUID actorUserId, UUID propertyId) {
+        requireProperty(tenantId, propertyId);
+        if (hasOperationalHistory(tenantId, propertyId)) {
+            throw new BadRequestException("Property has work history and must be deactivated instead.");
+        }
+        jdbcTemplate.update("DELETE FROM property_service_types WHERE tenant_id = ? AND property_id = ?", tenantId, propertyId);
+        jdbcTemplate.update("DELETE FROM property_access_instructions WHERE tenant_id = ? AND property_id = ?", tenantId, propertyId);
+        jdbcTemplate.update("DELETE FROM properties WHERE tenant_id = ? AND id = ?", tenantId, propertyId);
+        auditWriter.record(tenantId, actorUserId, "PROPERTY_DELETED", "PROPERTY", propertyId, Map.of());
     }
 
     @Transactional
@@ -174,6 +241,33 @@ public class PropertyManagementService {
         if (!exists) {
             throw new ResourceNotFoundException("Property not found.");
         }
+    }
+
+    private void requireTenantOwner(UUID tenantId, UUID ownerId) {
+        var exists = Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM customers WHERE tenant_id = ? AND id = ? AND active = true)",
+                Boolean.class,
+                tenantId,
+                ownerId
+        ));
+        if (!exists) {
+            throw new BadRequestException("Property owner is not available for this tenant.");
+        }
+    }
+
+    private boolean hasOperationalHistory(UUID tenantId, UUID propertyId) {
+        var workOrderCount = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM work_orders
+                WHERE tenant_id = ? AND property_id = ?
+                """, Integer.class, tenantId, propertyId);
+        var recurringTemplateCount = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM recurring_work_templates
+                WHERE tenant_id = ? AND property_id = ?
+                """, Integer.class, tenantId, propertyId);
+        return (workOrderCount != null && workOrderCount > 0)
+                || (recurringTemplateCount != null && recurringTemplateCount > 0);
     }
 
     private void requireTenantServiceTypes(UUID tenantId, List<UUID> serviceTypeIds) {

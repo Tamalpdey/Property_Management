@@ -2,7 +2,9 @@ package com.lorne.platform.workorder.internal.controller;
 
 import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
+import com.lorne.platform.workorder.internal.dto.CancelWorkOrderRequest;
 import com.lorne.platform.workorder.internal.dto.CreateWorkOrderRequest;
+import com.lorne.platform.workorder.internal.dto.SendWorkOrderOwnerEmailRequest;
 import com.lorne.platform.workorder.internal.dto.WorkerAvailabilityDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderReviewActionRequest;
@@ -10,6 +12,7 @@ import com.lorne.platform.workorder.internal.dto.WorkOrderReviewDto;
 import com.lorne.platform.workorder.internal.service.WorkOrderManagementService;
 import jakarta.validation.Valid;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -34,8 +37,14 @@ class WorkOrderManagementController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
-    ApiResponse<List<WorkOrderDto>> list(@AuthenticationPrincipal JwtPrincipal principal) {
-        return ApiResponse.ok(workOrderManagementService.list(principal.tenantId()));
+    ApiResponse<List<WorkOrderDto>> list(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestParam(defaultValue = "ALL") String statusFilter,
+            @RequestParam(defaultValue = "ALL") String dateFilter,
+            @RequestParam(required = false) LocalDate customFrom,
+            @RequestParam(required = false) LocalDate customTo
+    ) {
+        return ApiResponse.ok(workOrderManagementService.list(principal.tenantId(), statusFilter, dateFilter, customFrom, customTo));
     }
 
     @GetMapping("/availability")
@@ -84,6 +93,16 @@ class WorkOrderManagementController {
         return ApiResponse.ok(workOrderManagementService.update(principal.tenantId(), principal.userId(), workOrderId, request));
     }
 
+    @PostMapping("/{workOrderId}/cancel")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<WorkOrderDto> cancel(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @Valid @RequestBody CancelWorkOrderRequest request
+    ) {
+        return ApiResponse.ok(workOrderManagementService.cancel(principal.tenantId(), principal.userId(), workOrderId, request));
+    }
+
     @PostMapping("/{workOrderId}/review/actions")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
     ApiResponse<WorkOrderReviewDto> reviewAction(
@@ -101,5 +120,15 @@ class WorkOrderManagementController {
             @PathVariable UUID workOrderId
     ) {
         return ApiResponse.ok(workOrderManagementService.generateInvoice(principal.tenantId(), principal.userId(), workOrderId));
+    }
+
+    @PostMapping("/{workOrderId}/owner-notification")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<WorkOrderReviewDto> notifyOwner(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @RequestBody(required = false) SendWorkOrderOwnerEmailRequest request
+    ) {
+        return ApiResponse.ok(workOrderManagementService.notifyOwner(principal.tenantId(), principal.userId(), workOrderId, request));
     }
 }

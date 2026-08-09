@@ -32,4 +32,10 @@ export class WorkerJobService {
       responseType: 'text'
     });
   }
+
+  deleteEvidence(workOrderId: string, documentId: string) {
+    return this.http
+      .delete<ApiResponse<WorkerJobActionResponse>>(`${environment.apiBaseUrl}/field-worker/jobs/${workOrderId}/documents/${documentId}`)
+      .pipe(map((response) => response.data));
+  }
 }

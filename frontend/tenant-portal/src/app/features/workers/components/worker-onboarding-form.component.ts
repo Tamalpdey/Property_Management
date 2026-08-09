@@ -1,9 +1,9 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateWorkerRequest, ServiceType, WorkerEngagementType } from '@lorne/contracts';
+import { CreateWorkerRequest, ServiceType, WorkerEngagementType, WorkerRecord } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-worker-onboarding-form',
@@ -13,8 +13,8 @@ import { CreateWorkerRequest, ServiceType, WorkerEngagementType } from '@lorne/c
   template: `
     <form class="space-y-4" (ngSubmit)="submit()">
       <div>
-        <p class="text-xs font-bold uppercase tracking-wide text-teal-700">Worker onboarding</p>
-        <h2 class="mt-1 text-xl font-bold text-slate-950">Create worker profile</h2>
+        <p class="text-xs font-bold uppercase tracking-wide text-teal-700">{{ editing ? 'Worker profile' : 'Worker onboarding' }}</p>
+        <h2 class="mt-1 text-xl font-bold text-slate-950">{{ editing ? 'Update worker profile' : 'Create worker profile' }}</h2>
       </div>
 
       <div class="grid grid-cols-4 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -149,13 +149,14 @@ import { CreateWorkerRequest, ServiceType, WorkerEngagementType } from '@lorne/c
         @if (tab < tabs.length - 1) {
           <button pButton type="button" icon="pi pi-arrow-right" iconPos="right" label="Next" (click)="tab = tab + 1"></button>
         } @else {
-          <button pButton type="submit" icon="pi pi-user-plus" [loading]="saving()" label="Onboard worker"></button>
+          <button pButton type="submit" [icon]="editing ? 'pi pi-save' : 'pi pi-user-plus'" [loading]="saving()" [label]="editing ? 'Save worker' : 'Onboard worker'"></button>
         }
       </div>
     </form>
   `
 })
 export class WorkerOnboardingFormComponent {
+  private readonly cdr = inject(ChangeDetectorRef);
   readonly serviceTypes = input<ServiceType[]>([]);
   readonly saving = input(false);
   readonly createWorker = output<CreateWorkerRequest>();
@@ -178,6 +179,7 @@ export class WorkerOnboardingFormComponent {
   protected shiftStart = '08:00';
   protected shiftEnd = '17:00';
   protected timezone = 'America/Toronto';
+  protected editing = false;
 
   submit(): void {
     if (!this.form.displayName.trim() || this.saving()) {
@@ -217,6 +219,7 @@ export class WorkerOnboardingFormComponent {
 
   reset(): void {
     this.tab = 0;
+    this.editing = false;
     this.form = this.blankForm();
     this.certification = { certificationName: '', issuedBy: '', issuedOn: '', expiresOn: '' };
     this.selectedDays.clear();
@@ -225,6 +228,46 @@ export class WorkerOnboardingFormComponent {
     this.shiftStart = '08:00';
     this.shiftEnd = '17:00';
     this.timezone = 'America/Toronto';
+    this.cdr.detectChanges();
+  }
+
+  loadWorker(worker: WorkerRecord, tabIndex = 0): void {
+    this.tab = Math.max(0, Math.min(tabIndex, this.tabs.length - 1));
+    this.editing = true;
+    this.form = {
+      employeeNumber: worker.employeeNumber || '',
+      displayName: worker.displayName,
+      phone: worker.phone || '',
+      email: worker.email || '',
+      engagementType: worker.engagementType,
+      maxWeeklyHours: worker.maxWeeklyHours,
+      hourlyRate: worker.hourlyRate,
+      hireDate: worker.hireDate || '',
+      emergencyContact: worker.emergencyContact
+        ? { ...worker.emergencyContact }
+        : { contactName: '', relationship: '', phone: '' },
+      certifications: [],
+      serviceTypeIds: [],
+      shifts: []
+    };
+    const certification = worker.certifications[0];
+    this.certification = certification
+      ? {
+          certificationName: certification.certificationName,
+          issuedBy: certification.issuedBy || '',
+          issuedOn: certification.issuedOn || '',
+          expiresOn: certification.expiresOn || ''
+        }
+      : { certificationName: '', issuedBy: '', issuedOn: '', expiresOn: '' };
+    this.selectedServiceTypeIds.clear();
+    worker.serviceSkills.forEach((skill) => this.selectedServiceTypeIds.add(skill.serviceTypeId));
+    this.selectedDays.clear();
+    worker.shifts.forEach((shift) => this.selectedDays.add(shift.dayOfWeek));
+    const firstShift = worker.shifts[0];
+    this.shiftStart = firstShift?.startTime || '08:00';
+    this.shiftEnd = firstShift?.endTime || '17:00';
+    this.timezone = firstShift?.timezone || 'America/Toronto';
+    this.cdr.detectChanges();
   }
 
   protected toggleService(serviceTypeId: string, event: Event): void {

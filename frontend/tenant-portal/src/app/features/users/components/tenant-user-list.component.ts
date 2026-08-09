@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { TenantUserRecord } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -105,6 +105,10 @@ import { DenseCollectionToolbarComponent } from '../../../shared/collection/dens
 })
 export class TenantUserListComponent {
   readonly users = input.required<TenantUserRecord[]>();
+  readonly editUser = output<TenantUserRecord>();
+  readonly activateUser = output<TenantUserRecord>();
+  readonly deactivateUser = output<TenantUserRecord>();
+  readonly deleteUser = output<TenantUserRecord>();
   protected readonly selectedUser = signal<TenantUserRecord | null>(null);
   protected readonly userMenuItems = signal<MenuItem[]>([]);
   protected readonly collection = new DenseCollectionState<TenantUserRecord>(
@@ -126,10 +130,13 @@ export class TenantUserListComponent {
   protected openUserMenu(user: TenantUserRecord, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedUser.set(user);
     this.userMenuItems.set([
-      { label: 'Reset password', icon: 'pi pi-key', disabled: true },
-      { label: 'Update roles', icon: 'pi pi-user-edit', disabled: true },
+      { label: 'Update user', icon: 'pi pi-user-edit', command: () => this.editUser.emit(user) },
+      { label: 'Reset password', icon: 'pi pi-key', command: () => this.editUser.emit(user) },
       { separator: true },
-      { label: 'Disable user', icon: 'pi pi-ban', disabled: true }
+      user.status === 'ACTIVE'
+        ? { label: 'Deactivate user', icon: 'pi pi-ban', command: () => this.deactivateUser.emit(user) }
+        : { label: 'Activate user', icon: 'pi pi-check-circle', command: () => this.activateUser.emit(user) },
+      { label: 'Remove from tenant', icon: 'pi pi-trash', command: () => this.deleteUser.emit(user) }
     ]);
     menu.toggle(event);
   }

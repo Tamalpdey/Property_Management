@@ -1,6 +1,7 @@
 package com.lorne.platform.document;
 
 import com.lorne.platform.shared.exception.BadRequestException;
+import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,8 +15,12 @@ import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 @Service
@@ -65,7 +70,6 @@ public class DocumentStorageService {
                 .bucket(properties.bucket())
                 .key(objectKey)
                 .contentType(contentType)
-                .contentLength(byteSize)
                 .build();
         var presignRequest = PutObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofSeconds(properties.uploadExpiresSeconds()))
@@ -97,6 +101,46 @@ public class DocumentStorageService {
         }
     }
 
+    public String createReadUrl(String bucket, String objectKey) {
+        requireConfigured();
+        if (isBlank(bucket) || isBlank(objectKey)) {
+            return "";
+        }
+        var request = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofSeconds(properties.uploadExpiresSeconds()))
+                .getObjectRequest(GetObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(objectKey)
+                        .build())
+                .build();
+        try (var presigner = presigner()) {
+            return presigner.presignGetObject(request).url().toString();
+        }
+    }
+
+    @Transactional
+    public DeletedDocument deleteWorkOrderDocument(UUID tenantId, UUID workOrderId, UUID documentId) {
+        requireConfigured();
+        var documents = jdbcTemplate.query("""
+                SELECT id, bucket, object_key
+                FROM documents
+                WHERE tenant_id = ? AND id = ? AND owner_type = 'WORK_ORDER' AND owner_id = ?
+                """, (rs, rowNum) -> new DeletedDocument(
+                rs.getObject("id", UUID.class),
+                rs.getString("bucket"),
+                rs.getString("object_key")
+        ), tenantId, documentId, workOrderId);
+        var document = documents.stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Uploaded evidence was not found."));
+
+        deleteObject(document.bucket(), document.objectKey());
+        jdbcTemplate.update("""
+                DELETE FROM documents
+                WHERE tenant_id = ? AND id = ? AND owner_type = 'WORK_ORDER' AND owner_id = ?
+                """, tenantId, documentId, workOrderId);
+        return document;
+    }
+
     private S3Presigner presigner() {
         var builder = S3Presigner.builder()
                 .region(Region.of(properties.region()))
@@ -107,6 +151,27 @@ public class DocumentStorageService {
             builder.endpointOverride(URI.create(properties.endpoint()));
         }
         return builder.build();
+    }
+
+    private S3Client s3Client() {
+        var builder = S3Client.builder()
+                .region(Region.of(properties.region()))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(properties.accessKeyId(), properties.secretAccessKey())
+                ));
+        if (properties.endpoint() != null && !properties.endpoint().isBlank()) {
+            builder.endpointOverride(URI.create(properties.endpoint()));
+        }
+        return builder.build();
+    }
+
+    private void deleteObject(String bucket, String objectKey) {
+        try (var client = s3Client()) {
+            client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(objectKey)
+                    .build());
+        }
     }
 
     private void requireConfigured() {
@@ -157,5 +222,8 @@ public class DocumentStorageService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    public record DeletedDocument(UUID documentId, String bucket, String objectKey) {
     }
 }

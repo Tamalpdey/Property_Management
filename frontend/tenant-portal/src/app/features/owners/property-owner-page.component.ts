@@ -24,20 +24,30 @@ import { PropertyOwnerService } from './services/property-owner.service';
             <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ owners().length }} records</span>
           </div>
           <div class="flex gap-2">
-            <button pButton type="button" icon="pi pi-plus" label="Add owner" (click)="showCreate.set(true)"></button>
+            <button pButton type="button" icon="pi pi-plus" label="Add owner" (click)="openCreate()"></button>
             <button pButton type="button" icon="pi pi-refresh" severity="secondary" label="Refresh" (click)="load()"></button>
           </div>
         </div>
       </div>
 
-      <lorne-owner-list [owners]="owners()" />
+      @if (error()) {
+        <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
+      }
+
+      <lorne-owner-list
+        [owners]="owners()"
+        (editOwner)="openEdit($event)"
+        (activateOwner)="setActive($event, true)"
+        (deactivateOwner)="setActive($event, false)"
+        (deleteOwner)="delete($event)"
+      />
 
       <p-dialog
-        header="Add portfolio owner"
+        [header]="editingOwner() ? 'Update portfolio owner' : 'Add portfolio owner'"
         [modal]="true"
         [visible]="showCreate()"
         [style]="{ width: 'min(42rem, 92vw)' }"
-        (visibleChange)="showCreate.set($event)"
+        (visibleChange)="visibleChange($event)"
       >
         <form class="grid gap-4" (ngSubmit)="create()">
           <label class="block">
@@ -63,8 +73,8 @@ import { PropertyOwnerService } from './services/property-owner.service';
             <textarea class="w-full border border-slate-300 px-3 py-2" name="notes" rows="4" [(ngModel)]="form.notes"></textarea>
           </label>
           <div class="flex justify-end gap-2">
-            <button pButton type="button" severity="secondary" label="Cancel" (click)="showCreate.set(false)"></button>
-            <button pButton type="submit" icon="pi pi-plus" [loading]="saving()" label="Create owner"></button>
+            <button pButton type="button" severity="secondary" label="Cancel" (click)="closeDialog()"></button>
+            <button pButton type="submit" [icon]="editingOwner() ? 'pi pi-save' : 'pi pi-plus'" [loading]="saving()" [label]="editingOwner() ? 'Save owner' : 'Create owner'"></button>
           </div>
         </form>
       </p-dialog>
@@ -76,6 +86,8 @@ export class PropertyOwnerPageComponent {
   protected readonly owners = signal<PropertyOwner[]>([]);
   protected readonly saving = signal(false);
   protected readonly showCreate = signal(false);
+  protected readonly editingOwner = signal<PropertyOwner | null>(null);
+  protected readonly error = signal('');
   protected form: CreatePropertyOwnerRequest = this.blankForm();
 
   constructor() {
@@ -86,18 +98,78 @@ export class PropertyOwnerPageComponent {
     this.owners.set(await firstValueFrom(this.propertyOwnerService.list()));
   }
 
+  openCreate(): void {
+    this.editingOwner.set(null);
+    this.form = this.blankForm();
+    this.showCreate.set(true);
+  }
+
+  openEdit(owner: PropertyOwner): void {
+    this.editingOwner.set(owner);
+    this.form = {
+      displayName: owner.displayName,
+      email: owner.email || '',
+      phone: owner.phone || '',
+      billingEmail: owner.billingEmail || '',
+      notes: owner.notes || ''
+    };
+    this.showCreate.set(true);
+  }
+
+  visibleChange(visible: boolean): void {
+    if (visible) {
+      this.showCreate.set(true);
+    } else {
+      this.closeDialog();
+    }
+  }
+
+  closeDialog(): void {
+    this.showCreate.set(false);
+    this.editingOwner.set(null);
+    this.form = this.blankForm();
+  }
+
   async create(): Promise<void> {
     if (!this.form.displayName?.trim()) {
       return;
     }
     this.saving.set(true);
+    this.error.set('');
     try {
-      const owner = await firstValueFrom(this.propertyOwnerService.create(this.form));
-      this.owners.update((owners) => [owner, ...owners]);
-      this.form = this.blankForm();
-      this.showCreate.set(false);
+      const editingOwner = this.editingOwner();
+      const owner = editingOwner
+        ? await firstValueFrom(this.propertyOwnerService.update(editingOwner.id, this.form))
+        : await firstValueFrom(this.propertyOwnerService.create(this.form));
+      this.owners.update((owners) => [owner, ...owners.filter((candidate) => candidate.id !== owner.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
+      this.closeDialog();
+    } catch {
+      this.error.set('Unable to save property owner.');
     } finally {
       this.saving.set(false);
+    }
+  }
+
+  async setActive(owner: PropertyOwner, active: boolean): Promise<void> {
+    this.error.set('');
+    try {
+      const updated = await firstValueFrom(this.propertyOwnerService.updateStatus(owner.id, active));
+      this.owners.update((owners) => [updated, ...owners.filter((candidate) => candidate.id !== updated.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
+    } catch {
+      this.error.set(active ? 'Unable to activate property owner.' : 'Unable to deactivate property owner.');
+    }
+  }
+
+  async delete(owner: PropertyOwner): Promise<void> {
+    if (!confirm(`Delete ${owner.displayName}? Owners with properties must be deactivated instead.`)) {
+      return;
+    }
+    this.error.set('');
+    try {
+      await firstValueFrom(this.propertyOwnerService.delete(owner.id));
+      this.owners.update((owners) => owners.filter((candidate) => candidate.id !== owner.id));
+    } catch {
+      this.error.set('Unable to delete owner. Deactivate owners that still have properties.');
     }
   }
 

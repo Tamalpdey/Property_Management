@@ -37,6 +37,7 @@ public record WorkOrderDto(
     public record AssignmentDto(
             UUID workerId,
             String workerName,
+            String workerEmail,
             boolean leadWorker,
             String assignmentStatus,
             String assignmentRole,

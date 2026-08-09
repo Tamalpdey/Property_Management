@@ -1,18 +1,4 @@
-(security_headers_app) {
-  header {
-    X-Content-Type-Options "nosniff"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    X-Frame-Options "SAMEORIGIN"
-    X-XSS-Protection "0"
-    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
-    Cross-Origin-Opener-Policy "same-origin"
-    -Server
-  }
-  encode gzip zstd
-}
-
-(security_headers_worker) {
+(security_headers) {
   header {
     X-Content-Type-Options "nosniff"
     Referrer-Policy "strict-origin-when-cross-origin"
@@ -40,8 +26,28 @@
   encode gzip zstd
 }
 
-{$APP_DOMAIN} {
-  import security_headers_app
+{$ROOT_DOMAIN}, maplepropertyservices.ca {
+  import security_headers
+
+  redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+{$MAIN_DOMAIN}, www.maplepropertyservices.ca {
+  import security_headers
+
+  redir https://{$APP_DOMAIN}{uri} permanent
+}
+
+{$API_DOMAIN}, api.maplepropertyservices.ca {
+  import security_headers
+
+  handle {
+    reverse_proxy lorne-modulith:8091
+  }
+}
+
+{$APP_DOMAIN}, app.maplepropertyservices.ca {
+  import security_headers
 
   @api path /api/v1/*
   handle @api {
@@ -53,7 +59,7 @@
   }
 }
 
-{$ADMIN_DOMAIN} {
+{$ADMIN_DOMAIN}, admin.maplepropertyservices.ca {
   import security_headers_admin
 
   @api path /api/v1/*
@@ -66,8 +72,8 @@
   }
 }
 
-{$WORKER_DOMAIN} {
-  import security_headers_worker
+{$WORKER_DOMAIN}, worker.maplepropertyservices.ca {
+  import security_headers
 
   @api path /api/v1/*
   handle @api {
@@ -79,8 +85,8 @@
   }
 }
 
-{$WS_DOMAIN} {
-  import security_headers_app
+{$WS_DOMAIN}, ws.maplepropertyservices.ca {
+  import security_headers
 
   @ws path /ws/* /api/v1/ws/*
   handle @ws {

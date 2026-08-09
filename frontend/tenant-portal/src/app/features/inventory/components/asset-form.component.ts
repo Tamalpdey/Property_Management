@@ -80,6 +80,10 @@ export class AssetFormComponent {
     this.form = this.blankForm();
   }
 
+  selectWorker(workerId: string): void {
+    this.form = { ...this.form, assignedWorkerId: workerId };
+  }
+
   private blankForm(): CreateAssetRequest {
     return { assetType: 'TOOL', name: '', identifier: '', quantityOnHand: 1, storageLocation: '', assignedWorkerId: '' };
   }

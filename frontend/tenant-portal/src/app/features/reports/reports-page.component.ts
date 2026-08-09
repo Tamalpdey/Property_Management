@@ -10,9 +10,9 @@ import { TenantAnalytics, TenantAnalyticsService } from '../analytics/services/t
   selector: 'report-total',
   standalone: true,
   template: `
-    <article class="h-full min-h-24 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <article class="h-full min-h-20 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
       <p class="text-xs font-black uppercase tracking-wide text-slate-500">{{ label() }}</p>
-      <p class="mt-1 text-2xl font-black text-slate-950">{{ value() }}</p>
+      <p class="mt-0.5 text-xl font-black text-slate-950">{{ value() }}</p>
       <p class="text-xs font-semibold text-slate-500">{{ detail() }}</p>
     </article>
   `
@@ -27,12 +27,12 @@ export class ReportTotalComponent {
   selector: 'report-panel',
   standalone: true,
   template: `
-    <article class="flex h-full min-h-72 flex-col rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div class="min-h-12">
+    <article class="flex h-full min-h-56 flex-col rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+      <div class="min-h-10">
         <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ eyebrow() }}</p>
-        <h2 class="mt-1 text-lg font-black text-slate-950">{{ title() }}</h2>
+        <h2 class="mt-0.5 text-base font-black text-slate-950">{{ title() }}</h2>
       </div>
-      <div class="mt-3 grid flex-1 content-start gap-2">
+      <div class="mt-2 grid flex-1 content-start gap-1.5">
         <ng-content />
       </div>
     </article>
@@ -68,9 +68,9 @@ export class BarRowComponent {
   selector: 'money-card',
   standalone: true,
   template: `
-    <div class="h-full rounded-lg px-3 py-2" [class.bg-amber-50]="tone() === 'amber'" [class.bg-teal-50]="tone() === 'teal'" [class.bg-blue-50]="tone() === 'blue'" [class.bg-red-50]="tone() === 'red'">
+    <div class="h-full rounded-lg px-2.5 py-1.5" [class.bg-amber-50]="tone() === 'amber'" [class.bg-teal-50]="tone() === 'teal'" [class.bg-blue-50]="tone() === 'blue'" [class.bg-red-50]="tone() === 'red'">
       <p class="text-xs font-black uppercase tracking-wide text-slate-500">{{ label() }}</p>
-      <p class="mt-1 text-xl font-black text-slate-950">{{ display(amount()) }}</p>
+      <p class="mt-0.5 text-lg font-black text-slate-950">{{ display(amount()) }}</p>
       <p class="text-xs font-semibold text-slate-500">{{ detail() }}</p>
     </div>
   `
@@ -104,12 +104,12 @@ export class EmptyReportComponent {
   imports: [BarRowComponent, ButtonModule, DatePipe, EmptyReportComponent, MoneyCardComponent, ReportPanelComponent, ReportTotalComponent, RouterLink, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="space-y-3">
-      <div class="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+    <section class="space-y-2.5">
+      <div class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 shadow-sm">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
             <p-tag value="Analytics" severity="info" />
-            <h1 class="text-xl font-bold text-slate-950 md:text-2xl">Reports</h1>
+            <h1 class="text-lg font-bold text-slate-950 md:text-xl">Reports</h1>
             @if (analytics(); as data) {
               <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">Updated {{ data.generatedAt | date:'MMM d, h:mm a' }}</span>
             }
@@ -123,14 +123,14 @@ export class EmptyReportComponent {
       }
 
       @if (analytics(); as data) {
-        <div class="grid items-stretch gap-3 md:grid-cols-4">
+        <div class="grid items-stretch gap-2.5 md:grid-cols-4">
           <report-total label="Owners" [value]="data.owners.length" detail="Portfolio records" />
           <report-total label="Properties" [value]="data.properties.length" detail="Managed locations" />
           <report-total label="Workers" [value]="data.workers.length" detail="All field profiles" />
           <report-total label="Invoices" [value]="data.finance.invoiceCount" detail="Non-void records" />
         </div>
 
-        <section class="grid items-stretch gap-3 xl:grid-cols-2">
+        <section class="grid items-stretch gap-2.5 xl:grid-cols-2">
           <report-panel title="Work order status" eyebrow="Operations">
             @for (bucket of data.statusBuckets; track bucket.label) {
               <bar-row [label]="bucket.label" [value]="bucket.count" [max]="maxCount(data.statusBuckets)" />
@@ -196,8 +196,8 @@ export class EmptyReportComponent {
 
           <report-panel title="Stock and tool exceptions" eyebrow="Inventory">
             <div class="grid gap-2">
-              <p class="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">{{ data.lowInventory.length }} low-stock inventory item(s)</p>
-              <p class="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">{{ data.unassignedAssets.length }} active tool/equipment item(s) not assigned to a worker</p>
+              <p class="rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm font-semibold text-amber-800">{{ data.lowInventory.length }} low-stock inventory item(s)</p>
+              <p class="rounded-lg bg-blue-50 px-2.5 py-1.5 text-sm font-semibold text-blue-800">{{ data.unassignedAssets.length }} active tool/equipment item(s) not assigned to a worker</p>
             </div>
           </report-panel>
         </section>

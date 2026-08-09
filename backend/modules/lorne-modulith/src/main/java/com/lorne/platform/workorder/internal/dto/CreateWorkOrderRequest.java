@@ -30,7 +30,9 @@ public record CreateWorkOrderRequest(
         List<MaterialRequest> materials,
         List<UUID> assetIds,
         List<String> tasks,
-        List<TaskRequest> taskItems
+        List<TaskRequest> taskItems,
+        Boolean allowAvailabilityOverride,
+        String allowAvailabilityOverrideReason
 ) {
     public record MaterialRequest(
             UUID id,

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, WorkerRecord } from '@lorne/contracts';
+import { CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
 import { WorkerManagementService } from '../workers/services/worker-management.service';
 import { TenantUserDialogComponent } from './components/tenant-user-dialog.component';
 import { TenantUserListComponent } from './components/tenant-user-list.component';
@@ -33,15 +33,24 @@ import { TenantUserService } from './services/tenant-user.service';
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
       }
 
-      <lorne-tenant-user-list [users]="users()" />
+      <lorne-tenant-user-list
+        [users]="users()"
+        (editUser)="openEdit($event)"
+        (activateUser)="activate($event)"
+        (deactivateUser)="deactivate($event)"
+        (deleteUser)="delete($event)"
+      />
 
       <lorne-tenant-user-dialog
         [visible]="showCreate()"
         [roles]="roles()"
         [workers]="workers()"
+        [editingUser]="editingUser()"
+        [title]="editingUser() ? 'Update tenant user' : 'Add tenant user'"
+        [submitLabel]="editingUser() ? 'Save user' : 'Create user'"
         [saving]="saving()"
-        (visibleChange)="showCreate.set($event)"
-        (createUser)="create($event)"
+        (visibleChange)="closeDialog($event)"
+        (saveUser)="save($event)"
       />
     </section>
   `
@@ -54,6 +63,7 @@ export class TenantUserPageComponent {
   protected readonly workers = signal<WorkerRecord[]>([]);
   protected readonly saving = signal(false);
   protected readonly showCreate = signal(false);
+  protected readonly editingUser = signal<TenantUserRecord | null>(null);
   protected readonly error = signal('');
 
   constructor() {
@@ -72,20 +82,74 @@ export class TenantUserPageComponent {
   }
 
   openCreate(): void {
+    this.editingUser.set(null);
     this.showCreate.set(true);
   }
 
-  async create(request: CreateTenantUserRequest): Promise<void> {
+  openEdit(user: TenantUserRecord): void {
+    this.editingUser.set(user);
+    this.showCreate.set(true);
+  }
+
+  closeDialog(visible: boolean): void {
+    this.showCreate.set(visible);
+    if (!visible) {
+      this.editingUser.set(null);
+    }
+  }
+
+  async save(request: CreateTenantUserRequest | UpdateTenantUserRequest): Promise<void> {
     this.saving.set(true);
     this.error.set('');
     try {
-      const user = await firstValueFrom(this.tenantUserService.create(request));
+      const editingUser = this.editingUser();
+      const user = editingUser
+        ? await firstValueFrom(this.tenantUserService.update(editingUser.id, request as UpdateTenantUserRequest))
+        : await firstValueFrom(this.tenantUserService.create(request as CreateTenantUserRequest));
       this.users.update((users) => [user, ...users.filter((candidate) => candidate.id !== user.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
       this.showCreate.set(false);
+      this.editingUser.set(null);
+      await this.refreshWorkers();
     } catch {
-      this.error.set('Unable to create tenant user. Check email, role selection, worker link, or backend status.');
+      this.error.set('Unable to save tenant user. Check email, role selection, worker link, or backend status.');
     } finally {
       this.saving.set(false);
     }
+  }
+
+  async activate(user: TenantUserRecord): Promise<void> {
+    await this.replaceUser(firstValueFrom(this.tenantUserService.activate(user.id)), 'Unable to activate tenant user.');
+  }
+
+  async deactivate(user: TenantUserRecord): Promise<void> {
+    await this.replaceUser(firstValueFrom(this.tenantUserService.deactivate(user.id)), 'Unable to deactivate tenant user.');
+  }
+
+  async delete(user: TenantUserRecord): Promise<void> {
+    if (!confirm(`Remove ${user.displayName} from this tenant? Their login will be disabled if it has no other tenant access.`)) {
+      return;
+    }
+    this.error.set('');
+    try {
+      await firstValueFrom(this.tenantUserService.delete(user.id));
+      this.users.update((users) => users.filter((candidate) => candidate.id !== user.id));
+      await this.refreshWorkers();
+    } catch {
+      this.error.set('Unable to remove tenant user.');
+    }
+  }
+
+  private async replaceUser(userPromise: Promise<TenantUserRecord>, message: string): Promise<void> {
+    this.error.set('');
+    try {
+      const updated = await userPromise;
+      this.users.update((users) => [updated, ...users.filter((user) => user.id !== updated.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
+    } catch {
+      this.error.set(message);
+    }
+  }
+
+  private async refreshWorkers(): Promise<void> {
+    this.workers.set(await firstValueFrom(this.workerManagementService.list()));
   }
 }

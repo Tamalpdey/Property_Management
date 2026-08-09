@@ -4,8 +4,10 @@ import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.auth.internal.dto.CreateTenantUserRequest;
 import com.lorne.platform.auth.internal.dto.TenantRoleDto;
 import com.lorne.platform.auth.internal.dto.TenantUserDto;
+import com.lorne.platform.auth.internal.dto.UpdateTenantUserRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.DuplicateResourceException;
+import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -121,6 +123,108 @@ public class TenantUserManagementService {
                 .orElseThrow();
     }
 
+    @Transactional
+    public TenantUserDto update(UUID tenantId, UUID actorUserId, UUID userId, UpdateTenantUserRequest request) {
+        requireTenantUser(tenantId, userId);
+        var roles = normalizeRoles(request.roles());
+        var email = request.email().trim().toLowerCase();
+        var password = request.temporaryPassword() == null ? "" : request.temporaryPassword().trim();
+        if (!password.isBlank() && password.length() < 8) {
+            throw new BadRequestException("Temporary password must be at least 8 characters.");
+        }
+        var fieldWorker = roles.contains("FIELD_WORKER");
+        if (request.workerId() != null && !fieldWorker) {
+            throw new BadRequestException("Worker profile can only be linked when Field Worker role is selected.");
+        }
+
+        try {
+            var updated = password.isBlank()
+                    ? jdbcTemplate.update("""
+                            UPDATE app_users
+                            SET display_name = ?, email = ?, phone = ?, updated_at = now(), updated_by = ?
+                            WHERE id = ?
+                            """, request.displayName().trim(), email, blankToNull(request.phone()), actorUserId, userId)
+                    : jdbcTemplate.update("""
+                            UPDATE app_users
+                            SET display_name = ?, email = ?, phone = ?, password_hash = ?, status = 'ACTIVE'::user_status,
+                                updated_at = now(), updated_by = ?
+                            WHERE id = ?
+                            """, request.displayName().trim(), email, blankToNull(request.phone()), passwordEncoder.encode(password), actorUserId, userId);
+            if (updated != 1) {
+                throw new ResourceNotFoundException("Tenant user not found.");
+            }
+        } catch (DuplicateKeyException exception) {
+            throw new DuplicateResourceException("User email already exists.");
+        }
+
+        replaceTenantRoles(tenantId, actorUserId, userId, roles);
+        var workerId = fieldWorker
+                ? resolveWorkerProfile(tenantId, actorUserId, userId, request)
+                : null;
+        linkWorkerProfile(tenantId, actorUserId, userId, workerId);
+        if (workerId != null) {
+            syncWorkerProfileContact(tenantId, actorUserId, workerId, request.displayName().trim(), blankToNull(request.phone()), email);
+        }
+        auditWriter.record(tenantId, actorUserId, "TENANT_USER_UPDATED", "USER", userId, Map.of(
+                "email", email,
+                "roles", roles,
+                "workerId", workerId == null ? "" : workerId
+        ));
+        return find(tenantId, userId);
+    }
+
+    @Transactional
+    public TenantUserDto updateStatus(UUID tenantId, UUID actorUserId, UUID userId, String status) {
+        requireTenantUser(tenantId, userId);
+        if (!Set.of("ACTIVE", "DISABLED").contains(status)) {
+            throw new BadRequestException("User status is not supported.");
+        }
+        if (actorUserId.equals(userId) && status.equals("DISABLED")) {
+            throw new BadRequestException("You cannot deactivate your own login.");
+        }
+        jdbcTemplate.update("""
+                UPDATE app_users
+                SET status = ?::user_status, updated_at = now(), updated_by = ?
+                WHERE id = ?
+                """, status, actorUserId, userId);
+        auditWriter.record(tenantId, actorUserId, status.equals("ACTIVE") ? "TENANT_USER_ACTIVATED" : "TENANT_USER_DEACTIVATED", "USER", userId, Map.of(
+                "status", status
+        ));
+        return find(tenantId, userId);
+    }
+
+    @Transactional
+    public void delete(UUID tenantId, UUID actorUserId, UUID userId) {
+        requireTenantUser(tenantId, userId);
+        if (actorUserId.equals(userId)) {
+            throw new BadRequestException("You cannot remove your own login from the tenant.");
+        }
+        jdbcTemplate.update("""
+                UPDATE workers
+                SET user_id = NULL, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND user_id = ?
+                """, actorUserId, tenantId, userId);
+        jdbcTemplate.update("""
+                DELETE FROM user_tenant_roles
+                WHERE tenant_id = ? AND user_id = ?
+                """, tenantId, userId);
+        var remainingTenantRoles = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM user_tenant_roles
+                WHERE user_id = ?
+                """, Integer.class, userId);
+        if (remainingTenantRoles == null || remainingTenantRoles == 0) {
+            jdbcTemplate.update("""
+                    UPDATE app_users
+                    SET status = 'DISABLED'::user_status, updated_at = now(), updated_by = ?
+                    WHERE id = ?
+                    """, actorUserId, userId);
+        }
+        auditWriter.record(tenantId, actorUserId, "TENANT_USER_REMOVED", "USER", userId, Map.of(
+                "remainingTenantRoles", remainingTenantRoles == null ? 0 : remainingTenantRoles
+        ));
+    }
+
     private UUID createUser(String email, String displayName, String phone, String password, UUID actorUserId) {
         try {
             return jdbcTemplate.queryForObject("""
@@ -171,6 +275,30 @@ public class TenantUserManagementService {
     }
 
     private UUID resolveWorkerProfile(UUID tenantId, UUID actorUserId, UUID userId, CreateTenantUserRequest request) {
+        if (request.workerId() != null) {
+            return request.workerId();
+        }
+        var existingWorkerId = workerIdByUser(tenantId, userId);
+        if (existingWorkerId != null) {
+            return existingWorkerId;
+        }
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO workers (tenant_id, user_id, display_name, phone, email, status, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE'::worker_status, ?, ?)
+                RETURNING id
+                """,
+                UUID.class,
+                tenantId,
+                userId,
+                request.displayName().trim(),
+                blankToNull(request.phone()),
+                request.email().trim().toLowerCase(),
+                actorUserId,
+                actorUserId
+        );
+    }
+
+    private UUID resolveWorkerProfile(UUID tenantId, UUID actorUserId, UUID userId, UpdateTenantUserRequest request) {
         if (request.workerId() != null) {
             return request.workerId();
         }
@@ -250,5 +378,23 @@ public class TenantUserManagementService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private void requireTenantUser(UUID tenantId, UUID userId) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM user_tenant_roles
+                WHERE tenant_id = ? AND user_id = ?
+                """, Integer.class, tenantId, userId);
+        if (count == null || count == 0) {
+            throw new ResourceNotFoundException("Tenant user not found.");
+        }
+    }
+
+    private TenantUserDto find(UUID tenantId, UUID userId) {
+        return list(tenantId).stream()
+                .filter(user -> user.id().equals(userId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant user not found."));
     }
 }

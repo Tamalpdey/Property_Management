@@ -46,6 +46,47 @@ export function primaryAction(status: WorkOrderStatus): WorkerJobAction | null {
   }
 }
 
+export function isWorkerAssignmentClosed(job: WorkerAssignedJob): boolean {
+  return ['COMPLETED', 'RELEASED', 'DECLINED', 'LEFT_EMERGENCY'].includes(job.assignmentStatus);
+}
+
+export function workerFacingStatus(job: WorkerAssignedJob): WorkOrderStatus {
+  if (['APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(job.status)) {
+    return job.status;
+  }
+  switch (job.assignmentStatus) {
+    case 'COMPLETED':
+      return job.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING_COMPLETION';
+    case 'RELEASED':
+    case 'DECLINED':
+    case 'LEFT_EMERGENCY':
+      return 'ON_HOLD';
+    case 'IN_PROGRESS':
+      return 'IN_PROGRESS';
+    case 'PAUSED':
+      return 'PAUSED';
+    case 'ON_SITE':
+      return 'ON_SITE';
+    case 'ACCEPTED':
+      if (job.status === 'ON_SITE') {
+        return 'ON_SITE';
+      }
+      return 'TRAVELING';
+    case 'ASSIGNED':
+      return 'ASSIGNED';
+    default:
+      return job.status;
+  }
+}
+
+export function isFutureJob(job: WorkerAssignedJob, now = new Date()): boolean {
+  if (!job.scheduledStart) {
+    return false;
+  }
+  const scheduledStart = new Date(job.scheduledStart);
+  return Number.isFinite(scheduledStart.getTime()) && serviceDateKey(scheduledStart) > serviceDateKey(now);
+}
+
 export function primaryActionLabel(job: WorkerAssignedJob): string {
   switch (job.status) {
     case 'TO_DO':
@@ -80,6 +121,9 @@ export function primaryActionLabel(job: WorkerAssignedJob): string {
 }
 
 export function canUseChecklist(job: WorkerAssignedJob, phase: 'PRE_START' | 'COMPLETION' = 'COMPLETION'): boolean {
+  if (isFutureJob(job)) {
+    return false;
+  }
   if (phase === 'PRE_START') {
     return ['TO_DO', 'CREATED', 'SCHEDULED', 'ASSIGNED', 'TRAVELING', 'ON_SITE'].includes(job.status);
   }
@@ -87,6 +131,9 @@ export function canUseChecklist(job: WorkerAssignedJob, phase: 'PRE_START' | 'CO
 }
 
 export function checklistDisabledReason(job: WorkerAssignedJob, phase: 'PRE_START' | 'COMPLETION' = 'COMPLETION'): string {
+  if (isFutureJob(job)) {
+    return 'This job is scheduled for a future date. Field actions unlock on the service date.';
+  }
   if (phase === 'PRE_START') {
     if (['IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'COMPLETED', 'APPROVED'].includes(job.status)) {
       return 'Pre-start checks are closed after work starts.';
@@ -100,6 +147,10 @@ export function checklistDisabledReason(job: WorkerAssignedJob, phase: 'PRE_STAR
     return 'Completion checks are already submitted for review.';
   }
   return 'Checklist unlocks after you start work on site.';
+}
+
+function serviceDateKey(date: Date): number {
+  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
 }
 
 export function parseDateInput(value: string): Date {
@@ -120,7 +171,26 @@ export function workerErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof HttpErrorResponse) {
     const body = error.error as { error?: { message?: string; fields?: Array<{ field: string; message: string }> } } | undefined;
     const fieldMessage = body?.error?.fields?.[0]?.message;
-    return fieldMessage || body?.error?.message || error.message || fallback;
+    const apiMessage = fieldMessage || body?.error?.message;
+    if (apiMessage) {
+      return apiMessage;
+    }
+    if (error.status === 0) {
+      return fallback;
+    }
+    if (error.status === 401) {
+      return 'Your session has expired. Sign in again to continue.';
+    }
+    if (error.status === 403) {
+      return 'You do not have permission to do this action.';
+    }
+    if (error.status === 413) {
+      return 'This file is too large. Choose a smaller file and try again.';
+    }
+    if (error.status >= 500) {
+      return 'Something went wrong on the server. Try again in a moment.';
+    }
+    return fallback;
   }
   return fallback;
 }

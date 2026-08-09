@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ViewChild, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -76,6 +77,8 @@ import { InventoryService } from './services/inventory.service';
 export class InventoryPageComponent {
   private readonly inventoryService = inject(InventoryService);
   private readonly assetService = inject(AssetService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   @ViewChild(InventoryCategoryFormComponent) private categoryForm?: InventoryCategoryFormComponent;
   @ViewChild(InventoryItemFormComponent) private itemForm?: InventoryItemFormComponent;
   @ViewChild(AssetFormComponent) private assetForm?: AssetFormComponent;
@@ -101,6 +104,7 @@ export class InventoryPageComponent {
     ]);
     this.inventory.set(inventory);
     this.assets.set(assets);
+    this.openAssignmentDialogFromRoute();
   }
 
   async createCategory(request: CreateInventoryCategoryRequest): Promise<void> {
@@ -146,5 +150,15 @@ export class InventoryPageComponent {
     } finally {
       this.savingAsset.set(false);
     }
+  }
+
+  private openAssignmentDialogFromRoute(): void {
+    const assignedWorkerId = this.route.snapshot.queryParamMap.get('assignedWorkerId');
+    if (!assignedWorkerId) {
+      return;
+    }
+    this.showAssetDialog.set(true);
+    setTimeout(() => this.assetForm?.selectWorker(assignedWorkerId));
+    void this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
   }
 }

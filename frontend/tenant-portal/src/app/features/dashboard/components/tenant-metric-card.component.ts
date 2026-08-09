@@ -14,11 +14,11 @@ export interface TenantMetric {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article class="h-full rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center justify-between gap-2.5">
         <div>
-          <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ metric().label }}</p>
-          <p class="mt-1 text-2xl font-bold leading-none text-slate-950">{{ metric().value }}</p>
-          <p class="mt-1 text-xs font-medium text-slate-600">{{ metric().detail }}</p>
+          <p class="text-[0.8rem] font-bold uppercase tracking-wide text-slate-500">{{ metric().label }}</p>
+          <p class="mt-0.5 text-2xl font-bold leading-none text-slate-950">{{ metric().value }}</p>
+          <p class="mt-1 text-[0.84rem] font-medium text-slate-600">{{ metric().detail }}</p>
         </div>
         <span
           class="grid h-9 w-9 shrink-0 place-items-center rounded-lg"

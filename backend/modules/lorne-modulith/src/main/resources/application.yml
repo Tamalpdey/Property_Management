@@ -74,6 +74,13 @@ lorne:
   mail:
     enabled: ${LORNE_MAIL_ENABLED:false}
     from: ${LORNE_MAIL_FROM:no-reply@lorne.local}
+  worker-clock:
+    auto-clock-out:
+      enabled: ${LORNE_WORKER_AUTO_CLOCK_OUT_ENABLED:true}
+      grace-minutes: ${LORNE_WORKER_AUTO_CLOCK_OUT_GRACE_MINUTES:60}
+      max-open-hours: ${LORNE_WORKER_AUTO_CLOCK_OUT_MAX_OPEN_HOURS:16}
+      initial-delay-ms: ${LORNE_WORKER_AUTO_CLOCK_OUT_INITIAL_DELAY_MS:120000}
+      fixed-delay-ms: ${LORNE_WORKER_AUTO_CLOCK_OUT_FIXED_DELAY_MS:300000}
 
 logging:
   level:

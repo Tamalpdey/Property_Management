@@ -126,6 +126,9 @@ export class PropertyListComponent {
   properties = input.required<PropertyRecord[]>();
   serviceTypes = input.required<ServiceType[]>();
   savingPropertyId = input<string | null>(null);
+  editProperty = output<PropertyRecord>();
+  updatePropertyStatus = output<{ property: PropertyRecord; active: boolean }>();
+  deleteProperty = output<PropertyRecord>();
   servicesChanged = output<{ propertyId: string; serviceTypeIds: string[] }>();
   protected readonly selectedProperty = signal<PropertyRecord | null>(null);
   protected readonly propertyMenuItems = signal<MenuItem[]>([]);
@@ -153,9 +156,12 @@ export class PropertyListComponent {
   protected openPropertyMenu(property: PropertyRecord, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.propertyMenuItems.set([
       { label: 'Service profiles', icon: 'pi pi-wrench', command: () => this.selectedProperty.set(property) },
-      { label: 'Update property', icon: 'pi pi-pencil', disabled: true },
+      { label: 'Update property', icon: 'pi pi-pencil', command: () => this.editProperty.emit(property) },
       { separator: true },
-      { label: 'Deactivate property', icon: 'pi pi-ban', disabled: true }
+      property.active
+        ? { label: 'Deactivate property', icon: 'pi pi-ban', command: () => this.updatePropertyStatus.emit({ property, active: false }) }
+        : { label: 'Activate property', icon: 'pi pi-check-circle', command: () => this.updatePropertyStatus.emit({ property, active: true }) },
+      { label: 'Delete property', icon: 'pi pi-trash', command: () => this.deleteProperty.emit(property) }
     ]);
     menu.toggle(event);
   }

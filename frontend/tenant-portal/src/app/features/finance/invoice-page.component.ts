@@ -97,15 +97,40 @@ import { EmailTemplateService } from '../notifications/services/email-template.s
             </div>
             <div class="mt-3 grid gap-2">
               @for (line of invoice.lines; track line.id) {
-                <div class="rounded-lg bg-slate-50 px-3 py-2">
-                  <p class="text-sm font-black text-slate-950">{{ line.description }}</p>
-                  <p class="mt-1 text-xs font-semibold text-slate-500">{{ line.quantity }} x {{ currency(line.unitPrice) }}</p>
-                  <p class="mt-1 text-sm font-black text-slate-800">{{ currency(line.lineTotal) }}</p>
+                <div class="grid gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-start">
+                  <span>
+                    <p class="text-sm font-black text-slate-950">{{ line.description }}</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-500">{{ line.quantity }} x {{ currency(line.unitPrice) }}</p>
+                    <p class="mt-1 text-sm font-black text-slate-800">{{ currency(line.lineTotal) }}</p>
+                  </span>
+                  @if (invoice.status === 'DRAFT') {
+                    <button pButton type="button" size="small" severity="danger" icon="pi pi-trash" [text]="true" [disabled]="savingLine()" (click)="deleteLine(invoice, line.id)"></button>
+                  }
                 </div>
               } @empty {
                 <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">No line items.</p>
               }
             </div>
+            @if (invoice.status === 'DRAFT') {
+              <form class="mt-3 rounded-lg border border-teal-100 bg-teal-50 p-3" (ngSubmit)="addLine(invoice)">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Add draft line</p>
+                <label class="mt-2 block">
+                  <span class="mb-1 block text-xs font-bold text-slate-700">Description</span>
+                  <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="lineDescription" [(ngModel)]="lineForm.description" />
+                </label>
+                <div class="mt-2 grid grid-cols-2 gap-2">
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-bold text-slate-700">Qty</span>
+                    <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="number" min="0.01" step="0.01" name="lineQuantity" [(ngModel)]="lineForm.quantity" />
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-bold text-slate-700">Unit price</span>
+                    <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="number" min="0" step="0.01" name="lineUnitPrice" [(ngModel)]="lineForm.unitPrice" />
+                  </label>
+                </div>
+                <button class="mt-2 w-full" pButton type="submit" size="small" icon="pi pi-plus" label="Add line" [loading]="savingLine()"></button>
+              </form>
+            }
             <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p class="flex justify-between text-sm"><span>Subtotal</span><strong>{{ currency(invoice.subtotal) }}</strong></p>
               <p class="mt-1 flex justify-between text-sm"><span>Tax</span><strong>{{ currency(invoice.taxTotal) }}</strong></p>
@@ -154,12 +179,14 @@ export class InvoicePageComponent {
   protected readonly template = signal<EmailTemplateRecord | null>(null);
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
+  protected readonly savingLine = signal(false);
   protected readonly downloading = signal(false);
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly showSend = signal(false);
   protected readonly sendTarget = signal<InvoiceRecord | null>(null);
   protected readonly sendForm = { recipientEmail: '', subject: '', body: '' };
+  protected readonly lineForm = { description: '', quantity: 1, unitPrice: 0 };
 
   constructor() {
     void this.load();
@@ -184,6 +211,62 @@ export class InvoicePageComponent {
   }
 
   protected select(invoice: InvoiceRecord): void {
+    this.selectedInvoice.set(invoice);
+  }
+
+  protected async addLine(invoice: InvoiceRecord): Promise<void> {
+    if (this.savingLine()) {
+      return;
+    }
+    const description = this.lineForm.description.trim();
+    if (!description) {
+      this.error.set('Line description is required.');
+      return;
+    }
+    this.savingLine.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const updated = await firstValueFrom(this.invoiceService.addLine(invoice.id, {
+        description,
+        quantity: Number(this.lineForm.quantity || 0),
+        unitPrice: Number(this.lineForm.unitPrice || 0)
+      }));
+      this.replaceInvoice(updated);
+      this.lineForm.description = '';
+      this.lineForm.quantity = 1;
+      this.lineForm.unitPrice = 0;
+      this.message.set('Draft invoice line added.');
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to add invoice line.'));
+    } finally {
+      this.savingLine.set(false);
+    }
+  }
+
+  protected async deleteLine(invoice: InvoiceRecord, lineId: string): Promise<void> {
+    if (this.savingLine()) {
+      return;
+    }
+    if (!window.confirm('Delete this invoice line?')) {
+      return;
+    }
+    this.savingLine.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const updated = await firstValueFrom(this.invoiceService.deleteLine(invoice.id, lineId));
+      this.replaceInvoice(updated);
+      this.message.set('Draft invoice line deleted.');
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to delete invoice line.'));
+    } finally {
+      this.savingLine.set(false);
+    }
+  }
+
+  private replaceInvoice(invoice: InvoiceRecord): void {
+    this.invoices.update((invoices) => invoices.map((candidate) => candidate.id === invoice.id ? invoice : candidate));
     this.selectedInvoice.set(invoice);
   }
 

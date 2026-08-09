@@ -11,11 +11,14 @@ public record WorkOrderReviewDto(
         List<EvidenceDto> evidence,
         List<TimeEntryDto> timeEntries,
         List<InvoiceDto> invoices,
+        List<CommunicationDto> communications,
         List<AuditEntryDto> auditLogs
 ) {
     public record FieldNoteDto(
             UUID id,
+            UUID workerId,
             String workerName,
+            String workerEmail,
             String note,
             Instant createdAt,
             Instant updatedAt
@@ -29,9 +32,12 @@ public record WorkOrderReviewDto(
             String caption,
             String bucket,
             String objectKey,
+            String viewUrl,
             String contentType,
             Long byteSize,
+            UUID workerId,
             String createdByName,
+            String createdByEmail,
             Instant capturedAt,
             Instant createdAt,
             Map<String, Object> metadata
@@ -40,6 +46,7 @@ public record WorkOrderReviewDto(
 
     public record TimeEntryDto(
             UUID id,
+            UUID workerId,
             String workerName,
             String entryType,
             Instant startedAt,
@@ -57,6 +64,21 @@ public record WorkOrderReviewDto(
             String subtotal,
             String taxTotal,
             String total
+    ) {
+    }
+
+    public record CommunicationDto(
+            UUID id,
+            String communicationType,
+            UUID invoiceId,
+            String invoiceNumber,
+            String recipientEmail,
+            String subject,
+            String body,
+            String status,
+            String providerMessage,
+            Instant sentAt,
+            Instant createdAt
     ) {
     }
 

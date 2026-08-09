@@ -2,6 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import {
   ApiResponse,
+  InvoiceLineRequest,
   InvoiceRecord,
   SendInvoiceEmailRequest,
   SendInvoiceEmailResponse
@@ -28,6 +29,18 @@ export class InvoiceService {
   sendEmail(invoiceId: string, request: SendInvoiceEmailRequest) {
     return this.http
       .post<ApiResponse<SendInvoiceEmailResponse>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/email`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  addLine(invoiceId: string, request: InvoiceLineRequest) {
+    return this.http
+      .post<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/lines`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  deleteLine(invoiceId: string, lineId: string) {
+    return this.http
+      .delete<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/lines/${lineId}`)
       .pipe(map((response) => response.data));
   }
 

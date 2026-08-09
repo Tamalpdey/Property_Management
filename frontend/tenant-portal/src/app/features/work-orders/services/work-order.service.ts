@@ -1,16 +1,26 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, CreateWorkOrderRequest, WorkerAvailabilityOption, WorkOrderRecord, WorkOrderReview, WorkOrderReviewActionRequest } from '@lorne/contracts';
+import { ApiResponse, CancelWorkOrderRequest, CreateWorkOrderRequest, SendWorkOrderOwnerEmailRequest, WorkerAvailabilityOption, WorkOrderRecord, WorkOrderReview, WorkOrderReviewActionRequest } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
+
+export interface WorkOrderListFilters {
+  statusFilter?: string;
+  dateFilter?: string;
+  customFrom?: string;
+  customTo?: string;
+}
 
 @Injectable({ providedIn: 'root' })
 export class WorkOrderService {
   private readonly http = inject(HttpClient);
 
-  list() {
+  list(filters: WorkOrderListFilters = {}) {
+    const params = Object.fromEntries(
+      Object.entries(filters).filter(([, value]) => Boolean(value))
+    ) as Record<string, string>;
     return this.http
-      .get<ApiResponse<WorkOrderRecord[]>>(`${environment.apiBaseUrl}/tenant/work-orders`)
+      .get<ApiResponse<WorkOrderRecord[]>>(`${environment.apiBaseUrl}/tenant/work-orders`, { params })
       .pipe(map((response) => response.data));
   }
 
@@ -23,6 +33,12 @@ export class WorkOrderService {
   update(workOrderId: string, request: CreateWorkOrderRequest) {
     return this.http
       .patch<ApiResponse<WorkOrderRecord>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  cancel(workOrderId: string, request: CancelWorkOrderRequest) {
+    return this.http
+      .post<ApiResponse<WorkOrderRecord>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/cancel`, request)
       .pipe(map((response) => response.data));
   }
 
@@ -41,6 +57,12 @@ export class WorkOrderService {
   generateInvoice(workOrderId: string) {
     return this.http
       .post<ApiResponse<WorkOrderReview>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/invoice`, {})
+      .pipe(map((response) => response.data));
+  }
+
+  notifyOwner(workOrderId: string, request: SendWorkOrderOwnerEmailRequest = {}) {
+    return this.http
+      .post<ApiResponse<WorkOrderReview>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/owner-notification`, request)
       .pipe(map((response) => response.data));
   }
 

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, WorkerRecord } from '@lorne/contracts';
+import { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
@@ -12,7 +12,14 @@ import { PasswordModule } from 'primeng/password';
   imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, PasswordModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <p-dialog [header]="title" [modal]="true" [visible]="visible" [style]="{ width: 'min(44rem, 94vw)' }" (visibleChange)="visibleChange.emit($event)">
+    <p-dialog
+      [header]="title"
+      [modal]="true"
+      [visible]="visible"
+      [style]="{ width: '44rem', maxWidth: '94vw', height: '38rem', maxHeight: '90vh' }"
+      [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'auto' }"
+      (visibleChange)="visibleChange.emit($event)"
+    >
       <form class="grid gap-4" (ngSubmit)="submit()">
         @if (linkedWorker) {
           <div class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2">
@@ -29,7 +36,7 @@ import { PasswordModule } from 'primeng/password';
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-semibold text-slate-700">Email</span>
-            <input pInputText class="w-full" name="email" type="email" required [(ngModel)]="form.email" />
+            <input pInputText class="w-full" name="email" type="email" required [disabled]="!!editingUser" [(ngModel)]="form.email" />
           </label>
         </div>
 
@@ -39,8 +46,11 @@ import { PasswordModule } from 'primeng/password';
             <input pInputText class="w-full" name="phone" [(ngModel)]="form.phone" />
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-semibold text-slate-700">Temporary password</span>
+            <span class="mb-1 block text-sm font-semibold text-slate-700">{{ editingUser ? 'New password' : 'Temporary password' }}</span>
             <p-password styleClass="w-full" inputStyleClass="w-full" name="temporaryPassword" [feedback]="false" [(ngModel)]="form.temporaryPassword" />
+            @if (editingUser) {
+              <span class="mt-1 block text-xs font-semibold text-slate-500">Leave blank to keep the existing password.</span>
+            }
           </label>
         </div>
 
@@ -98,8 +108,9 @@ export class TenantUserDialogComponent implements OnChanges {
   @Input() roles: TenantRoleOption[] = [];
   @Input() workers: WorkerRecord[] = [];
   @Input() linkedWorker: WorkerRecord | null = null;
+  @Input() editingUser: TenantUserRecord | null = null;
   @Output() visibleChange = new EventEmitter<boolean>();
-  @Output() createUser = new EventEmitter<CreateTenantUserRequest>();
+  @Output() saveUser = new EventEmitter<CreateTenantUserRequest | UpdateTenantUserRequest>();
 
   protected form: CreateTenantUserRequest = this.blankForm();
   protected formError = '';
@@ -110,7 +121,7 @@ export class TenantUserDialogComponent implements OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if ((changes['visible'] && this.visible) || (changes['linkedWorker'] && this.visible)) {
+    if ((changes['visible'] && this.visible) || (changes['linkedWorker'] && this.visible) || (changes['editingUser'] && this.visible)) {
       this.reset();
     }
   }
@@ -121,22 +132,26 @@ export class TenantUserDialogComponent implements OnChanges {
       this.formError = 'Name and email are required.';
       return;
     }
-    if (!this.form.temporaryPassword.trim() || this.form.temporaryPassword.trim().length < 8) {
+    if (!this.editingUser && (!this.form.temporaryPassword.trim() || this.form.temporaryPassword.trim().length < 8)) {
       this.formError = 'Temporary password must be at least 8 characters.';
+      return;
+    }
+    if (this.editingUser && this.form.temporaryPassword.trim() && this.form.temporaryPassword.trim().length < 8) {
+      this.formError = 'New password must be at least 8 characters.';
       return;
     }
     if (!this.selectedRoles.size) {
       this.formError = 'Select at least one role.';
       return;
     }
-    this.createUser.emit({
+    this.saveUser.emit({
       displayName: this.form.displayName.trim(),
       email: this.form.email.trim(),
       phone: this.form.phone?.trim() || undefined,
-      temporaryPassword: this.form.temporaryPassword.trim(),
+      temporaryPassword: this.form.temporaryPassword.trim() || undefined,
       roles: [...this.selectedRoles],
       workerId: this.selectedRoles.has('FIELD_WORKER') && this.form.workerId ? this.form.workerId : undefined
-    });
+    } as CreateTenantUserRequest | UpdateTenantUserRequest);
   }
 
   protected toggleRole(role: TenantAssignableRole, event: Event): void {
@@ -172,13 +187,20 @@ export class TenantUserDialogComponent implements OnChanges {
   private reset(): void {
     this.form = this.blankForm();
     this.selectedRoles.clear();
-    if (this.linkedWorker) {
+    if (this.editingUser) {
+      this.editingUser.roles.forEach((role) => this.selectedRoles.add(role));
+      this.form = {
+        displayName: this.editingUser.displayName,
+        email: this.editingUser.email,
+        phone: this.editingUser.phone || '',
+        temporaryPassword: '',
+        roles: this.editingUser.roles,
+        workerId: this.editingUser.workerId || undefined
+      };
+    } else if (this.linkedWorker) {
       this.selectedRoles.add('FIELD_WORKER');
       this.form = {
         ...this.form,
-        displayName: this.linkedWorker.displayName,
-        email: this.linkedWorker.email || '',
-        phone: this.linkedWorker.phone || '',
         workerId: this.linkedWorker.id,
         roles: ['FIELD_WORKER']
       };
@@ -193,7 +215,7 @@ export class TenantUserDialogComponent implements OnChanges {
       displayName: '',
       email: '',
       phone: '',
-      temporaryPassword: 'Password123!',
+      temporaryPassword: '',
       roles: ['OPERATIONS'],
       workerId: undefined
     };

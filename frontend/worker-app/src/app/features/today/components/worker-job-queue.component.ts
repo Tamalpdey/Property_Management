@@ -2,6 +2,7 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { WorkerAssignedJob } from '@lorne/contracts';
+import { workerFacingStatus } from '../worker-job-ui';
 
 type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
 
@@ -21,7 +22,7 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
           <span class="grid h-9 min-w-9 place-items-center rounded-lg bg-slate-950 px-2 text-sm font-black text-white">{{ dayJobs().length }}</span>
         </div>
 
-        <div class="grid gap-2 sm:grid-cols-[1fr_10rem] xl:grid-cols-1">
+        <div class="grid gap-2 sm:grid-cols-[1fr_12rem]">
           <label class="relative block">
             <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400"></i>
             <input
@@ -57,10 +58,16 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
               [class.bg-white]="job.id !== selectedJobId()"
               (click)="jobSelected.emit(job)"
             >
-              <span class="flex items-center justify-between gap-2">
-                <span class="text-xs font-black text-teal-700">{{ job.workOrderNumber }}</span>
+              <span class="flex items-start justify-between gap-3">
+                <span class="min-w-0">
+                  <span class="flex min-w-0 flex-wrap items-center gap-2">
+                    <span class="truncate text-xs font-black text-teal-700">{{ job.workOrderNumber }}</span>
+                    <span [class]="orderBadgeClass(job)">{{ orderStatusLabel(job) }}</span>
+                    <span [class]="workerBadgeClass(job)">Me: {{ assignmentStatusLabel(job) }}</span>
+                  </span>
+                </span>
                 <span
-                  class="rounded-full px-2 py-1 text-[0.68rem] font-black"
+                  class="shrink-0 rounded-full px-2 py-1 text-[0.68rem] font-black"
                   [class.bg-red-100]="timingTone(job) === 'late'"
                   [class.text-red-700]="timingTone(job) === 'late'"
                   [class.bg-teal-100]="timingTone(job) === 'now'"
@@ -72,7 +79,6 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
               <span class="mt-2 block text-base font-black leading-tight text-slate-950">{{ job.title }}</span>
               <span class="mt-1 block truncate text-sm font-bold text-slate-700">{{ job.propertyName }}</span>
               <span class="mt-1 block truncate text-xs font-semibold text-slate-500">{{ job.ownerName }}{{ job.serviceName ? ' · ' + job.serviceName : '' }}</span>
-              <span class="mt-3 inline-flex rounded-full bg-slate-950 px-2.5 py-1 text-[0.7rem] font-bold uppercase text-white">{{ statusLabel(job.status) }}</span>
             </button>
           } @empty {
             <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-10 text-center text-sm font-bold leading-6 text-slate-500">
@@ -88,7 +94,16 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
           <div class="space-y-2">
             @for (job of visibleUnscheduledJobs(); track job.id) {
               <button type="button" class="touch-action w-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-left shadow-sm sm:p-4" (click)="jobSelected.emit(job)">
-                <span class="block text-xs font-black text-teal-700">{{ job.workOrderNumber }}</span>
+                <span class="flex items-start justify-between gap-2">
+                  <span class="min-w-0">
+                    <span class="flex min-w-0 flex-wrap items-center gap-2">
+                      <span class="truncate text-xs font-black text-teal-700">{{ job.workOrderNumber }}</span>
+                      <span [class]="orderBadgeClass(job)">{{ orderStatusLabel(job) }}</span>
+                      <span [class]="workerBadgeClass(job)">Me: {{ assignmentStatusLabel(job) }}</span>
+                    </span>
+                  </span>
+                  <span class="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[0.68rem] font-black text-amber-800">unscheduled</span>
+                </span>
                 <span class="mt-1 block text-base font-black text-slate-950">{{ job.title }}</span>
                 <span class="mt-1 block truncate text-sm font-bold text-slate-700">{{ job.propertyName }}</span>
               </button>
@@ -144,8 +159,20 @@ export class WorkerJobQueueComponent {
     return 'future';
   }
 
-  protected statusLabel(status: string): string {
-    return status.toLowerCase().replaceAll('_', ' ');
+  protected orderStatusLabel(job: WorkerAssignedJob): string {
+    return job.status.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected assignmentStatusLabel(job: WorkerAssignedJob): string {
+    return job.assignmentStatus.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected orderBadgeClass(job: WorkerAssignedJob): string {
+    return badgeClass(job.status);
+  }
+
+  protected workerBadgeClass(job: WorkerAssignedJob): string {
+    return badgeClass(workerFacingStatus(job), 'border-indigo-100 bg-indigo-50 text-indigo-700');
   }
 
   private matches(job: WorkerAssignedJob): boolean {
@@ -157,13 +184,13 @@ export class WorkerJobQueueComponent {
   private matchesFilter(job: WorkerAssignedJob): boolean {
     switch (this.filter()) {
       case 'ACTIVE':
-        return ['TRAVELING', 'ON_SITE', 'IN_PROGRESS', 'PAUSED'].includes(job.status);
+        return ['TRAVELING', 'ON_SITE', 'IN_PROGRESS', 'PAUSED'].includes(workerFacingStatus(job));
       case 'SCHEDULED':
-        return ['TO_DO', 'CREATED', 'SCHEDULED', 'ASSIGNED'].includes(job.status);
+        return ['TO_DO', 'CREATED', 'SCHEDULED', 'ASSIGNED'].includes(workerFacingStatus(job));
       case 'DONE':
         return isDone(job);
       case 'NEEDS_HELP':
-        return ['ON_HOLD', 'PENDING_COMPLETION', 'CANCELLED'].includes(job.status);
+        return ['ON_HOLD', 'PENDING_COMPLETION', 'CANCELLED'].includes(workerFacingStatus(job));
       default:
         return true;
     }
@@ -171,5 +198,22 @@ export class WorkerJobQueueComponent {
 }
 
 function isDone(job: WorkerAssignedJob): boolean {
-  return ['COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID'].includes(job.status);
+  return ['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID'].includes(workerFacingStatus(job));
+}
+
+function badgeClass(status: string, fallback = 'border-slate-200 bg-slate-50 text-slate-700'): string {
+  const base = 'inline-flex rounded-full border px-2 py-1 text-[0.64rem] font-black uppercase leading-none';
+  if (['IN_PROGRESS', 'ON_SITE', 'TRAVELING', 'PAUSED'].includes(status)) {
+    return `${base} border-teal-100 bg-teal-50 text-teal-700`;
+  }
+  if (['ASSIGNED', 'ACCEPTED', 'TO_DO', 'SCHEDULED', 'CREATED'].includes(status)) {
+    return `${base} border-blue-100 bg-blue-50 text-blue-700`;
+  }
+  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID'].includes(status)) {
+    return `${base} border-emerald-100 bg-emerald-50 text-emerald-700`;
+  }
+  if (['ON_HOLD', 'LEFT_EMERGENCY', 'RELEASED', 'DECLINED', 'CANCELLED'].includes(status)) {
+    return `${base} border-amber-100 bg-amber-50 text-amber-800`;
+  }
+  return `${base} ${fallback}`;
 }

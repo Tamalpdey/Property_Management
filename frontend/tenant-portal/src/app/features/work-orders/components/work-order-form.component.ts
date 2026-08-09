@@ -23,8 +23,8 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
   imports: [ButtonModule, FormsModule, InputTextModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <form class="space-y-3" (ngSubmit)="submit()">
-      <div>
+    <form class="flex h-full min-h-0 flex-col gap-3" (ngSubmit)="submit()">
+      <div class="flex-none">
         <p class="text-xs font-bold uppercase tracking-wide text-teal-700">Work order</p>
         <h2 class="mt-0.5 text-lg font-bold text-slate-950">{{ workOrder() ? 'Update work order' : 'Create work order' }}</h2>
       </div>
@@ -38,9 +38,12 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
       @if (saveError()) {
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ saveError() }}</p>
       }
+      @if (formError) {
+        <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ formError }}</p>
+      }
 
-      <fieldset class="space-y-3" [disabled]="isLockedWorkOrder()">
-      <div class="grid grid-cols-5 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+      <fieldset class="flex min-h-0 flex-1 flex-col gap-3" [disabled]="isLockedWorkOrder()">
+      <div class="flex-none grid grid-cols-5 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
         @for (stepLabel of steps; track stepLabel; let index = $index) {
           <button
             pButton
@@ -54,11 +57,13 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
         }
       </div>
 
+      <div class="min-h-0 flex-1 overflow-y-auto pr-1">
       @if (step === 0) {
         <div class="grid gap-2">
+          <p class="text-xs font-semibold text-slate-500"><span class="font-black text-red-600">*</span> Required field</p>
           <div class="grid gap-2 md:grid-cols-2">
             <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Owner</span>
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Owner <span class="text-red-600">*</span></span>
               <select class="w-full border border-slate-300 px-3 py-2" name="ownerId" required [(ngModel)]="ownerId" (ngModelChange)="onOwnerChange()">
                 <option value="">Select owner</option>
                 @for (owner of ownerOptions(); track owner.id) {
@@ -67,7 +72,7 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
               </select>
             </label>
             <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Property</span>
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Property <span class="text-red-600">*</span></span>
               <select class="w-full border border-slate-300 px-3 py-2" name="propertyId" required [(ngModel)]="form.propertyId" (ngModelChange)="onPropertyChange()">
                 <option value="">Select property</option>
                 @for (property of propertyOptions(); track property.id) {
@@ -91,7 +96,9 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
                 <option value="ADHOC_CALL">Adhoc call</option>
                 <option value="WEBSITE">Website</option>
                 <option value="CUSTOMER_PORTAL">Customer portal</option>
-                <option value="RECURRING">Recurring</option>
+                @if (workOrder()?.source === 'RECURRING') {
+                  <option value="RECURRING">Recurring template draft</option>
+                }
               </select>
             </label>
             <label class="block">
@@ -108,7 +115,7 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Service</span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="serviceTypeId" [(ngModel)]="form.serviceTypeId" (ngModelChange)="pruneWorkers()">
+              <select class="w-full border border-slate-300 px-3 py-2" name="serviceTypeId" [(ngModel)]="form.serviceTypeId" (ngModelChange)="onServiceChange()">
                 <option value="">General service</option>
                 @for (service of serviceOptions(); track service.id) {
                   <option [value]="service.id">{{ service.name }}{{ service.categoryName ? ' · ' + service.categoryName : '' }}</option>
@@ -118,8 +125,8 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
           </div>
 
           <label class="block">
-            <span class="mb-1 block text-sm font-semibold text-slate-700">Work order title</span>
-            <input pInputText class="w-full" name="title" required [(ngModel)]="form.title" />
+            <span class="mb-1 block text-sm font-semibold text-slate-700">Work order title <span class="text-red-600">*</span></span>
+            <input pInputText class="w-full" name="title" required [ngModel]="form.title" (ngModelChange)="onTitleChange($event)" />
           </label>
 
           <label class="block">
@@ -156,26 +163,11 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
               <input class="w-full border border-slate-300 px-3 py-2" name="scheduledEnd" type="datetime-local" [(ngModel)]="scheduledEnd" />
             </label>
           </div>
-
-          <div class="grid gap-2 md:grid-cols-3">
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Recurrence</span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="recurrenceRule" [(ngModel)]="form.recurrenceRule">
-                <option value="">None</option>
-                <option value="DAILY">Daily</option>
-                <option value="WEEKLY">Weekly</option>
-                <option value="MONTHLY">Monthly</option>
-              </select>
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Every</span>
-              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceInterval" type="number" min="1" [(ngModel)]="form.recurrenceInterval" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Until</span>
-              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceUntil" type="date" [(ngModel)]="form.recurrenceUntil" />
-            </label>
-          </div>
+          @if (workOrder()?.source === 'RECURRING') {
+            <p class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+              This is a draft generated from a recurring work template. Recurrence rules are managed from the Schedule board.
+            </p>
+          }
         </div>
       }
 
@@ -197,7 +189,21 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
             </select>
           </div>
 
-          <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
+          <label class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            <input class="mt-1" type="checkbox" name="allowAvailabilityOverride" [(ngModel)]="allowAvailabilityOverride" />
+            <span>
+              <span class="block font-black">Allow dispatch override</span>
+              <span class="mt-0.5 block text-xs leading-5">Use when operations intentionally accepts overlapping work or outside-shift scheduling.</span>
+            </span>
+          </label>
+          @if (allowAvailabilityOverride) {
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Override reason <span class="text-red-600">*</span></span>
+              <textarea class="w-full border border-amber-300 px-3 py-2 text-sm font-semibold" name="availabilityOverrideReason" rows="2" [(ngModel)]="availabilityOverrideReason"></textarea>
+            </label>
+          }
+
+          <div class="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
           @for (worker of filteredWorkers(); track worker.id) {
             <label class="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <input type="checkbox" [checked]="selectedWorkerIds.has(worker.id)" (change)="toggleWorker(worker.id, $event)" />
@@ -388,8 +394,9 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
           }
         </div>
       }
+      </div>
 
-      <div class="flex justify-between gap-2 border-t border-slate-200 pt-3">
+      <div class="-mx-4 -mb-4 flex flex-none justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
         <button pButton type="button" severity="secondary" icon="pi pi-arrow-left" label="Back" [disabled]="step === 0" (click)="step = step - 1"></button>
         <div class="flex gap-2">
           @if (step < steps.length - 1) {
@@ -431,12 +438,16 @@ export class WorkOrderFormComponent {
   protected workerSearch = '';
   protected workerEngagementFilter = 'ALL';
   protected workerAvailabilityFilter = 'AVAILABLE';
+  protected allowAvailabilityOverride = false;
+  protected availabilityOverrideReason = '';
+  protected formError = '';
   protected inventorySearch = '';
   protected inventoryStockFilter = 'AVAILABLE';
   protected assetSearch = '';
   protected assetTypeFilter = 'ALL';
   protected assetAvailabilityFilter = 'AVAILABLE';
   private loadedWorkOrderId: string | null = null;
+  private titleTouched = false;
 
   constructor() {
     effect(() => {
@@ -561,7 +572,39 @@ export class WorkOrderFormComponent {
   }
 
   submit(): void {
-    if (!this.form.propertyId || !this.form.title.trim() || this.saving() || this.isLockedWorkOrder()) {
+    this.formError = '';
+    if (this.saving() || this.isLockedWorkOrder()) {
+      return;
+    }
+    if (!this.ownerId) {
+      this.step = 0;
+      this.formError = 'Owner is required.';
+      return;
+    }
+    if (!this.form.propertyId) {
+      this.step = 0;
+      this.formError = 'Property is required.';
+      return;
+    }
+    if (!this.form.title.trim()) {
+      this.step = 0;
+      this.formError = 'Work order title is required.';
+      return;
+    }
+    const availabilityWarnings = this.selectedAvailabilityWarnings();
+    if (!this.allowAvailabilityOverride && availabilityWarnings.length > 0) {
+      const confirmed = window.confirm(`Selected worker schedule warning:\n\n${availabilityWarnings.join('\n')}\n\nSave anyway with dispatch override?`);
+      if (!confirmed) {
+        return;
+      }
+      this.allowAvailabilityOverride = true;
+      this.formError = 'Dispatch override reason is required.';
+      this.step = 2;
+      return;
+    }
+    if (this.allowAvailabilityOverride && !this.availabilityOverrideReason.trim()) {
+      this.step = 2;
+      this.formError = 'Dispatch override reason is required.';
       return;
     }
     const workerIds = [...this.selectedWorkerIds];
@@ -579,6 +622,8 @@ export class WorkOrderFormComponent {
       recurrenceRule: this.form.recurrenceRule || undefined,
       recurrenceInterval: this.form.recurrenceRule ? this.form.recurrenceInterval || 1 : undefined,
       recurrenceUntil: this.form.recurrenceRule ? this.form.recurrenceUntil || undefined : undefined,
+      allowAvailabilityOverride: this.allowAvailabilityOverride || undefined,
+      allowAvailabilityOverrideReason: this.allowAvailabilityOverride ? this.availabilityOverrideReason.trim() : undefined,
       scheduledStart: this.scheduledStart ? new Date(this.scheduledStart).toISOString() : undefined,
       scheduledEnd: this.scheduledEnd ? new Date(this.scheduledEnd).toISOString() : undefined,
       materials: this.materialRows
@@ -607,6 +652,8 @@ export class WorkOrderFormComponent {
 
   reset(): void {
     this.loadedWorkOrderId = null;
+    this.formError = '';
+    this.titleTouched = false;
     this.step = 0;
     this.ownerId = '';
     this.form = this.blankForm();
@@ -621,6 +668,8 @@ export class WorkOrderFormComponent {
     this.workerSearch = '';
     this.workerEngagementFilter = 'ALL';
     this.workerAvailabilityFilter = 'AVAILABLE';
+    this.allowAvailabilityOverride = false;
+    this.availabilityOverrideReason = '';
     this.inventorySearch = '';
     this.inventoryStockFilter = 'AVAILABLE';
     this.assetSearch = '';
@@ -631,6 +680,7 @@ export class WorkOrderFormComponent {
   protected onOwnerChange(): void {
     this.form.propertyId = '';
     this.form.serviceTypeId = '';
+    this.syncSuggestedTitle();
     this.pruneWorkers();
   }
 
@@ -638,7 +688,31 @@ export class WorkOrderFormComponent {
     const property = this.selectedProperty();
     this.ownerId = property?.ownerId || this.ownerId;
     this.form.serviceTypeId = '';
+    this.syncSuggestedTitle();
     this.pruneWorkers();
+  }
+
+  protected onServiceChange(): void {
+    this.syncSuggestedTitle();
+    this.pruneWorkers();
+  }
+
+  protected onTitleChange(value: string): void {
+    this.titleTouched = true;
+    this.form.title = value;
+  }
+
+  private syncSuggestedTitle(): void {
+    if (this.titleTouched && this.form.title.trim()) {
+      return;
+    }
+    const property = this.selectedProperty();
+    if (!property) {
+      this.form.title = '';
+      return;
+    }
+    const service = this.serviceTypes().find((candidate) => candidate.id === this.form.serviceTypeId);
+    this.form.title = `${service?.name || 'General service'} - ${property.name}`;
   }
 
   protected toggleWorker(workerId: string, event: Event): void {
@@ -735,12 +809,31 @@ export class WorkOrderFormComponent {
       return { available: true, label: 'Schedule open' };
     }
     if (!coversShift(worker, this.scheduledStart, this.scheduledEnd)) {
-      return { available: false, label: 'Outside shift' };
+      return { available: this.allowAvailabilityOverride, label: this.allowAvailabilityOverride ? 'Override: outside shift' : 'Outside shift' };
     }
     if (this.hasScheduleConflict(worker.id)) {
-      return { available: false, label: 'Conflict' };
+      return { available: this.allowAvailabilityOverride, label: this.allowAvailabilityOverride ? 'Override: conflict' : 'Conflict' };
     }
     return { available: true, label: 'Available' };
+  }
+
+  private selectedAvailabilityWarnings(): string[] {
+    if (!this.scheduledStart || !this.scheduledEnd) {
+      return [];
+    }
+    return [...this.selectedWorkerIds]
+      .map((workerId) => this.workers().find((worker) => worker.id === workerId))
+      .filter((worker): worker is WorkerRecord => Boolean(worker))
+      .map((worker) => {
+        if (!coversShift(worker, this.scheduledStart, this.scheduledEnd)) {
+          return `${worker.displayName}: outside shift`;
+        }
+        if (this.hasScheduleConflict(worker.id)) {
+          return `${worker.displayName}: overlapping work order`;
+        }
+        return '';
+      })
+      .filter(Boolean);
   }
 
   protected isLowStock(item: InventoryItem): boolean {
@@ -749,6 +842,8 @@ export class WorkOrderFormComponent {
 
   private loadWorkOrder(workOrder: WorkOrderRecord): void {
     this.loadedWorkOrderId = workOrder.id;
+    this.formError = '';
+    this.titleTouched = true;
     this.step = clampStep(this.initialStep());
     this.resourceTab = this.initialResourceTab();
     this.ownerId = workOrder.ownerId;
@@ -771,6 +866,8 @@ export class WorkOrderFormComponent {
     };
     this.scheduledStart = toDateTimeInput(workOrder.scheduledStart);
     this.scheduledEnd = toDateTimeInput(workOrder.scheduledEnd);
+    this.allowAvailabilityOverride = false;
+    this.availabilityOverrideReason = '';
     this.selectedWorkerIds.clear();
     for (const assignment of workOrder.assignments.filter(isActiveAssignment)) {
       this.selectedWorkerIds.add(assignment.workerId);

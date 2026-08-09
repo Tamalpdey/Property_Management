@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { PropertyOwner } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -50,7 +50,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                     <div class="flex items-center gap-3">
                       <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-teal-50 text-sm font-bold text-teal-700">{{ owner.displayName.slice(0, 1) }}</span>
                       <div class="min-w-0">
-                        <p class="truncate font-bold text-slate-950">{{ owner.displayName }}</p>
+                        <div class="flex items-center gap-2">
+                          <p class="truncate font-bold text-slate-950">{{ owner.displayName }}</p>
+                          <p-tag [value]="owner.active ? 'ACTIVE' : 'INACTIVE'" [severity]="owner.active ? 'success' : 'secondary'" />
+                        </div>
                         <p class="truncate text-xs text-slate-500">{{ owner.notes || 'No notes' }}</p>
                       </div>
                     </div>
@@ -97,6 +100,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class OwnerListComponent {
   owners = input.required<PropertyOwner[]>();
+  readonly editOwner = output<PropertyOwner>();
+  readonly activateOwner = output<PropertyOwner>();
+  readonly deactivateOwner = output<PropertyOwner>();
+  readonly deleteOwner = output<PropertyOwner>();
   protected readonly selectedOwner = signal<PropertyOwner | null>(null);
   protected readonly ownerMenuItems = signal<MenuItem[]>([]);
   protected readonly collection = new DenseCollectionState<PropertyOwner>(
@@ -121,10 +128,13 @@ export class OwnerListComponent {
   protected openOwnerMenu(owner: PropertyOwner, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedOwner.set(owner);
     this.ownerMenuItems.set([
-      { label: 'Update owner', icon: 'pi pi-pencil', disabled: true },
+      { label: 'Update owner', icon: 'pi pi-pencil', command: () => this.editOwner.emit(owner) },
       { label: 'View properties', icon: 'pi pi-building', disabled: true },
       { separator: true },
-      { label: 'Deactivate owner', icon: 'pi pi-ban', disabled: true }
+      owner.active
+        ? { label: 'Deactivate owner', icon: 'pi pi-ban', command: () => this.deactivateOwner.emit(owner) }
+        : { label: 'Activate owner', icon: 'pi pi-check-circle', command: () => this.activateOwner.emit(owner) },
+      { label: 'Delete owner', icon: 'pi pi-trash', command: () => this.deleteOwner.emit(owner) }
     ]);
     menu.toggle(event);
   }

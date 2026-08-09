@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, CreateTenantUserRequest, TenantRoleOption, TenantUserRecord } from '@lorne/contracts';
+import { ApiResponse, CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -23,6 +23,30 @@ export class TenantUserService {
   create(request: CreateTenantUserRequest) {
     return this.http
       .post<ApiResponse<TenantUserRecord>>(`${environment.apiBaseUrl}/tenant/users`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  update(userId: string, request: UpdateTenantUserRequest) {
+    return this.http
+      .patch<ApiResponse<TenantUserRecord>>(`${environment.apiBaseUrl}/tenant/users/${userId}`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  activate(userId: string) {
+    return this.http
+      .post<ApiResponse<TenantUserRecord>>(`${environment.apiBaseUrl}/tenant/users/${userId}/activate`, {})
+      .pipe(map((response) => response.data));
+  }
+
+  deactivate(userId: string) {
+    return this.http
+      .post<ApiResponse<TenantUserRecord>>(`${environment.apiBaseUrl}/tenant/users/${userId}/deactivate`, {})
+      .pipe(map((response) => response.data));
+  }
+
+  delete(userId: string) {
+    return this.http
+      .delete<ApiResponse<void>>(`${environment.apiBaseUrl}/tenant/users/${userId}`)
       .pipe(map((response) => response.data));
   }
 }

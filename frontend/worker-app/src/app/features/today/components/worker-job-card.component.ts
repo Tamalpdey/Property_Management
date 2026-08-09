@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { WorkerAssignedJob } from '@lorne/contracts';
 import { TagModule } from 'primeng/tag';
 import { CardModule } from 'primeng/card';
+import { workerFacingStatus } from '../worker-job-ui';
 
 @Component({
   selector: 'lorne-worker-job-card',
@@ -19,6 +20,9 @@ import { CardModule } from 'primeng/card';
           </div>
           <div class="flex items-start justify-between gap-2 sm:block sm:text-right">
             <p-tag [value]="statusLabel()" [severity]="statusSeverity()" />
+            @if (showOverallStatus()) {
+              <span class="mt-2 inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[0.68rem] font-black uppercase text-slate-200">Order: {{ overallStatusLabel() }}</span>
+            }
             <p class="mt-2 text-sm font-black text-white">{{ windowLabel() }}</p>
           </div>
         </div>
@@ -111,13 +115,22 @@ export class WorkerJobCardComponent {
   }
 
   protected statusLabel(): string {
-    return this.job().status === 'PENDING_COMPLETION'
+    const status = workerFacingStatus(this.job());
+    return status === 'PENDING_COMPLETION'
       ? 'submitted for review'
-      : this.job().status.toLowerCase().replaceAll('_', ' ');
+      : status.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected showOverallStatus(): boolean {
+    return workerFacingStatus(this.job()) !== this.job().status;
+  }
+
+  protected overallStatusLabel(): string {
+    return this.job().status.toLowerCase().replaceAll('_', ' ');
   }
 
   protected statusSeverity(): 'success' | 'info' | 'warn' | 'danger' | 'secondary' | 'contrast' {
-    switch (this.job().status) {
+    switch (workerFacingStatus(this.job())) {
       case 'COMPLETED':
       case 'APPROVED':
       case 'PAID':

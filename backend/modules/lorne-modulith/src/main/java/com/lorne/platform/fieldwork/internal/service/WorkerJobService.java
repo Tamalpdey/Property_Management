@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class WorkerJobService {
+    private static final int EVIDENCE_LIMIT_PER_GROUP = 15;
+
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final DocumentStorageService documentStorageService;
@@ -81,6 +83,7 @@ public class WorkerJobService {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 List.of()
         ), tenantId, worker.id(), start, end);
         return jobs.stream()
@@ -94,15 +97,14 @@ public class WorkerJobService {
             UUID userId,
             String email,
             UUID workOrderId,
-            WorkerJobActionRequest request
+        WorkerJobActionRequest request
     ) {
         var worker = worker(tenantId, userId, email);
         var action = normalizeAction(request.action());
-        if (!isViewAction(action)) {
-            workerShiftClockService.requireClockedIn(tenantId, userId, email);
-        }
+        workerShiftClockService.requireClockedIn(tenantId, userId, email);
         requireAssigned(tenantId, worker.id(), workOrderId);
         var now = Instant.now();
+        requireActionAllowed(tenantId, worker.id(), workOrderId, action, now);
         actionRequestContext.set(request);
         try {
             switch (action) {
@@ -111,7 +113,7 @@ public class WorkerJobService {
                 case "VIEW_COMPLETION_CHECKLIST" -> recordViewAction(tenantId, worker, workOrderId, "WORKER_VIEWED_COMPLETION_CHECKLIST", "Completion checklist viewed.", now);
                 case "VIEW_TIMELINE" -> recordViewAction(tenantId, worker, workOrderId, "WORKER_VIEWED_TIMELINE", "Execution timeline viewed.", now);
                 case "START_TRAVEL" -> updateWorkState(tenantId, worker, workOrderId, "TRAVELING", "ACCEPTED", now, action, request.note());
-                case "ARRIVE_ON_SITE" -> updateWorkState(tenantId, worker, workOrderId, "ON_SITE", "ACCEPTED", now, action, request.note());
+                case "ARRIVE_ON_SITE" -> updateWorkState(tenantId, worker, workOrderId, "ON_SITE", "ON_SITE", now, action, request.note());
                 case "START_WORK" -> {
                     var remainingPreStartChecks = remainingRequiredChecklistCount(tenantId, worker.id(), workOrderId, "PRE_START");
                     if (remainingPreStartChecks > 0) {
@@ -151,6 +153,45 @@ public class WorkerJobService {
         requireAssigned(tenantId, worker.id(), workOrderId);
     }
 
+    @Transactional(readOnly = true)
+    public void requireEvidenceUploadAllowed(UUID tenantId, UUID userId, String email, UUID workOrderId) {
+        var worker = worker(tenantId, userId, email);
+        requireAssigned(tenantId, worker.id(), workOrderId);
+        requireActionAllowed(tenantId, worker.id(), workOrderId, "ADD_PHOTO", Instant.now());
+    }
+
+    @Transactional(readOnly = true)
+    public void requireEvidenceLimitAvailable(UUID tenantId, UUID workOrderId, String documentType, String photoType) {
+        var normalizedDocumentType = blankToNull(documentType) == null ? "WORK_PHOTO" : documentType.trim().toUpperCase();
+        if ("PURCHASE_RECEIPT".equals(normalizedDocumentType)) {
+            if (receiptCount(tenantId, workOrderId) >= EVIDENCE_LIMIT_PER_GROUP) {
+                throw new BadRequestException("This work order already has 15 purchase receipts. Delete one before uploading another.");
+            }
+            return;
+        }
+        var normalizedPhotoType = blankToNull(photoType) == null ? "OTHER" : photoType.trim().toUpperCase();
+        if (photoCount(tenantId, workOrderId, normalizedPhotoType) >= EVIDENCE_LIMIT_PER_GROUP) {
+            throw new BadRequestException("This work order already has 15 %s photos. Delete one before uploading another.".formatted(normalizedPhotoType.toLowerCase()));
+        }
+    }
+
+    @Transactional
+    public WorkerJobActionResponse deleteEvidence(UUID tenantId, UUID userId, String email, UUID workOrderId, UUID documentId) {
+        var worker = worker(tenantId, userId, email);
+        workerShiftClockService.requireClockedIn(tenantId, userId, email);
+        requireAssigned(tenantId, worker.id(), workOrderId);
+        var now = Instant.now();
+        requireActionAllowed(tenantId, worker.id(), workOrderId, "DELETE_EVIDENCE", now);
+        requireWorkerCreatedEvidence(tenantId, worker.userId(), workOrderId, documentId);
+        var deleted = documentStorageService.deleteWorkOrderDocument(tenantId, workOrderId, documentId);
+        auditAction(tenantId, worker, workOrderId, "WORKER_EVIDENCE_DELETED", Map.of(
+                "documentId", deleted.documentId().toString(),
+                "objectKey", deleted.objectKey(),
+                "actionAt", now.toString()
+        ));
+        return new WorkerJobActionResponse(job(tenantId, worker, workOrderId), "Evidence deleted.");
+    }
+
     private void updateWorkState(
             UUID tenantId,
             WorkerRef worker,
@@ -186,6 +227,114 @@ public class WorkerJobService {
         ));
     }
 
+    private void requireActionAllowed(UUID tenantId, UUID workerId, UUID workOrderId, String action, Instant actionAt) {
+        if (isViewAction(action)) {
+            return;
+        }
+        var gate = actionGate(tenantId, workerId, workOrderId);
+        if (isFutureServiceDate(tenantId, gate.scheduledStart(), actionAt)) {
+            throw new BadRequestException("This job is scheduled for a future date. You can view it now, but field actions unlock on the service date.");
+        }
+        if (Set.of("CANCELLED", "APPROVED", "CUSTOMER_NOTIFIED", "INVOICED", "PAID").contains(gate.status())) {
+            throw new BadRequestException("This job is closed for worker actions.");
+        }
+        if (Set.of("PENDING_COMPLETION", "COMPLETED").contains(gate.status())
+                && !isEvidenceAction(action)
+                && terminalAssignmentStatus(gate.assignmentStatus())) {
+            throw new BadRequestException("This job is submitted for review. Only photos and purchase receipts can still be added.");
+        }
+    }
+
+    private ActionGate actionGate(UUID tenantId, UUID workerId, UUID workOrderId) {
+        return jdbcTemplate.query("""
+                SELECT wo.status::text AS status, wo.scheduled_start, woa.assignment_status::text AS assignment_status
+                FROM work_orders wo
+                JOIN work_order_assignments woa ON woa.tenant_id = wo.tenant_id AND woa.work_order_id = wo.id
+                WHERE wo.tenant_id = ? AND wo.id = ? AND woa.worker_id = ?
+                """, rs -> {
+            if (!rs.next()) {
+                throw new ResourceNotFoundException("Assigned job not found.");
+            }
+            return new ActionGate(
+                    rs.getString("status"),
+                    instant("scheduled_start", rs),
+                    rs.getString("assignment_status")
+            );
+        }, tenantId, workOrderId, workerId);
+    }
+
+    private boolean isFutureServiceDate(UUID tenantId, Instant scheduledStart, Instant actionAt) {
+        if (scheduledStart == null) {
+            return false;
+        }
+        var zoneId = tenantZoneId(tenantId);
+        return scheduledStart.atZone(zoneId).toLocalDate().isAfter(actionAt.atZone(zoneId).toLocalDate());
+    }
+
+    private boolean isEvidenceAction(String action) {
+        return "ADD_PHOTO".equals(action) || "ADD_PURCHASE_RECEIPT".equals(action) || "DELETE_EVIDENCE".equals(action);
+    }
+
+    private void requireWorkerCreatedEvidence(UUID tenantId, UUID userId, UUID workOrderId, UUID documentId) {
+        var ownsPhoto = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM work_order_photos
+                    WHERE tenant_id = ? AND work_order_id = ? AND document_id = ? AND created_by = ?
+                )
+                """, Boolean.class, tenantId, workOrderId, documentId, userId));
+        var ownsReceipt = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM audit_logs
+                    WHERE tenant_id = ?
+                      AND resource_type = 'WORK_ORDER'
+                      AND resource_id = ?
+                      AND action = 'WORKER_PURCHASE_RECEIPT_UPLOADED'
+                      AND actor_user_id = ?
+                      AND metadata ->> 'documentId' = ?
+                )
+                """, Boolean.class, tenantId, workOrderId, userId, documentId.toString()));
+        if (!ownsPhoto && !ownsReceipt) {
+            throw new ResourceNotFoundException("Uploaded evidence was not found for this worker.");
+        }
+    }
+
+    private int photoCount(UUID tenantId, UUID workOrderId, String photoType) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM work_order_photos
+                WHERE tenant_id = ? AND work_order_id = ? AND photo_type = ?
+                """, Integer.class, tenantId, workOrderId, photoType);
+        return count == null ? 0 : count;
+    }
+
+    private int workerPhotoCount(UUID tenantId, UUID workOrderId, UUID userId, String photoType) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM work_order_photos
+                WHERE tenant_id = ? AND work_order_id = ? AND created_by = ? AND photo_type = ?
+                """, Integer.class, tenantId, workOrderId, userId, photoType);
+        return count == null ? 0 : count;
+    }
+
+    private int receiptCount(UUID tenantId, UUID workOrderId) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM audit_logs al
+                JOIN documents d ON d.id = (al.metadata ->> 'documentId')::uuid
+                  AND d.tenant_id = al.tenant_id
+                  AND d.owner_type = 'WORK_ORDER'
+                  AND d.owner_id = al.resource_id
+                WHERE al.tenant_id = ?
+                  AND al.resource_type = 'WORK_ORDER'
+                  AND al.resource_id = ?
+                  AND al.action = 'WORKER_PURCHASE_RECEIPT_UPLOADED'
+                  AND jsonb_exists(al.metadata, 'documentId')
+                """, Integer.class, tenantId, workOrderId);
+        return count == null ? 0 : count;
+    }
+
     private void completeChecklist(UUID tenantId, WorkerRef worker, UUID userId, UUID workOrderId, UUID taskId, Instant actionAt) {
         if (taskId == null) {
             throw new BadRequestException("Checklist item is required.");
@@ -213,11 +362,18 @@ public class WorkerJobService {
         if (remainingRequiredChecks > 0) {
             throw new BadRequestException("Complete all required completion checks before submitting this work order.");
         }
-        jdbcTemplate.update("""
+        if (workerPhotoCount(tenantId, workOrderId, worker.userId(), "AFTER") == 0) {
+            throw new BadRequestException("Add at least one after photo before submitting this work order.");
+        }
+        var updatedAssignment = jdbcTemplate.update("""
                 UPDATE work_order_assignments
                 SET assignment_status = 'COMPLETED'::work_order_assignment_status, updated_by = ?, updated_at = now()
                 WHERE tenant_id = ? AND work_order_id = ? AND worker_id = ?
+                  AND assignment_status NOT IN ('COMPLETED', 'RELEASED', 'DECLINED', 'LEFT_EMERGENCY')
                 """, userId, tenantId, workOrderId, worker.id());
+        if (updatedAssignment == 0) {
+            throw new BadRequestException("This worker assignment is already closed.");
+        }
         endOpenTimeEntry(tenantId, worker.id(), workOrderId, userId, actionAt);
 
         var allAssignmentsCompleted = allWorkerAssignmentsCompleted(tenantId, workOrderId);
@@ -382,6 +538,7 @@ public class WorkerJobService {
         }
         documentStorageService.requireWorkOrderDocument(tenantId, workOrderId, request.documentId());
         var photoType = blankToNull(request.photoType()) == null ? "OTHER" : request.photoType().trim().toUpperCase();
+        requireEvidenceLimitAvailable(tenantId, workOrderId, "WORK_PHOTO", photoType);
         var caption = blankToNull(request.caption()) == null ? "" : request.caption().trim();
         jdbcTemplate.update("""
                 INSERT INTO work_order_photos (
@@ -411,6 +568,7 @@ public class WorkerJobService {
             throw new BadRequestException("Uploaded receipt or invoice document is required.");
         }
         documentStorageService.requireWorkOrderDocument(tenantId, workOrderId, request.documentId());
+        requireEvidenceLimitAvailable(tenantId, workOrderId, "PURCHASE_RECEIPT", null);
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("documentId", request.documentId().toString());
         metadata.put("vendorName", blankToNull(request.vendorName()) == null ? "" : request.vendorName().trim());
@@ -519,7 +677,7 @@ public class WorkerJobService {
                 FROM work_order_assignments
                 WHERE tenant_id = ?
                   AND work_order_id = ?
-                  AND assignment_status NOT IN ('COMPLETED', 'RELEASED', 'DECLINED')
+                  AND assignment_status NOT IN ('COMPLETED', 'RELEASED', 'DECLINED', 'LEFT_EMERGENCY')
                 """, Integer.class, tenantId, workOrderId);
         return remaining == null || remaining == 0;
     }
@@ -530,7 +688,7 @@ public class WorkerJobService {
                 FROM work_order_assignments
                 WHERE tenant_id = ?
                   AND work_order_id = ?
-                  AND assignment_status IN ('ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'PAUSED')
+                  AND assignment_status IN ('ASSIGNED', 'ACCEPTED', 'ON_SITE', 'IN_PROGRESS', 'PAUSED')
                 """, Integer.class, tenantId, workOrderId);
         return count == null ? 0 : count;
     }
@@ -567,6 +725,7 @@ public class WorkerJobService {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 List.of()
         ), tenantId, worker.id(), workOrderId);
         return jobs.stream().findFirst()
@@ -594,6 +753,7 @@ public class WorkerJobService {
                 materials(tenantId, job.id()),
                 assets(tenantId, job.id()),
                 fieldNotes(tenantId, actorUserId, job.id()),
+                evidence(tenantId, actorUserId, job.id()),
                 executionEvents(tenantId, job.id())
         );
     }
@@ -669,6 +829,53 @@ public class WorkerJobService {
         ), tenantId, workOrderId);
     }
 
+    private List<WorkerAssignedJobDto.EvidenceDto> evidence(UUID tenantId, UUID actorUserId, UUID workOrderId) {
+        return jdbcTemplate.query("""
+                SELECT *
+                FROM (
+                    SELECT d.id AS document_id, 'WORK_PHOTO' AS document_type, wop.photo_type, wop.caption,
+                           d.bucket, d.object_key, d.content_type, d.byte_size,
+                           coalesce(au.display_name, 'Field worker') AS created_by_name,
+                           wop.created_at,
+                           (wop.created_by = ?) AS can_delete
+                    FROM work_order_photos wop
+                    JOIN documents d ON d.id = wop.document_id AND d.tenant_id = wop.tenant_id
+                    LEFT JOIN app_users au ON au.id = wop.created_by
+                    WHERE wop.tenant_id = ? AND wop.work_order_id = ?
+                    UNION ALL
+                    SELECT d.id AS document_id, 'PURCHASE_RECEIPT' AS document_type, NULL::text AS photo_type,
+                           coalesce(al.metadata ->> 'caption', al.metadata ->> 'vendorName', '') AS caption,
+                           d.bucket, d.object_key, d.content_type, d.byte_size,
+                           coalesce(au.display_name, 'Field worker') AS created_by_name,
+                           al.created_at,
+                           (al.actor_user_id = ?) AS can_delete
+                    FROM audit_logs al
+                    JOIN documents d ON d.id = (al.metadata ->> 'documentId')::uuid
+                      AND d.tenant_id = al.tenant_id
+                      AND d.owner_type = 'WORK_ORDER'
+                      AND d.owner_id = al.resource_id
+                    LEFT JOIN app_users au ON au.id = al.actor_user_id
+                    WHERE al.tenant_id = ?
+                      AND al.resource_type = 'WORK_ORDER'
+                      AND al.resource_id = ?
+                      AND al.action = 'WORKER_PURCHASE_RECEIPT_UPLOADED'
+                      AND jsonb_exists(al.metadata, 'documentId')
+                ) evidence
+                ORDER BY created_at DESC
+                """, (rs, rowNum) -> new WorkerAssignedJobDto.EvidenceDto(
+                rs.getObject("document_id", UUID.class),
+                rs.getString("document_type"),
+                rs.getString("photo_type"),
+                rs.getString("caption"),
+                documentStorageService.createReadUrl(rs.getString("bucket"), rs.getString("object_key")),
+                rs.getString("content_type"),
+                (Long) rs.getObject("byte_size"),
+                rs.getString("created_by_name"),
+                instant("created_at", rs),
+                rs.getBoolean("can_delete")
+        ), actorUserId, tenantId, workOrderId, actorUserId, tenantId, workOrderId);
+    }
+
     private List<WorkerAssignedJobDto.ExecutionEventDto> executionEvents(UUID tenantId, UUID workOrderId) {
         return jdbcTemplate.query("""
                 WITH ready_event AS (
@@ -715,6 +922,7 @@ public class WorkerJobService {
                         'WORKER_TOOL_RETURNED',
                         'WORKER_PHOTO_CAPTURED',
                         'WORKER_PURCHASE_RECEIPT_UPLOADED',
+                        'WORKER_EVIDENCE_DELETED',
                         'WORKER_NOTE_ADDED',
                         'WORKER_NOTE_UPDATED',
                         'WORKER_COMPLETE_WORK',
@@ -756,6 +964,7 @@ public class WorkerJobService {
             case "WORKER_TOOL_RETURNED" -> "Tool returned";
             case "WORKER_PHOTO_CAPTURED" -> "Photo added";
             case "WORKER_PURCHASE_RECEIPT_UPLOADED" -> "Receipt uploaded";
+            case "WORKER_EVIDENCE_DELETED" -> "Evidence deleted";
             case "WORKER_NOTE_ADDED" -> "Note added";
             case "WORKER_NOTE_UPDATED" -> "Note updated";
             case "WORKER_COMPLETE_WORK" -> "Submitted work";
@@ -876,6 +1085,10 @@ public class WorkerJobService {
         ).contains(action);
     }
 
+    private boolean terminalAssignmentStatus(String assignmentStatus) {
+        return Set.of("COMPLETED", "RELEASED", "DECLINED", "LEFT_EMERGENCY").contains(assignmentStatus);
+    }
+
     private String message(String action) {
         return switch (action) {
             case "VIEW_DISPATCH" -> "Dispatch view recorded.";
@@ -921,5 +1134,8 @@ public class WorkerJobService {
     }
 
     private record ChecklistTaskRef(String label, String phase) {
+    }
+
+    private record ActionGate(String status, Instant scheduledStart, String assignmentStatus) {
     }
 }

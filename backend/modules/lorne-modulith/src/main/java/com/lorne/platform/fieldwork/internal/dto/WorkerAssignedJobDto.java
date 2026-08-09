@@ -24,6 +24,7 @@ public record WorkerAssignedJobDto(
         List<MaterialDto> materials,
         List<AssetDto> assets,
         List<FieldNoteDto> fieldNotes,
+        List<EvidenceDto> evidence,
         List<ExecutionEventDto> executionEvents
 ) {
     public record ChecklistItemDto(
@@ -63,6 +64,20 @@ public record WorkerAssignedJobDto(
             Instant createdAt,
             Instant updatedAt,
             boolean canEdit
+    ) {
+    }
+
+    public record EvidenceDto(
+            UUID documentId,
+            String documentType,
+            String photoType,
+            String caption,
+            String viewUrl,
+            String contentType,
+            Long byteSize,
+            String createdByName,
+            Instant createdAt,
+            boolean canDelete
     ) {
     }
 

@@ -1,9 +1,13 @@
 package com.lorne.platform.worker.internal.service;
 
 import com.lorne.platform.audit.AuditWriter;
+import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.DuplicateResourceException;
+import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
+import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,7 +41,8 @@ public class WorkerManagementService {
                        COALESCE(u.phone, w.phone) AS phone,
                        COALESCE(u.email, w.email) AS email,
                        w.status, w.engagement_type::text AS engagement_type,
-                       w.max_weekly_hours, w.hourly_rate, w.hire_date
+                       w.max_weekly_hours, w.hourly_rate, w.hire_date,
+                       w.leave_start_date, w.leave_end_date, w.leave_reason
                 FROM workers w
                 LEFT JOIN app_users u ON u.id = w.user_id
                 WHERE w.tenant_id = ?
@@ -54,6 +59,9 @@ public class WorkerManagementService {
                 (Integer) rs.getObject("max_weekly_hours"),
                 rs.getBigDecimal("hourly_rate"),
                 rs.getObject("hire_date", java.time.LocalDate.class),
+                rs.getObject("leave_start_date", java.time.LocalDate.class),
+                rs.getObject("leave_end_date", java.time.LocalDate.class),
+                rs.getString("leave_reason"),
                 emergencyContacts.get(rs.getObject("id", UUID.class)),
                 certifications.getOrDefault(rs.getObject("id", UUID.class), List.of()),
                 serviceSkills.getOrDefault(rs.getObject("id", UUID.class), List.of()),
@@ -107,6 +115,104 @@ public class WorkerManagementService {
         }
     }
 
+    @Transactional
+    public WorkerDto update(UUID tenantId, UUID actorUserId, UUID workerId, CreateWorkerRequest request) {
+        requireWorker(tenantId, workerId);
+        try {
+            var updated = jdbcTemplate.update("""
+                    UPDATE workers
+                    SET employee_number = ?, display_name = ?, phone = ?, email = ?,
+                        engagement_type = ?::worker_engagement_type, max_weekly_hours = ?, hourly_rate = ?, hire_date = ?,
+                        updated_at = now(), updated_by = ?
+                    WHERE tenant_id = ? AND id = ?
+                    """,
+                    blankToNull(request.employeeNumber()),
+                    request.displayName(),
+                    blankToNull(request.phone()),
+                    blankToNull(request.email()),
+                    engagementType(request.engagementType()),
+                    request.maxWeeklyHours(),
+                    request.hourlyRate(),
+                    request.hireDate(),
+                    actorUserId,
+                    tenantId,
+                    workerId
+            );
+            if (updated != 1) {
+                throw new ResourceNotFoundException("Worker not found.");
+            }
+            replaceEmergencyContact(tenantId, workerId, request.emergencyContact());
+            replaceCertifications(tenantId, workerId, request.certifications());
+            replaceServiceSkills(tenantId, workerId, actorUserId, request.serviceTypeIds());
+            replaceShifts(tenantId, workerId, actorUserId, request.shifts());
+            syncLinkedUserContact(tenantId, actorUserId, workerId, request.displayName(), blankToNull(request.phone()), blankToNull(request.email()));
+            auditWriter.record(tenantId, actorUserId, "WORKER_UPDATED", "WORKER", workerId, Map.of(
+                    "displayName", request.displayName(),
+                    "employeeNumber", request.employeeNumber() == null ? "" : request.employeeNumber(),
+                    "engagementType", engagementType(request.engagementType()),
+                    "serviceSkillCount", request.serviceTypeIds() == null ? 0 : request.serviceTypeIds().stream().distinct().count(),
+                    "shiftCount", request.shifts() == null ? 0 : request.shifts().size()
+            ));
+            return find(tenantId, workerId);
+        } catch (DuplicateKeyException exception) {
+            throw new DuplicateResourceException("Worker employee number already exists.");
+        }
+    }
+
+    @Transactional
+    public WorkerDto updateStatus(UUID tenantId, UUID actorUserId, UUID workerId, UpdateWorkerStatusRequest request) {
+        requireWorker(tenantId, workerId);
+        var status = normalizeStatus(request.status());
+        var leaveStartDate = request.leaveStartDate();
+        var leaveEndDate = request.leaveEndDate();
+        var leaveReason = blankToNull(request.leaveReason());
+        if ("ON_LEAVE".equals(status)) {
+            if (leaveStartDate == null || leaveEndDate == null) {
+                throw new BadRequestException("Leave start and end dates are required.");
+            }
+            if (leaveEndDate.isBefore(leaveStartDate)) {
+                throw new BadRequestException("Leave end date must be on or after leave start date.");
+            }
+        } else {
+            leaveStartDate = null;
+            leaveEndDate = null;
+            leaveReason = null;
+        }
+        jdbcTemplate.update("""
+                UPDATE workers
+                SET status = ?::worker_status,
+                    leave_start_date = ?,
+                    leave_end_date = ?,
+                    leave_reason = ?,
+                    updated_at = now(),
+                    updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """, status, leaveStartDate, leaveEndDate, leaveReason, actorUserId, tenantId, workerId);
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("status", status);
+        if ("ON_LEAVE".equals(status)) {
+            metadata.put("leaveStartDate", leaveStartDate);
+            metadata.put("leaveEndDate", leaveEndDate);
+            metadata.put("leaveReason", leaveReason == null ? "" : leaveReason);
+        }
+        auditWriter.record(tenantId, actorUserId, "WORKER_STATUS_UPDATED", "WORKER", workerId, metadata);
+        return find(tenantId, workerId);
+    }
+
+    @Transactional
+    public void delete(UUID tenantId, UUID actorUserId, UUID workerId) {
+        requireWorker(tenantId, workerId);
+        if (hasOperationalHistory(tenantId, workerId)) {
+            throw new BadRequestException("Worker has work, clock, or payroll history. Deactivate or terminate the worker instead.");
+        }
+        jdbcTemplate.update("UPDATE assets SET assigned_worker_id = NULL WHERE tenant_id = ? AND assigned_worker_id = ?", tenantId, workerId);
+        var deleted = jdbcTemplate.update("DELETE FROM workers WHERE tenant_id = ? AND id = ?", tenantId, workerId);
+        if (deleted != 1) {
+            throw new ResourceNotFoundException("Worker not found.");
+        }
+        auditWriter.record(tenantId, actorUserId, "WORKER_DELETED", "WORKER", workerId, Map.of());
+    }
+
     private void createEmergencyContact(UUID tenantId, UUID workerId, CreateWorkerRequest.EmergencyContactRequest request) {
         if (request == null || request.contactName() == null || request.contactName().isBlank() || request.phone() == null || request.phone().isBlank()) {
             return;
@@ -115,6 +221,11 @@ public class WorkerManagementService {
                 INSERT INTO worker_emergency_contacts (tenant_id, worker_id, contact_name, relationship, phone)
                 VALUES (?, ?, ?, ?, ?)
                 """, tenantId, workerId, request.contactName(), blankToNull(request.relationship()), request.phone());
+    }
+
+    private void replaceEmergencyContact(UUID tenantId, UUID workerId, CreateWorkerRequest.EmergencyContactRequest request) {
+        jdbcTemplate.update("DELETE FROM worker_emergency_contacts WHERE tenant_id = ? AND worker_id = ?", tenantId, workerId);
+        createEmergencyContact(tenantId, workerId, request);
     }
 
     private void createCertifications(UUID tenantId, UUID workerId, List<CreateWorkerRequest.CertificationRequest> requests) {
@@ -130,6 +241,11 @@ public class WorkerManagementService {
                     VALUES (?, ?, ?, ?, ?, ?)
                     """, tenantId, workerId, request.certificationName(), blankToNull(request.issuedBy()), request.issuedOn(), request.expiresOn());
         }
+    }
+
+    private void replaceCertifications(UUID tenantId, UUID workerId, List<CreateWorkerRequest.CertificationRequest> requests) {
+        jdbcTemplate.update("DELETE FROM worker_certifications WHERE tenant_id = ? AND worker_id = ?", tenantId, workerId);
+        createCertifications(tenantId, workerId, requests);
     }
 
     private void createServiceSkills(UUID tenantId, UUID workerId, UUID actorUserId, List<UUID> serviceTypeIds) {
@@ -148,6 +264,11 @@ public class WorkerManagementService {
                     ON CONFLICT (tenant_id, worker_id, service_type_id) DO NOTHING
                     """, tenantId, workerId, actorUserId, actorUserId, tenantId, serviceTypeId);
         }
+    }
+
+    private void replaceServiceSkills(UUID tenantId, UUID workerId, UUID actorUserId, List<UUID> serviceTypeIds) {
+        jdbcTemplate.update("DELETE FROM worker_service_skills WHERE tenant_id = ? AND worker_id = ?", tenantId, workerId);
+        createServiceSkills(tenantId, workerId, actorUserId, serviceTypeIds);
     }
 
     private void createShifts(UUID tenantId, UUID workerId, UUID actorUserId, List<CreateWorkerRequest.ShiftTemplateRequest> shifts) {
@@ -175,6 +296,11 @@ public class WorkerManagementService {
                     actorUserId
             );
         }
+    }
+
+    private void replaceShifts(UUID tenantId, UUID workerId, UUID actorUserId, List<CreateWorkerRequest.ShiftTemplateRequest> shifts) {
+        jdbcTemplate.update("DELETE FROM worker_shift_templates WHERE tenant_id = ? AND worker_id = ?", tenantId, workerId);
+        createShifts(tenantId, workerId, actorUserId, shifts);
     }
 
     private Map<UUID, WorkerDto.EmergencyContactDto> emergencyContactsByWorker(UUID tenantId) {
@@ -256,5 +382,53 @@ public class WorkerManagementService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private String normalizeStatus(String value) {
+        var status = value == null ? "" : value.trim().toUpperCase();
+        if (!List.of("ACTIVE", "INACTIVE", "ON_LEAVE", "TERMINATED").contains(status)) {
+            throw new BadRequestException("Worker status is not supported.");
+        }
+        return status;
+    }
+
+    private void requireWorker(UUID tenantId, UUID workerId) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM workers
+                WHERE tenant_id = ? AND id = ?
+                """, Integer.class, tenantId, workerId);
+        if (count == null || count == 0) {
+            throw new ResourceNotFoundException("Worker not found.");
+        }
+    }
+
+    private WorkerDto find(UUID tenantId, UUID workerId) {
+        return list(tenantId).stream()
+                .filter(worker -> worker.id().equals(workerId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Worker not found."));
+    }
+
+    private boolean hasOperationalHistory(UUID tenantId, UUID workerId) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT (
+                    (SELECT count(*) FROM work_order_assignments WHERE tenant_id = ? AND worker_id = ?) +
+                    (SELECT count(*) FROM work_order_time_entries WHERE tenant_id = ? AND worker_id = ?) +
+                    (SELECT count(*) FROM worker_shift_clock_entries WHERE tenant_id = ? AND worker_id = ?) +
+                    (SELECT count(*) FROM payroll_records WHERE tenant_id = ? AND worker_id = ?)
+                )::int
+                """, Integer.class, tenantId, workerId, tenantId, workerId, tenantId, workerId, tenantId, workerId);
+        return count != null && count > 0;
+    }
+
+    private void syncLinkedUserContact(UUID tenantId, UUID actorUserId, UUID workerId, String displayName, String phone, String email) {
+        jdbcTemplate.update("""
+                UPDATE app_users u
+                SET display_name = ?, phone = COALESCE(?, u.phone), email = COALESCE(?, u.email),
+                    updated_at = now(), updated_by = ?
+                FROM workers w
+                WHERE w.tenant_id = ? AND w.id = ? AND w.user_id = u.id
+                """, displayName, phone, email, actorUserId, tenantId, workerId);
     }
 }

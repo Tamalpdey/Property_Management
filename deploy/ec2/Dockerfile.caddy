@@ -1,4 +1,4 @@
 ARG CADDYFILE=Caddyfile
-FROM caddy:2-alpine
+FROM caddy:2
 ARG CADDYFILE
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
