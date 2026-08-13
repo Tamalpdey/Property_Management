@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { WorkerAssignedJob, WorkerJobAction, WorkerStepKey, WorkOrderStatus } from '@lorne/contracts';
+import type { WorkerAssignedJob, WorkerJobAction, WorkerStepKey, WorkOrderStatus } from '@lorne/contracts';
 
 export const WORKER_STEPS: Array<{ key: WorkerStepKey; label: string; icon: string }> = [
   { key: 'ready', label: 'Ready', icon: 'pi pi-check-circle' },
@@ -168,11 +168,18 @@ export function dateValue(value?: string): number {
 }
 
 export function workerErrorMessage(error: unknown, fallback: string): string {
+  const rawMessage = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (rawMessage.toLowerCase().includes('unable to add filesystem') || rawMessage.toLowerCase().includes('illegal path')) {
+    return 'The selected file could not be uploaded. Choose the photo again from your camera or gallery and try once more.';
+  }
   if (error instanceof HttpErrorResponse) {
     const body = error.error as { error?: { message?: string; fields?: Array<{ field: string; message: string }> } } | undefined;
     const fieldMessage = body?.error?.fields?.[0]?.message;
     const apiMessage = fieldMessage || body?.error?.message;
     if (apiMessage) {
+      if (apiMessage.toLowerCase().includes('unable to add filesystem') || apiMessage.toLowerCase().includes('illegal path')) {
+        return 'The selected file could not be uploaded. Choose the photo again from your camera or gallery and try once more.';
+      }
       return apiMessage;
     }
     if (error.status === 0) {

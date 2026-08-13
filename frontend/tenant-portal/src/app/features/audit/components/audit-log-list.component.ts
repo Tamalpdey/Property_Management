@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { AuditLogRecord } from '@lorne/contracts';
+import type { AuditLogRecord } from '@lorne/contracts';
 import { TagModule } from 'primeng/tag';
 import { DenseCollectionFooterComponent } from '../../../shared/collection/dense-collection-footer.component';
 import { DenseCollectionState } from '../../../shared/collection/dense-collection-state';

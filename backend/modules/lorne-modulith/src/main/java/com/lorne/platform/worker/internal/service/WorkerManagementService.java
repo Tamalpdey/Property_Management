@@ -6,7 +6,10 @@ import com.lorne.platform.shared.exception.DuplicateResourceException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
 import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
+import com.lorne.platform.worker.internal.dto.WorkerActivityDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -67,6 +70,69 @@ public class WorkerManagementService {
                 serviceSkills.getOrDefault(rs.getObject("id", UUID.class), List.of()),
                 shifts.getOrDefault(rs.getObject("id", UUID.class), List.of())
         ), tenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkerClockEntryDto> clockEntries(UUID tenantId, UUID workerId, LocalDate from, LocalDate to) {
+        requireWorker(tenantId, workerId);
+        var fromDate = from == null ? LocalDate.now() : from;
+        var toDate = to == null ? fromDate : to;
+        if (toDate.isBefore(fromDate)) {
+            throw new BadRequestException("Clock entry end date must be on or after start date.");
+        }
+        return jdbcTemplate.query("""
+                SELECT wsce.id, wsce.worker_id, wsce.started_at, wsce.ended_at,
+                       CASE WHEN wsce.ended_at IS NULL THEN NULL
+                            ELSE floor(extract(epoch from (wsce.ended_at - wsce.started_at)) / 60)::bigint
+                       END AS duration_minutes
+                FROM worker_shift_clock_entries wsce
+                JOIN tenants t ON t.id = wsce.tenant_id
+                WHERE wsce.tenant_id = ?
+                  AND wsce.worker_id = ?
+                  AND (wsce.started_at AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date <= ?
+                  AND (COALESCE(wsce.ended_at, now()) AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date >= ?
+                ORDER BY wsce.started_at
+                """, (rs, rowNum) -> new WorkerClockEntryDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("worker_id", UUID.class),
+                instant("started_at", rs),
+                instant("ended_at", rs),
+                (Long) rs.getObject("duration_minutes")
+        ), tenantId, workerId, toDate, fromDate);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkerActivityDto> activities(UUID tenantId, UUID workerId, LocalDate from, LocalDate to) {
+        requireWorker(tenantId, workerId);
+        var fromDate = from == null ? LocalDate.now() : from;
+        var toDate = to == null ? fromDate : to;
+        if (toDate.isBefore(fromDate)) {
+            throw new BadRequestException("Activity end date must be on or after start date.");
+        }
+        return jdbcTemplate.query("""
+                SELECT id, worker_id, activity_type, title, location_name, address, notes, started_at, ended_at,
+                       CASE WHEN ended_at IS NULL THEN NULL
+                            ELSE floor(extract(epoch from (ended_at - started_at)) / 60)::bigint
+                       END AS duration_minutes
+                FROM worker_daily_activities
+                WHERE tenant_id = ?
+                  AND worker_id = ?
+                  AND activity_date >= ?
+                  AND activity_date <= ?
+                ORDER BY started_at
+                """, (rs, rowNum) -> new WorkerActivityDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("worker_id", UUID.class),
+                rs.getString("activity_type"),
+                rs.getString("title"),
+                rs.getString("location_name"),
+                rs.getString("address"),
+                rs.getString("notes"),
+                instant("started_at", rs),
+                instant("ended_at", rs),
+                (Long) rs.getObject("duration_minutes"),
+                rs.getTimestamp("ended_at") == null
+        ), tenantId, workerId, fromDate, toDate);
     }
 
     @Transactional
@@ -162,6 +228,7 @@ public class WorkerManagementService {
     @Transactional
     public WorkerDto updateStatus(UUID tenantId, UUID actorUserId, UUID workerId, UpdateWorkerStatusRequest request) {
         requireWorker(tenantId, workerId);
+        var linkedUserId = linkedUserId(tenantId, workerId);
         var status = normalizeStatus(request.status());
         var leaveStartDate = request.leaveStartDate();
         var leaveEndDate = request.leaveEndDate();
@@ -188,6 +255,9 @@ public class WorkerManagementService {
                     updated_by = ?
                 WHERE tenant_id = ? AND id = ?
                 """, status, leaveStartDate, leaveEndDate, leaveReason, actorUserId, tenantId, workerId);
+        if (!"ACTIVE".equals(status) && linkedUserId != null) {
+            revokeWorkerRefreshSessions(linkedUserId, tenantId);
+        }
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("status", status);
         if ("ON_LEAVE".equals(status)) {
@@ -202,6 +272,7 @@ public class WorkerManagementService {
     @Transactional
     public void delete(UUID tenantId, UUID actorUserId, UUID workerId) {
         requireWorker(tenantId, workerId);
+        var linkedUserId = linkedUserId(tenantId, workerId);
         if (hasOperationalHistory(tenantId, workerId)) {
             throw new BadRequestException("Worker has work, clock, or payroll history. Deactivate or terminate the worker instead.");
         }
@@ -209,6 +280,9 @@ public class WorkerManagementService {
         var deleted = jdbcTemplate.update("DELETE FROM workers WHERE tenant_id = ? AND id = ?", tenantId, workerId);
         if (deleted != 1) {
             throw new ResourceNotFoundException("Worker not found.");
+        }
+        if (linkedUserId != null) {
+            revokeWorkerRefreshSessions(linkedUserId, tenantId);
         }
         auditWriter.record(tenantId, actorUserId, "WORKER_DELETED", "WORKER", workerId, Map.of());
     }
@@ -246,6 +320,28 @@ public class WorkerManagementService {
     private void replaceCertifications(UUID tenantId, UUID workerId, List<CreateWorkerRequest.CertificationRequest> requests) {
         jdbcTemplate.update("DELETE FROM worker_certifications WHERE tenant_id = ? AND worker_id = ?", tenantId, workerId);
         createCertifications(tenantId, workerId, requests);
+    }
+
+    private UUID linkedUserId(UUID tenantId, UUID workerId) {
+        var userIds = jdbcTemplate.query("""
+                SELECT user_id
+                FROM workers
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND user_id IS NOT NULL
+                """, (rs, rowNum) -> rs.getObject("user_id", UUID.class), tenantId, workerId);
+        return userIds.isEmpty() ? null : userIds.getFirst();
+    }
+
+    private void revokeWorkerRefreshSessions(UUID userId, UUID tenantId) {
+        jdbcTemplate.update("""
+                UPDATE auth_refresh_sessions
+                SET revoked_at = now()
+                WHERE user_id = ?
+                  AND tenant_id = ?
+                  AND client_type = 'WORKER'
+                  AND revoked_at IS NULL
+                """, userId, tenantId);
     }
 
     private void createServiceSkills(UUID tenantId, UUID workerId, UUID actorUserId, List<UUID> serviceTypeIds) {
@@ -382,6 +478,11 @@ public class WorkerManagementService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private Instant instant(String column, java.sql.ResultSet rs) throws java.sql.SQLException {
+        var timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toInstant();
     }
 
     private String normalizeStatus(String value) {

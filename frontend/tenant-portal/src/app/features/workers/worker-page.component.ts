@@ -5,15 +5,17 @@ import { Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
-import {
+import type {
+  TenantRoleOption,
   CreateTenantUserRequest,
-  CreateWorkerRequest,
+  UpdateTenantUserRequest,
   ServiceType,
   TenantAsset,
-  TenantRoleOption,
-  UpdateTenantUserRequest,
-  UpdateWorkerStatusRequest,
   WorkerRecord,
+  CreateWorkerRequest,
+  UpdateWorkerStatusRequest,
+  CreateWorkOrderRequest,
+  WorkOrderStatus,
   WorkOrderRecord
 } from '@lorne/contracts';
 import { AssetService } from '../inventory/services/asset.service';
@@ -25,6 +27,7 @@ import { Worker360ViewComponent } from './components/worker-360-view.component';
 import { WorkerListComponent } from './components/worker-list.component';
 import { WorkerOnboardingFormComponent } from './components/worker-onboarding-form.component';
 import { WorkerManagementService } from './services/worker-management.service';
+import { TenantAccessService } from '../../core/services/tenant-access.service';
 
 type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'ALL';
 
@@ -69,10 +72,12 @@ type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'A
       } @else {
         <lorne-worker-list
           [workers]="displayedWorkers()"
+          [canManageAppLogins]="canManageAppLogins()"
           (viewWorker)="openWorker360($event)"
           (createAppLogin)="openAppLogin($event)"
           (editWorker)="openEdit($event)"
           (editWorkerSection)="openEdit($event.worker, $event.tabIndex)"
+          (assignWorkOrder)="openAssignWorkOrder($event)"
           (assignEquipment)="assignEquipment($event)"
           (updateWorkerStatus)="updateStatus($event.worker, $event.status)"
           (markWorkerOnLeave)="openLeaveDialog($event)"
@@ -104,11 +109,89 @@ type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'A
             [worker]="worker"
             [workOrders]="workOrders()"
             [assets]="assets()"
+            [canManageAppLogins]="canManageAppLogins()"
             (createAppLogin)="openAppLoginFrom360($event)"
             (editWorker)="openEditFrom360($event)"
             (editWorkerSection)="openEditSectionFrom360($event.worker, $event.tabIndex)"
+            (assignWorkOrder)="openAssignWorkOrderFrom360($event)"
             (assignEquipment)="assignEquipmentFrom360($event)"
           />
+        }
+      </p-dialog>
+
+      <p-dialog
+        header="Assign work order"
+        [modal]="true"
+        [visible]="showAssignWorkOrder()"
+        [style]="{ width: '46rem', maxWidth: '94vw', height: '34rem', maxHeight: '90vh' }"
+        [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }"
+        (visibleChange)="onAssignWorkOrderVisible($event)"
+      >
+        @if (assigningWorker(); as worker) {
+          <form class="flex min-h-0 flex-1 flex-col gap-3" (ngSubmit)="assignSelectedWorkOrder()">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p class="text-sm font-black text-slate-950">{{ worker.displayName }}</p>
+              <p class="mt-1 text-xs font-semibold text-slate-500">{{ engagementLabel(worker.engagementType) }} · {{ worker.email || 'No email linked' }}</p>
+            </div>
+
+            <label class="block">
+              <span class="mb-1 block text-sm font-bold text-slate-700">Open work order</span>
+              <select
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                name="assignWorkOrderId"
+                required
+                [ngModel]="assignWorkOrderId()"
+                (ngModelChange)="assignWorkOrderId.set($event)"
+              >
+                <option value="">Select work order</option>
+                @for (workOrder of assignableWorkOrders(worker); track workOrder.id) {
+                  <option [value]="workOrder.id">
+                    {{ workOrder.workOrderNumber }} · {{ workOrder.title }} · {{ workOrder.propertyName }}{{ workOrder.scheduledStart ? ' · ' + scheduleOptionLabel(workOrder) : ' · unscheduled' }}
+                  </option>
+                }
+              </select>
+            </label>
+
+            @if (assignableWorkOrders(worker).length === 0) {
+              <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-800">
+                No open work orders are available for this worker. Completed, cancelled, invoiced, and already assigned jobs are hidden.
+              </p>
+            } @else if (selectedAssignableWorkOrder(); as workOrder) {
+              <div class="rounded-lg border border-teal-100 bg-teal-50 px-3 py-2">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Selected work</p>
+                <p class="mt-1 text-sm font-black text-slate-950">{{ workOrder.title }}</p>
+                <p class="mt-1 text-xs font-semibold text-slate-600">{{ workOrder.propertyName }} · {{ workOrder.serviceName || 'General service' }}</p>
+                <p class="mt-1 text-xs font-semibold text-slate-600">{{ scheduleOptionLabel(workOrder) }}</p>
+              </div>
+            }
+
+            <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <input
+                class="mt-0.5 h-4 w-4"
+                type="checkbox"
+                name="assignAsLead"
+                [ngModel]="assignAsLead()"
+                (ngModelChange)="assignAsLead.set($event)"
+              />
+              <span>
+                Assign as lead worker
+                <span class="block text-xs font-semibold text-slate-500">If unchecked, the current lead stays in place. If no lead exists, this worker becomes lead automatically.</span>
+              </span>
+            </label>
+
+            <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+              Dispatch override is applied from this menu so operations can assign flexibly. Skill validation still applies.
+            </p>
+
+            @if (assignError()) {
+              <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ assignError() }}</p>
+            }
+
+            <div class="mt-auto flex justify-end gap-2 border-t border-slate-200 pt-3">
+              <button pButton type="button" severity="secondary" label="Cancel" (click)="closeAssignWorkOrder()"></button>
+              <button pButton type="submit" icon="pi pi-calendar-plus" [loading]="assignSaving()" [disabled]="assignableWorkOrders(worker).length === 0" label="Assign work order"></button>
+            </div>
+          </form>
         }
       </p-dialog>
 
@@ -172,6 +255,8 @@ export class WorkerPageComponent {
   private readonly workOrderService = inject(WorkOrderService);
   private readonly assetService = inject(AssetService);
   private readonly router = inject(Router);
+  private readonly access = inject(TenantAccessService);
+  protected readonly canManageAppLogins = this.access.canManageWorkerAppLogins;
   @ViewChild(WorkerOnboardingFormComponent) private onboardingForm?: WorkerOnboardingFormComponent;
   protected readonly workers = signal<WorkerRecord[]>([]);
   protected readonly workOrders = signal<WorkOrderRecord[]>([]);
@@ -191,9 +276,19 @@ export class WorkerPageComponent {
   protected readonly showCreate = signal(false);
   protected readonly showWorker360 = signal(false);
   protected readonly showLeaveDialog = signal(false);
+  protected readonly showAssignWorkOrder = signal(false);
   protected readonly showAppLogin = signal(false);
   protected readonly selectedWorker360 = signal<WorkerRecord | null>(null);
   protected readonly leaveWorker = signal<WorkerRecord | null>(null);
+  protected readonly assigningWorker = signal<WorkerRecord | null>(null);
+  protected readonly assignWorkOrderId = signal('');
+  protected readonly assignAsLead = signal(false);
+  protected readonly assignSaving = signal(false);
+  protected readonly assignError = signal('');
+  protected readonly selectedAssignableWorkOrder = computed(() => {
+    const workOrderId = this.assignWorkOrderId();
+    return this.workOrders().find((workOrder) => workOrder.id === workOrderId) || null;
+  });
   protected readonly selectedLoginWorker = signal<WorkerRecord | null>(null);
   protected readonly editingWorker = signal<WorkerRecord | null>(null);
   protected readonly leaveSaving = signal(false);
@@ -287,6 +382,126 @@ export class WorkerPageComponent {
     this.assignEquipment(worker);
   }
 
+  protected openAssignWorkOrderFrom360(worker: WorkerRecord): void {
+    this.showWorker360.set(false);
+    this.selectedWorker360.set(null);
+    this.openAssignWorkOrder(worker);
+  }
+
+  protected openAssignWorkOrder(worker: WorkerRecord): void {
+    this.assigningWorker.set(worker);
+    this.assignWorkOrderId.set(this.assignableWorkOrders(worker)[0]?.id || '');
+    this.assignAsLead.set(false);
+    this.assignError.set('');
+    this.showAssignWorkOrder.set(true);
+  }
+
+  protected onAssignWorkOrderVisible(visible: boolean): void {
+    this.showAssignWorkOrder.set(visible);
+    if (!visible) {
+      this.closeAssignWorkOrder();
+    }
+  }
+
+  protected closeAssignWorkOrder(): void {
+    this.showAssignWorkOrder.set(false);
+    this.assigningWorker.set(null);
+    this.assignWorkOrderId.set('');
+    this.assignAsLead.set(false);
+    this.assignError.set('');
+  }
+
+  protected assignableWorkOrders(worker: WorkerRecord): WorkOrderRecord[] {
+    return this.workOrders()
+      .filter((workOrder) => !workerAssignmentClosedStatuses.has(workOrder.status))
+      .filter((workOrder) => !workOrder.assignments.some((assignment) => assignment.workerId === worker.id))
+      .sort((left, right) => {
+        const scheduleSort = dateValue(left.scheduledStart) - dateValue(right.scheduledStart);
+        return scheduleSort || left.workOrderNumber.localeCompare(right.workOrderNumber);
+      });
+  }
+
+  protected scheduleOptionLabel(workOrder: WorkOrderRecord): string {
+    if (!workOrder.scheduledStart) {
+      return 'Unscheduled';
+    }
+    const start = new Date(workOrder.scheduledStart);
+    const end = workOrder.scheduledEnd ? new Date(workOrder.scheduledEnd) : null;
+    const startLabel = start.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const endLabel = end?.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+  }
+
+  protected engagementLabel(value: string): string {
+    return value.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected async assignSelectedWorkOrder(): Promise<void> {
+    const worker = this.assigningWorker();
+    const workOrder = this.selectedAssignableWorkOrder();
+    if (!worker || !workOrder || this.assignSaving()) {
+      return;
+    }
+
+    this.assignSaving.set(true);
+    this.assignError.set('');
+    try {
+      const request = this.workOrderAssignmentRequest(workOrder, worker);
+      const updated = await firstValueFrom(this.workOrderService.update(workOrder.id, request));
+      this.workOrders.update((workOrders) => workOrders.map((candidate) => candidate.id === updated.id ? updated : candidate));
+      this.closeAssignWorkOrder();
+    } catch (exception) {
+      this.assignError.set(apiErrorMessage(exception, 'Unable to assign work order. Check service skills, schedule, or backend status.'));
+    } finally {
+      this.assignSaving.set(false);
+    }
+  }
+
+  private workOrderAssignmentRequest(workOrder: WorkOrderRecord, worker: WorkerRecord): CreateWorkOrderRequest {
+    const assignedWorkerIds = [...new Set([...workOrder.assignments.map((assignment) => assignment.workerId), worker.id])];
+    const currentLeadWorkerId = workOrder.assignments.find((assignment) => assignment.leadWorker)?.workerId;
+    const leadWorkerId = this.assignAsLead() || !currentLeadWorkerId ? worker.id : currentLeadWorkerId;
+    return {
+      propertyId: workOrder.propertyId,
+      serviceTypeId: workOrder.serviceTypeId,
+      title: workOrder.title,
+      description: workOrder.description,
+      source: workOrder.source,
+      status: assignStatus(workOrder.status),
+      priority: workOrder.priority,
+      scheduledStart: workOrder.scheduledStart,
+      scheduledEnd: workOrder.scheduledEnd,
+      requesterName: workOrder.requesterName,
+      requesterEmail: workOrder.requesterEmail,
+      requesterPhone: workOrder.requesterPhone,
+      recurrenceRule: workOrder.recurrenceRule,
+      recurrenceInterval: workOrder.recurrenceInterval,
+      recurrenceUntil: workOrder.recurrenceUntil,
+      assignedWorkerId: assignedWorkerIds[0],
+      assignedWorkerIds,
+      leadWorkerId,
+      materials: workOrder.materials.map((material) => ({
+        id: material.id,
+        inventoryItemId: material.inventoryItemId,
+        description: material.description,
+        quantity: material.quantity,
+        unitCost: material.unitCost
+      })),
+      assetIds: workOrder.assets.map((asset) => asset.assetId),
+      tasks: [],
+      taskItems: workOrder.tasks.map((task) => ({
+        id: task.id,
+        label: task.label,
+        assignedWorkerId: task.assignedWorkerId,
+        phase: task.phase,
+        required: task.required,
+        notes: task.notes
+      })),
+      allowAvailabilityOverride: true,
+      allowAvailabilityOverrideReason: `Assigned from worker profile to ${worker.displayName}`
+    };
+  }
+
   protected openLeaveDialog(worker: WorkerRecord): void {
     const today = localDateInput(new Date());
     this.leaveWorker.set(worker);
@@ -372,11 +587,19 @@ export class WorkerPageComponent {
   }
 
   protected openAppLogin(worker: WorkerRecord): void {
+    if (!this.canManageAppLogins()) {
+      this.error.set(this.access.workerLoginDeniedMessage);
+      return;
+    }
     this.selectedLoginWorker.set(worker);
     this.showAppLogin.set(true);
   }
 
   protected async createAppLogin(request: CreateTenantUserRequest | UpdateTenantUserRequest): Promise<void> {
+    if (!this.canManageAppLogins()) {
+      this.error.set(this.access.workerLoginDeniedMessage);
+      return;
+    }
     if (this.loginSaving()) {
       return;
     }
@@ -439,3 +662,30 @@ function localDateInput(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+
+function dateValue(value?: string): number {
+  return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+}
+
+function assignStatus(status: WorkOrderStatus): WorkOrderStatus {
+  return ['DRAFT', 'PENDING', 'TO_DO', 'CREATED', 'SCHEDULED'].includes(status) ? 'ASSIGNED' : status;
+}
+
+function apiErrorMessage(exception: unknown, fallback: string): string {
+  if (typeof exception === 'object' && exception !== null && 'error' in exception) {
+    const body = (exception as { error?: { error?: { message?: unknown } } }).error;
+    const message = typeof body?.error?.message === 'string' ? body.error.message : undefined;
+    return message || fallback;
+  }
+  return fallback;
+}
+
+const workerAssignmentClosedStatuses = new Set<WorkOrderStatus>([
+  'PENDING_COMPLETION',
+  'COMPLETED',
+  'APPROVED',
+  'CUSTOMER_NOTIFIED',
+  'INVOICED',
+  'PAID',
+  'CANCELLED'
+]);

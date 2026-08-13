@@ -3,20 +3,20 @@ package com.lorne.platform.notification.internal.service;
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.notification.EmailTemplateOperations;
 import com.lorne.platform.notification.NotificationDeliveryResult;
+import com.lorne.platform.notification.OutboundEmailMessage;
+import com.lorne.platform.notification.OutboundMailOperations;
 import com.lorne.platform.notification.OwnerNotificationOperations;
 import com.lorne.platform.notification.WorkOrderCompletionEmail;
-import java.sql.Timestamp;
+import com.lorne.platform.tenant.TenantSettingsOperations;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.sql.Timestamp;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,24 +25,21 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final EmailTemplateOperations emailTemplateOperations;
-    private final ObjectProvider<JavaMailSender> mailSenderProvider;
-    private final boolean mailEnabled;
-    private final String fromAddress;
+    private final OutboundMailOperations outboundMailOperations;
+    private final TenantSettingsOperations tenantSettingsOperations;
 
     public OwnerNotificationService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
             EmailTemplateOperations emailTemplateOperations,
-            ObjectProvider<JavaMailSender> mailSenderProvider,
-            @Value("${lorne.mail.enabled:false}") boolean mailEnabled,
-            @Value("${lorne.mail.from:no-reply@lorne.local}") String fromAddress
+            OutboundMailOperations outboundMailOperations,
+            TenantSettingsOperations tenantSettingsOperations
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.emailTemplateOperations = emailTemplateOperations;
-        this.mailSenderProvider = mailSenderProvider;
-        this.mailEnabled = mailEnabled;
-        this.fromAddress = fromAddress;
+        this.outboundMailOperations = outboundMailOperations;
+        this.tenantSettingsOperations = tenantSettingsOperations;
     }
 
     @Transactional
@@ -59,33 +56,10 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
         }
 
         var template = emailTemplateOperations.ensureDefaultWorkOrderCompletedTemplate(tenantId, actorUserId);
-        var values = templateValues(email);
+        var values = templateValues(email, tenantSettingsOperations.settings(tenantId).invoiceBrandName());
         var subject = emailTemplateOperations.render(template.subject(), values);
         var body = emailTemplateOperations.render(template.body(), values);
-        var status = "RECORDED";
-        var providerMessage = "SMTP disabled. Owner completion email recorded for review.";
-        var sentAt = (Instant) null;
-
-        if (mailEnabled) {
-            try {
-                var mailSender = mailSenderProvider.getIfAvailable();
-                if (mailSender == null) {
-                    throw new IllegalStateException("JavaMailSender is not available.");
-                }
-                var message = new SimpleMailMessage();
-                message.setFrom(fromAddress);
-                message.setTo(recipient);
-                message.setSubject(subject);
-                message.setText(body);
-                mailSender.send(message);
-                status = "SENT";
-                providerMessage = "Sent by SMTP.";
-                sentAt = Instant.now();
-            } catch (RuntimeException exception) {
-                status = "FAILED";
-                providerMessage = exception.getMessage();
-            }
-        }
+        var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(recipient, subject, body, List.of()));
 
         var deliveryLogId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
@@ -102,22 +76,23 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
                 recipient,
                 subject,
                 body,
-                status,
-                providerMessage,
-                sentAt == null ? null : Timestamp.from(sentAt),
+                delivery.status(),
+                delivery.providerMessage(),
+                delivery.sentAt() == null ? null : Timestamp.from(delivery.sentAt()),
                 actorUserId,
                 actorUserId
         );
         auditWriter.record(tenantId, actorUserId, "WORK_ORDER_OWNER_NOTIFICATION_SENT", "WORK_ORDER", email.workOrderId(), Map.of(
                 "workOrderNumber", safe(email.workOrderNumber()),
                 "recipientEmail", recipient,
-                "status", status,
-                "mailEnabled", mailEnabled
+                "status", delivery.status(),
+                "provider", delivery.provider(),
+                "fromAddress", delivery.fromAddress()
         ));
-        return new NotificationDeliveryResult(deliveryLogId, status, recipient, sentAt);
+        return new NotificationDeliveryResult(deliveryLogId, delivery.status(), recipient, delivery.sentAt());
     }
 
-    private Map<String, String> templateValues(WorkOrderCompletionEmail email) {
+    private Map<String, String> templateValues(WorkOrderCompletionEmail email, String tenantName) {
         var values = new LinkedHashMap<String, String>();
         values.put("workOrderNumber", email.workOrderNumber());
         values.put("ownerName", email.ownerName());
@@ -127,7 +102,7 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
         values.put("serviceName", firstNonBlank(email.serviceName(), email.title()));
         values.put("completedAt", formatInstant(email.completedAt()));
         values.put("reviewNote", email.reviewNote() == null || email.reviewNote().isBlank() ? "" : "Review note: " + email.reviewNote());
-        values.put("tenantName", "Lorne PropertyOps");
+        values.put("tenantName", tenantName);
         return values;
     }
 

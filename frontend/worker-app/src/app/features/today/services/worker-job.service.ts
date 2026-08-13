@@ -1,6 +1,18 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, PhotoUploadRequest, PresignedPhotoUpload, WorkerAssignedJob, WorkerJobActionRequest, WorkerJobActionResponse } from '@lorne/contracts';
+import type {
+  ApiResponse,
+  PhotoUploadRequest,
+  PresignedPhotoUpload,
+  WorkerAssignedJob,
+  WorkerActivityRequest,
+  WorkerDailyLoadout,
+  WorkerJobActionRequest,
+  WorkerJobActionResponse,
+  WorkerLoadoutToolActionRequest,
+  UpsertWorkOrderMaintenanceRecordRequest,
+  WorkOrderMaintenanceRecord
+} from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -14,9 +26,57 @@ export class WorkerJobService {
       .pipe(map((response) => response.data));
   }
 
+  loadout(date: string) {
+    return this.http
+      .get<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout`, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  checkOutLoadoutTool(date: string, request: WorkerLoadoutToolActionRequest) {
+    return this.http
+      .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/tools/check-out`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  returnLoadoutTool(date: string, request: WorkerLoadoutToolActionRequest) {
+    return this.http
+      .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/tools/return`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  reportLoadoutToolIssue(date: string, request: WorkerLoadoutToolActionRequest) {
+    return this.http
+      .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/tools/report-issue`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  startActivity(date: string, request: WorkerActivityRequest) {
+    return this.http
+      .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/activities/start`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  endActivity(date: string, activityId: string, request: WorkerActivityRequest = {}) {
+    return this.http
+      .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/activities/${activityId}/end`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
   action(workOrderId: string, request: WorkerJobActionRequest) {
     return this.http
       .post<ApiResponse<WorkerJobActionResponse>>(`${environment.apiBaseUrl}/field-worker/jobs/${workOrderId}/actions`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  maintenanceRecord(workOrderId: string) {
+    return this.http
+      .get<ApiResponse<WorkOrderMaintenanceRecord | null>>(`${environment.apiBaseUrl}/field-worker/jobs/${workOrderId}/maintenance-record`)
+      .pipe(map((response) => response.data));
+  }
+
+  saveMaintenanceRecord(workOrderId: string, request: UpsertWorkOrderMaintenanceRecordRequest) {
+    return this.http
+      .put<ApiResponse<WorkOrderMaintenanceRecord>>(`${environment.apiBaseUrl}/field-worker/jobs/${workOrderId}/maintenance-record`, request)
       .pipe(map((response) => response.data));
   }
 

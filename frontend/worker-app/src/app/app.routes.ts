@@ -21,6 +21,10 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/today/worker-today.component').then((m) => m.WorkerTodayComponent)
       },
       {
+        path: 'loadout',
+        loadComponent: () => import('./features/loadout/worker-loadout.component').then((m) => m.WorkerLoadoutComponent)
+      },
+      {
         path: 'jobs/:id',
         loadComponent: () => import('./features/job-detail/worker-job-detail.component').then((m) => m.WorkerJobDetailComponent)
       }

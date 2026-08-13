@@ -13,6 +13,9 @@ import com.lorne.platform.workorder.internal.dto.CreateWorkOrderRequest;
 import com.lorne.platform.workorder.internal.dto.SendWorkOrderOwnerEmailRequest;
 import com.lorne.platform.workorder.internal.dto.WorkerAvailabilityDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderDto;
+import com.lorne.platform.workorder.internal.dto.WorkOrderEvidenceActionRequest;
+import com.lorne.platform.workorder.internal.dto.WorkOrderFieldOverrideRequest;
+import com.lorne.platform.workorder.internal.dto.WorkOrderMaintenanceRecordDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderReviewActionRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderReviewDto;
 import java.math.BigDecimal;
@@ -30,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
@@ -39,6 +43,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class WorkOrderManagementService {
     private static final TypeReference<Map<String, Object>> METADATA_TYPE = new TypeReference<>() {
     };
+    private static final Map<String, Object> EMPTY_MAINTENANCE_RECORD_TEMPLATE = Map.of(
+            "enabled", false,
+            "title", "Maintenance record",
+            "callTypes", List.of(),
+            "checks", List.of(),
+            "measurements", List.of(),
+            "chemicals", List.of(),
+            "deliveries", List.of(),
+            "noteLabel", "Client note"
+    );
     private static final List<String> DEFAULT_PRE_START_CHECKS = List.of(
             "Confirm correct property and service scope",
             "Review dispatch instructions",
@@ -60,6 +74,16 @@ public class WorkOrderManagementService {
             "DRAFT", "TO_DO", "PENDING", "SCHEDULED", "ASSIGNED", "TRAVELING", "ON_SITE", "IN_PROGRESS",
             "PAUSED", "ON_HOLD", "PENDING_COMPLETION", "COMPLETED", "APPROVED", "CUSTOMER_NOTIFIED",
             "INVOICED", "PAID", "CANCELLED"
+    );
+    private static final Set<String> WORK_ORDER_TYPES = Set.of("SERVICE", "PICKUP_DELIVERY", "INSPECTION", "FOLLOW_UP");
+    private static final Set<String> WORK_ORDER_ASSIGNMENT_STATUSES = Set.of(
+            "ASSIGNED", "ACCEPTED", "ON_SITE", "DECLINED", "IN_PROGRESS", "PAUSED", "LEFT_EMERGENCY", "COMPLETED", "RELEASED"
+    );
+    private static final Set<String> WORK_ORDER_TASK_STATUSES = Set.of(
+            "TO_DO", "IN_PROGRESS", "ON_HOLD", "PENDING_COMPLETION", "COMPLETED", "CANCELLED"
+    );
+    private static final Set<String> WORKER_ACTIVITY_TYPES = Set.of(
+            "OFFICE", "SUPPLIER", "SHOP", "WAREHOUSE", "BREAK", "OTHER"
     );
 
     private final JdbcTemplate jdbcTemplate;
@@ -88,6 +112,20 @@ public class WorkOrderManagementService {
     @Transactional(readOnly = true)
     public List<WorkOrderDto> list(UUID tenantId) {
         return workOrders(tenantId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public void requireWorkOrderExists(UUID tenantId, UUID workOrderId) {
+        var exists = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM work_orders
+                    WHERE tenant_id = ? AND id = ?
+                )
+                """, Boolean.class, tenantId, workOrderId));
+        if (!exists) {
+            throw new ResourceNotFoundException("Work order not found.");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -143,20 +181,23 @@ public class WorkOrderManagementService {
         }
 
         var source = source(request.source());
+        var workOrderType = workOrderType(request.workOrderType());
+        validatePickupRouteStops(workOrderType, request.routeStops());
         var status = status(request.status(), source, assignedWorkerIds, request.scheduledStart());
         var priority = request.priority() == null || request.priority().isBlank() ? "NORMAL" : request.priority();
         var workOrderNumber = workOrderNumberGenerator.nextNumber();
         var workOrderId = jdbcTemplate.queryForObject("""
                 INSERT INTO work_orders (
-                    tenant_id, work_order_number, customer_id, property_id, service_type_id, title, description, status, priority,
+                    tenant_id, work_order_number, work_order_type, customer_id, property_id, service_type_id, title, description, status, priority,
                     scheduled_start, scheduled_end, source, requester_name, requester_email, requester_phone, requested_at,
                     recurrence_rule, recurrence_interval, recurrence_until, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?::work_order_status, ?::work_order_priority, ?, ?, ?::work_order_source, ?, ?, ?, now(), ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::work_order_status, ?::work_order_priority, ?, ?, ?::work_order_source, ?, ?, ?, now(), ?, ?, ?, ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId,
                 workOrderNumber,
+                workOrderType,
                 property.ownerId(),
                 request.propertyId(),
                 request.serviceTypeId(),
@@ -180,6 +221,8 @@ public class WorkOrderManagementService {
         replaceAssignments(tenantId, workOrderId, actorUserId, request, assignedWorkerIds);
         replaceMaterials(tenantId, workOrderId, actorUserId, request.materials());
         replaceAssets(tenantId, workOrderId, actorUserId, request.assetIds());
+        replaceRouteStops(tenantId, workOrderId, actorUserId, request.routeStops());
+        replaceWorkOrderLinks(tenantId, workOrderId, actorUserId, request.linkedWorkOrders());
 
         var tasks = normalizedTasks(request, true);
         var insertedTaskIds = new ArrayList<UUID>();
@@ -223,6 +266,7 @@ public class WorkOrderManagementService {
         auditMetadata.put("propertyId", request.propertyId().toString());
         auditMetadata.put("status", status);
         auditMetadata.put("source", source);
+        auditMetadata.put("workOrderType", workOrderType);
         auditMetadata.put("priority", priority);
         auditMetadata.put("assignedWorkerCount", assignedWorkerIds.size());
         auditMetadata.put("availabilityOverride", allowAvailabilityOverride);
@@ -232,6 +276,8 @@ public class WorkOrderManagementService {
         auditMetadata.put("materialCount", request.materials() == null ? 0 : request.materials().size());
         auditMetadata.put("assetCount", request.assetIds() == null ? 0 : request.assetIds().size());
         auditMetadata.put("taskCount", tasks.size());
+        auditMetadata.put("routeStopCount", request.routeStops() == null ? 0 : request.routeStops().size());
+        auditMetadata.put("linkedWorkOrderCount", request.linkedWorkOrders() == null ? 0 : request.linkedWorkOrders().size());
         auditWriter.record(tenantId, actorUserId, "WORK_ORDER_CREATED", "WORK_ORDER", workOrderId, auditMetadata);
         return workOrders(tenantId, workOrderId).stream().findFirst().orElseThrow();
     }
@@ -255,11 +301,13 @@ public class WorkOrderManagementService {
         }
 
         var source = source(request.source());
+        var workOrderType = workOrderType(request.workOrderType());
+        validatePickupRouteStops(workOrderType, request.routeStops());
         var status = status(request.status(), source, assignedWorkerIds, request.scheduledStart());
         var priority = request.priority() == null || request.priority().isBlank() ? "NORMAL" : request.priority();
         jdbcTemplate.update("""
                 UPDATE work_orders
-                SET customer_id = ?, property_id = ?, service_type_id = ?, title = ?, description = ?,
+                SET customer_id = ?, property_id = ?, service_type_id = ?, work_order_type = ?, title = ?, description = ?,
                     status = ?::work_order_status, priority = ?::work_order_priority,
                     scheduled_start = ?, scheduled_end = ?, source = ?::work_order_source,
                     requester_name = ?, requester_email = ?, requester_phone = ?,
@@ -270,6 +318,7 @@ public class WorkOrderManagementService {
                 property.ownerId(),
                 request.propertyId(),
                 request.serviceTypeId(),
+                workOrderType,
                 request.title(),
                 request.description(),
                 status,
@@ -290,6 +339,8 @@ public class WorkOrderManagementService {
         replaceAssignments(tenantId, workOrderId, actorUserId, request, assignedWorkerIds);
         replaceMaterials(tenantId, workOrderId, actorUserId, request.materials());
         replaceAssets(tenantId, workOrderId, actorUserId, request.assetIds());
+        replaceRouteStops(tenantId, workOrderId, actorUserId, request.routeStops());
+        replaceWorkOrderLinks(tenantId, workOrderId, actorUserId, request.linkedWorkOrders());
         replaceTasks(tenantId, workOrderId, actorUserId, request, assignedWorkerIds);
 
         var after = workOrders(tenantId, workOrderId).stream().findFirst().orElseThrow();
@@ -312,7 +363,9 @@ public class WorkOrderManagementService {
         return new WorkOrderReviewDto(
                 workOrder,
                 fieldNotes(tenantId, workOrderId),
+                maintenanceRecords(tenantId, workOrderId),
                 evidence(tenantId, workOrderId),
+                workerActivities(tenantId, workOrder),
                 timeEntries(tenantId, workOrderId),
                 invoices(tenantId, workOrderId),
                 communications(tenantId, workOrderId),
@@ -366,7 +419,13 @@ public class WorkOrderManagementService {
     }
 
     @Transactional
-    public WorkOrderReviewDto reviewAction(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderReviewActionRequest request) {
+    public WorkOrderReviewDto reviewAction(
+            UUID tenantId,
+            UUID actorUserId,
+            List<String> actorRoles,
+            UUID workOrderId,
+            WorkOrderReviewActionRequest request
+    ) {
         var action = normalizeReviewAction(request.action());
         var note = blankToNull(request.note());
         var before = workOrders(tenantId, workOrderId).stream()
@@ -382,7 +441,11 @@ public class WorkOrderManagementService {
             throw new BadRequestException("Send back reason is required.");
         }
         var approveAndInvoice = "APPROVE_AND_INVOICE".equals(action);
+        if (approveAndInvoice && !canManageBilling(actorRoles)) {
+            throw new AccessDeniedException("Only tenant admins or finance users can generate invoices.");
+        }
         if ("APPROVE".equals(action) || approveAndInvoice) {
+            requireLinkedDependenciesComplete(tenantId, workOrderId);
             jdbcTemplate.update("""
                     UPDATE work_orders
                     SET status = 'APPROVED'::work_order_status, updated_by = ?, updated_at = now()
@@ -440,6 +503,61 @@ public class WorkOrderManagementService {
         return review(tenantId, actorUserId, workOrderId);
     }
 
+    private boolean canManageBilling(List<String> roles) {
+        return roles != null && roles.stream().anyMatch(role -> "TENANT_ADMIN".equals(role) || "FINANCE".equals(role));
+    }
+
+    @Transactional
+    public WorkOrderReviewDto evidenceAction(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderEvidenceActionRequest request) {
+        requireWorkOrderExists(tenantId, workOrderId);
+        var action = normalizeEvidenceAction(request.action());
+        documentStorageService.requireWorkOrderDocument(tenantId, workOrderId, request.documentId());
+        if ("ADD_PHOTO".equals(action)) {
+            recordAdminPhoto(tenantId, actorUserId, workOrderId, request);
+        } else {
+            recordAdminPurchaseReceipt(tenantId, actorUserId, workOrderId, request);
+        }
+        return review(tenantId, actorUserId, workOrderId);
+    }
+
+    private void recordAdminPhoto(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderEvidenceActionRequest request) {
+        var photoType = normalizePhotoType(request.photoType());
+        var caption = requiredCaption(request.caption());
+        var capturedAt = Instant.now();
+        jdbcTemplate.update("""
+                INSERT INTO work_order_photos (
+                    tenant_id, work_order_id, document_id, photo_type, caption, captured_at, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?::work_order_photo_type, ?, ?, ?, ?)
+                """,
+                tenantId,
+                workOrderId,
+                request.documentId(),
+                photoType,
+                caption,
+                timestamp(capturedAt),
+                actorUserId,
+                actorUserId
+        );
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("documentId", request.documentId());
+        metadata.put("photoType", photoType);
+        metadata.put("caption", caption);
+        metadata.put("actionAt", capturedAt);
+        auditWriter.record(tenantId, actorUserId, "ADMIN_WORK_PHOTO_UPLOADED", "WORK_ORDER", workOrderId, metadata);
+    }
+
+    private void recordAdminPurchaseReceipt(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderEvidenceActionRequest request) {
+        var caption = requiredCaption(request.caption());
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("documentId", request.documentId());
+        metadata.put("caption", caption);
+        metadata.put("vendorName", blankToNull(request.vendorName()) == null ? "" : request.vendorName().trim());
+        metadata.put("receiptAmount", request.receiptAmount() == null ? BigDecimal.ZERO : request.receiptAmount());
+        metadata.put("actionAt", Instant.now());
+        auditWriter.record(tenantId, actorUserId, "ADMIN_PURCHASE_RECEIPT_UPLOADED", "WORK_ORDER", workOrderId, metadata);
+    }
+
     private WorkOrderReviewDto overrideComplete(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderDto before, String note) {
         if (note == null) {
             throw new BadRequestException("Override completion reason is required.");
@@ -471,6 +589,571 @@ public class WorkOrderManagementService {
                 "reason", note
         ));
         return review(tenantId, actorUserId, workOrderId);
+    }
+
+    @Transactional
+    public WorkOrderReviewDto fieldOverride(UUID tenantId, UUID actorUserId, UUID workOrderId, WorkOrderFieldOverrideRequest request) {
+        var reason = blankToNull(request.reason());
+        if (reason == null) {
+            throw new BadRequestException("Override reason is required.");
+        }
+        var workOrder = workOrders(tenantId, workOrderId).stream()
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Work order not found."));
+
+        var assignmentCount = applyAssignmentOverrides(tenantId, actorUserId, workOrderId, reason, nullToEmpty(request.assignments()));
+        var activityCount = applyWorkerActivityOverrides(tenantId, actorUserId, workOrderId, nullToEmpty(request.workerActivities()));
+        var taskCount = applyTaskOverrides(tenantId, actorUserId, workOrderId, nullToEmpty(request.tasks()));
+        var routeStopCount = applyRouteStopOverrides(tenantId, actorUserId, workOrderId, nullToEmpty(request.routeStops()));
+        var materialCount = applyMaterialOverrides(tenantId, actorUserId, workOrderId, nullToEmpty(request.materials()));
+        var noteCount = applyFieldNoteOverrides(tenantId, actorUserId, workOrderId, nullToEmpty(request.fieldNotes()));
+
+        if (assignmentCount + activityCount + taskCount + routeStopCount + materialCount + noteCount == 0) {
+            throw new BadRequestException("No override changes were provided.");
+        }
+
+        auditWriter.record(tenantId, actorUserId, "WORK_ORDER_FIELD_OVERRIDE_APPLIED", "WORK_ORDER", workOrderId, Map.of(
+                "workOrderNumber", workOrder.workOrderNumber(),
+                "title", workOrder.title(),
+                "reason", reason,
+                "assignmentChanges", assignmentCount,
+                "activityChanges", activityCount,
+                "taskChanges", taskCount,
+                "routeStopChanges", routeStopCount,
+                "materialChanges", materialCount,
+                "fieldNoteChanges", noteCount
+        ));
+        return review(tenantId, actorUserId, workOrderId);
+    }
+
+    private int applyAssignmentOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            String reason,
+            List<WorkOrderFieldOverrideRequest.AssignmentOverride> assignments
+    ) {
+        var count = 0;
+        for (var assignment : assignments) {
+            if (assignment.workerId() == null) {
+                continue;
+            }
+            requireAssignedWorker(tenantId, workOrderId, assignment.workerId());
+            var status = normalizedEnum(assignment.assignmentStatus(), WORK_ORDER_ASSIGNMENT_STATUSES, "assignment status");
+            var minutes = correctedMinutes(assignment.actualArrivedAt(), assignment.actualWorkStartedAt(), assignment.actualFinishedAt(), assignment.actualWorkMinutes());
+            if (status != null || assignment.leadWorker() != null || assignment.notes() != null) {
+                jdbcTemplate.update("""
+                        UPDATE work_order_assignments
+                        SET assignment_status = COALESCE(?::work_order_assignment_status, assignment_status),
+                            lead_worker = COALESCE(?::boolean, lead_worker),
+                            notes = COALESCE(?::text, notes),
+                            updated_by = ?,
+                            updated_at = now()
+                        WHERE tenant_id = ? AND work_order_id = ? AND worker_id = ?
+                        """,
+                        status,
+                        assignment.leadWorker(),
+                        blankToNull(assignment.notes()),
+                        actorUserId,
+                        tenantId,
+                        workOrderId,
+                        assignment.workerId()
+                );
+            }
+            if (status != null || assignment.actualArrivedAt() != null || assignment.actualWorkStartedAt() != null
+                    || assignment.actualFinishedAt() != null || minutes != null) {
+                jdbcTemplate.update("""
+                        INSERT INTO work_order_assignment_overrides (
+                            tenant_id, work_order_id, worker_id, assignment_status, actual_arrived_at,
+                            actual_work_started_at, actual_finished_at, actual_work_minutes, reason, created_by, updated_by
+                        )
+                        VALUES (?, ?, ?, ?::work_order_assignment_status, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id, work_order_id, worker_id)
+                        DO UPDATE SET
+                            assignment_status = COALESCE(EXCLUDED.assignment_status, work_order_assignment_overrides.assignment_status),
+                            actual_arrived_at = COALESCE(EXCLUDED.actual_arrived_at, work_order_assignment_overrides.actual_arrived_at),
+                            actual_work_started_at = COALESCE(EXCLUDED.actual_work_started_at, work_order_assignment_overrides.actual_work_started_at),
+                            actual_finished_at = COALESCE(EXCLUDED.actual_finished_at, work_order_assignment_overrides.actual_finished_at),
+                            actual_work_minutes = COALESCE(EXCLUDED.actual_work_minutes, work_order_assignment_overrides.actual_work_minutes),
+                            reason = EXCLUDED.reason,
+                            updated_by = EXCLUDED.updated_by,
+                            updated_at = now()
+                        """,
+                        tenantId,
+                        workOrderId,
+                        assignment.workerId(),
+                        status,
+                        timestamp(assignment.actualArrivedAt()),
+                        timestamp(assignment.actualWorkStartedAt()),
+                        timestamp(assignment.actualFinishedAt()),
+                        minutes,
+                        reason,
+                        actorUserId,
+                        actorUserId
+                );
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private int applyWorkerActivityOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            List<WorkOrderFieldOverrideRequest.WorkerActivityOverride> activities
+    ) {
+        var count = 0;
+        for (var activity : activities) {
+            if (activity.activityId() == null) {
+                count += insertWorkerActivityOverride(tenantId, actorUserId, workOrderId, activity);
+                continue;
+            }
+            if (Boolean.TRUE.equals(activity.delete())) {
+                count += jdbcTemplate.update("""
+                        DELETE FROM worker_daily_activities
+                        WHERE tenant_id = ? AND id = ?
+                          AND EXISTS (
+                              SELECT 1
+                              FROM work_order_assignments woa
+                              WHERE woa.tenant_id = worker_daily_activities.tenant_id
+                                AND woa.worker_id = worker_daily_activities.worker_id
+                                AND woa.work_order_id = ?
+                          )
+                        """, tenantId, activity.activityId(), workOrderId);
+                continue;
+            }
+            if (activity.workerId() == null) {
+                continue;
+            }
+            requireAssignedWorker(tenantId, workOrderId, activity.workerId());
+            var title = blankToNull(activity.title());
+            if (title == null) {
+                continue;
+            }
+            var startedAt = activity.startedAt();
+            if (startedAt == null) {
+                throw new BadRequestException("Worker activity start time is required.");
+            }
+            var endedAt = activity.endedAt();
+            if (endedAt != null && !endedAt.isAfter(startedAt)) {
+                throw new BadRequestException("Worker activity end time must be after the start time.");
+            }
+            var activityDate = startedAt.atZone(tenantZoneId(tenantId)).toLocalDate();
+            count += jdbcTemplate.update("""
+                    UPDATE worker_daily_activities
+                    SET worker_id = ?,
+                        activity_date = ?,
+                        activity_type = ?,
+                        title = ?,
+                        location_name = ?,
+                        address = ?,
+                        notes = ?,
+                        started_at = ?::timestamptz,
+                        ended_at = ?::timestamptz,
+                        updated_by = ?,
+                        updated_at = now()
+                    WHERE tenant_id = ? AND id = ?
+                    """,
+                    activity.workerId(),
+                    activityDate,
+                    workerActivityType(activity.activityType()),
+                    title,
+                    blankToNull(activity.locationName()),
+                    blankToNull(activity.address()),
+                    blankToNull(activity.notes()),
+                    timestamp(startedAt),
+                    timestamp(endedAt),
+                    actorUserId,
+                    tenantId,
+                    activity.activityId()
+            );
+        }
+        return count;
+    }
+
+    private int insertWorkerActivityOverride(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            WorkOrderFieldOverrideRequest.WorkerActivityOverride activity
+    ) {
+        if (activity.workerId() == null) {
+            return 0;
+        }
+        requireAssignedWorker(tenantId, workOrderId, activity.workerId());
+        var title = blankToNull(activity.title());
+        if (title == null) {
+            return 0;
+        }
+        if (activity.startedAt() == null) {
+            throw new BadRequestException("Worker activity start time is required.");
+        }
+        if (activity.endedAt() != null && !activity.endedAt().isAfter(activity.startedAt())) {
+            throw new BadRequestException("Worker activity end time must be after the start time.");
+        }
+        var activityDate = activity.startedAt().atZone(tenantZoneId(tenantId)).toLocalDate();
+        jdbcTemplate.update("""
+                INSERT INTO worker_daily_activities (
+                    tenant_id, worker_id, activity_date, activity_type, title, location_name,
+                    address, notes, started_at, ended_at, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz, ?, ?)
+                """,
+                tenantId,
+                activity.workerId(),
+                activityDate,
+                workerActivityType(activity.activityType()),
+                title,
+                blankToNull(activity.locationName()),
+                blankToNull(activity.address()),
+                blankToNull(activity.notes()),
+                timestamp(activity.startedAt()),
+                timestamp(activity.endedAt()),
+                actorUserId,
+                actorUserId
+        );
+        return 1;
+    }
+
+    private int applyTaskOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            List<WorkOrderFieldOverrideRequest.TaskOverride> tasks
+    ) {
+        var count = 0;
+        for (var task : tasks) {
+            if (task.taskId() == null) {
+                continue;
+            }
+            var status = normalizedEnum(task.taskStatus(), WORK_ORDER_TASK_STATUSES, "task status");
+            var completed = task.completed();
+            var completedAt = completed == null ? task.completedAt() : Boolean.TRUE.equals(completed) ? Objects.requireNonNullElse(task.completedAt(), Instant.now()) : null;
+            var updated = jdbcTemplate.update("""
+                    UPDATE work_order_tasks
+                    SET completed = COALESCE(?::boolean, completed),
+                        completed_at = CASE
+                            WHEN ?::boolean IS TRUE THEN COALESCE(?::timestamptz, completed_at, now())
+                            WHEN ?::boolean IS FALSE THEN NULL
+                            ELSE COALESCE(?::timestamptz, completed_at)
+                        END,
+                        completed_by = CASE
+                            WHEN ?::boolean IS TRUE THEN COALESCE(completed_by, ?)
+                            WHEN ?::boolean IS FALSE THEN NULL
+                            ELSE completed_by
+                        END,
+                        task_status = COALESCE(?::work_order_task_status, task_status),
+                        notes = COALESCE(?::text, notes),
+                        updated_by = ?,
+                        updated_at = now()
+                    WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                    """,
+                    completed,
+                    completed,
+                    timestamp(completedAt),
+                    completed,
+                    timestamp(completedAt),
+                    completed,
+                    actorUserId,
+                    completed,
+                    status,
+                    blankToNull(task.notes()),
+                    actorUserId,
+                    tenantId,
+                    workOrderId,
+                    task.taskId()
+            );
+            count += updated;
+        }
+        return count;
+    }
+
+    private int applyRouteStopOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            List<WorkOrderFieldOverrideRequest.RouteStopOverride> routeStops
+    ) {
+        var count = 0;
+        for (var routeStop : routeStops) {
+            if (routeStop.routeStopId() == null) {
+                count += addOverrideRouteStop(tenantId, actorUserId, workOrderId, routeStop);
+                continue;
+            }
+            if (Boolean.TRUE.equals(routeStop.delete())) {
+                count += jdbcTemplate.update("""
+                        DELETE FROM work_order_route_stops
+                        WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                        """, tenantId, workOrderId, routeStop.routeStopId());
+                continue;
+            }
+            var updated = jdbcTemplate.update("""
+                    UPDATE work_order_route_stops
+                    SET stop_type = COALESCE(?::text, stop_type),
+                        name = COALESCE(?::text, name),
+                        address = COALESCE(?::text, address),
+                        instructions = COALESCE(?::text, instructions),
+                        planned_arrival = COALESCE(?::timestamptz, planned_arrival),
+                        arrived_at = COALESCE(?::timestamptz, arrived_at),
+                        arrived_by = CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE arrived_by END,
+                        completed_at = COALESCE(?::timestamptz, completed_at),
+                        completed_by = CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE completed_by END,
+                        skipped_at = COALESCE(?::timestamptz, skipped_at),
+                        skipped_by = CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE skipped_by END,
+                        skipped_reason = COALESCE(?::text, skipped_reason),
+                        updated_by = ?,
+                        updated_at = now()
+                    WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                    """,
+                    blankToNull(routeStop.stopType()) == null ? null : routeStopType(routeStop.stopType()),
+                    blankToNull(routeStop.name()),
+                    blankToNull(routeStop.address()),
+                    blankToNull(routeStop.instructions()),
+                    timestamp(routeStop.plannedArrival()),
+                    timestamp(routeStop.arrivedAt()),
+                    timestamp(routeStop.arrivedAt()),
+                    actorUserId,
+                    timestamp(routeStop.completedAt()),
+                    timestamp(routeStop.completedAt()),
+                    actorUserId,
+                    timestamp(routeStop.skippedAt()),
+                    timestamp(routeStop.skippedAt()),
+                    actorUserId,
+                    blankToNull(routeStop.skippedReason()),
+                    actorUserId,
+                    tenantId,
+                    workOrderId,
+                    routeStop.routeStopId()
+            );
+            count += updated;
+        }
+        return count;
+    }
+
+    private int addOverrideRouteStop(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            WorkOrderFieldOverrideRequest.RouteStopOverride routeStop
+    ) {
+        var name = blankToNull(routeStop.name());
+        if (name == null) {
+            return 0;
+        }
+        var stopOrder = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(MAX(stop_order), 0) + 1
+                FROM work_order_route_stops
+                WHERE tenant_id = ? AND work_order_id = ?
+                """, Integer.class, tenantId, workOrderId);
+        jdbcTemplate.update("""
+                INSERT INTO work_order_route_stops (
+                    tenant_id, work_order_id, stop_order, stop_type, name, address, instructions,
+                    planned_arrival, arrived_at, arrived_by, completed_at, completed_by,
+                    skipped_at, skipped_by, skipped_reason, created_by, updated_by
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE NULL END,
+                    ?, CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE NULL END,
+                    ?, CASE WHEN ?::timestamptz IS NOT NULL THEN ? ELSE NULL END,
+                    ?, ?, ?
+                )
+                """,
+                tenantId,
+                workOrderId,
+                stopOrder,
+                routeStopType(routeStop.stopType()),
+                name,
+                blankToNull(routeStop.address()),
+                blankToNull(routeStop.instructions()),
+                timestamp(routeStop.plannedArrival()),
+                timestamp(routeStop.arrivedAt()),
+                timestamp(routeStop.arrivedAt()),
+                actorUserId,
+                timestamp(routeStop.completedAt()),
+                timestamp(routeStop.completedAt()),
+                actorUserId,
+                timestamp(routeStop.skippedAt()),
+                timestamp(routeStop.skippedAt()),
+                actorUserId,
+                blankToNull(routeStop.skippedReason()),
+                actorUserId,
+                actorUserId
+        );
+        return 1;
+    }
+
+    private int applyMaterialOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            List<WorkOrderFieldOverrideRequest.MaterialOverride> materials
+    ) {
+        var count = 0;
+        for (var material : materials) {
+            if (material.materialId() == null) {
+                count += insertOverrideMaterial(tenantId, actorUserId, workOrderId, material);
+                continue;
+            }
+            var usedAt = Boolean.TRUE.equals(material.used()) ? Objects.requireNonNullElse(material.usedAt(), Instant.now()) : material.usedAt();
+            var updated = jdbcTemplate.update("""
+                    UPDATE work_order_materials
+                    SET used = COALESCE(?::boolean, used),
+                        used_at = CASE
+                            WHEN ?::boolean IS TRUE THEN COALESCE(?::timestamptz, used_at, now())
+                            WHEN ?::boolean IS FALSE THEN NULL
+                            ELSE COALESCE(?::timestamptz, used_at)
+                        END,
+                        used_by = CASE
+                            WHEN ?::boolean IS TRUE THEN COALESCE(used_by, ?)
+                            WHEN ?::boolean IS FALSE THEN NULL
+                            ELSE used_by
+                        END,
+                        quantity = COALESCE(?::numeric, quantity),
+                        unit_cost = COALESCE(?::numeric, unit_cost),
+                        updated_by = ?,
+                        updated_at = now()
+                    WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                    """,
+                    material.used(),
+                    material.used(),
+                    timestamp(usedAt),
+                    material.used(),
+                    timestamp(usedAt),
+                    material.used(),
+                    actorUserId,
+                    material.used(),
+                    material.quantity(),
+                    material.unitCost(),
+                    actorUserId,
+                    tenantId,
+                    workOrderId,
+                    material.materialId()
+            );
+            count += updated;
+        }
+        return count;
+    }
+
+    private int insertOverrideMaterial(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            WorkOrderFieldOverrideRequest.MaterialOverride material
+    ) {
+        var description = blankToNull(material.description());
+        if (description == null) {
+            return 0;
+        }
+        var quantity = material.quantity() == null || material.quantity().signum() <= 0
+                ? BigDecimal.ONE
+                : material.quantity();
+        var used = Boolean.TRUE.equals(material.used());
+        var usedAt = used ? Objects.requireNonNullElse(material.usedAt(), Instant.now()) : material.usedAt();
+        jdbcTemplate.update("""
+                INSERT INTO work_order_materials (
+                    tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost,
+                    used, used_at, used_by, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?::boolean, ?::timestamptz, ?, ?, ?)
+                """,
+                tenantId,
+                workOrderId,
+                material.inventoryItemId(),
+                description,
+                quantity,
+                material.unitCost(),
+                used,
+                timestamp(usedAt),
+                used ? actorUserId : null,
+                actorUserId,
+                actorUserId
+        );
+        return 1;
+    }
+
+    private int applyFieldNoteOverrides(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            List<WorkOrderFieldOverrideRequest.FieldNoteOverride> fieldNotes
+    ) {
+        var count = 0;
+        for (var fieldNote : fieldNotes) {
+            var note = blankToNull(fieldNote.note());
+            if (note == null) {
+                continue;
+            }
+            if (fieldNote.noteId() != null) {
+                count += jdbcTemplate.update("""
+                        UPDATE work_order_field_notes
+                        SET note = ?, updated_by = ?, updated_at = now()
+                        WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                        """, note, actorUserId, tenantId, workOrderId, fieldNote.noteId());
+            } else {
+                if (fieldNote.workerId() != null) {
+                    requireAssignedWorker(tenantId, workOrderId, fieldNote.workerId());
+                }
+                count += jdbcTemplate.update("""
+                        INSERT INTO work_order_field_notes (
+                            tenant_id, work_order_id, worker_id, note, created_by, updated_by
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """, tenantId, workOrderId, fieldNote.workerId(), note, actorUserId, actorUserId);
+            }
+        }
+        return count;
+    }
+
+    private <T> List<T> nullToEmpty(List<T> values) {
+        return values == null ? List.of() : values;
+    }
+
+    private void requireAssignedWorker(UUID tenantId, UUID workOrderId, UUID workerId) {
+        var exists = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM work_order_assignments
+                    WHERE tenant_id = ? AND work_order_id = ? AND worker_id = ?
+                )
+                """, Boolean.class, tenantId, workOrderId, workerId));
+        if (!exists) {
+            throw new BadRequestException("Worker is not assigned to this work order.");
+        }
+    }
+
+    private String normalizedEnum(String value, Set<String> allowedValues, String label) {
+        var normalized = blankToNull(value);
+        if (normalized == null) {
+            return null;
+        }
+        normalized = normalized.toUpperCase(Locale.ROOT);
+        if (!allowedValues.contains(normalized)) {
+            throw new BadRequestException("Invalid " + label + ".");
+        }
+        return normalized;
+    }
+
+    private String workerActivityType(String value) {
+        return Objects.requireNonNullElse(normalizedEnum(value, WORKER_ACTIVITY_TYPES, "worker activity type"), "OTHER");
+    }
+
+    private Long correctedMinutes(Instant arrivedAt, Instant workStartedAt, Instant finishedAt, Long requestedMinutes) {
+        if (requestedMinutes != null) {
+            if (requestedMinutes < 0) {
+                throw new BadRequestException("Actual work minutes cannot be negative.");
+            }
+            return requestedMinutes;
+        }
+        var start = workStartedAt != null ? workStartedAt : arrivedAt;
+        if (start == null || finishedAt == null) {
+            return null;
+        }
+        if (!finishedAt.isAfter(start)) {
+            throw new BadRequestException("Actual finished time must be after actual start time.");
+        }
+        return java.time.Duration.between(start, finishedAt).toMinutes();
     }
 
     @Transactional
@@ -547,12 +1230,13 @@ public class WorkOrderManagementService {
         for (var line : lines) {
             jdbcTemplate.update("""
                     INSERT INTO invoice_lines (
-                        tenant_id, invoice_id, description, quantity, unit_price, line_total, created_by, updated_by
+                        tenant_id, invoice_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate, created_by, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, false, 0, ?, ?)
                     """,
                     tenantId,
                     invoiceId,
+                    invoiceLineType(line.sourceType()),
                     line.description(),
                     line.quantity(),
                     line.unitPrice(),
@@ -589,7 +1273,8 @@ public class WorkOrderManagementService {
         var sql = new StringBuilder("""
                 SELECT wo.id, wo.customer_id, c.display_name AS owner_name, wo.property_id, p.name AS property_name,
                        p.address_line1 || ', ' || p.city AS property_address, wo.service_type_id, st.name AS service_name,
-                       wo.work_order_number, wo.title, wo.description, wo.status::text AS status, wo.source::text AS source, wo.priority::text AS priority,
+                       st.maintenance_record_template::text AS maintenance_record_template,
+                       wo.work_order_number, wo.work_order_type, wo.title, wo.description, wo.status::text AS status, wo.source::text AS source, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.requester_name, wo.requester_email, wo.requester_phone,
                        wo.recurrence_rule, wo.recurrence_interval, wo.recurrence_until
                 FROM work_orders wo
@@ -611,6 +1296,7 @@ public class WorkOrderManagementService {
         var rows = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new WorkOrderRow(
                 rs.getObject("id", UUID.class),
                 rs.getString("work_order_number"),
+                rs.getString("work_order_type"),
                 rs.getObject("customer_id", UUID.class),
                 rs.getString("owner_name"),
                 rs.getObject("property_id", UUID.class),
@@ -618,6 +1304,7 @@ public class WorkOrderManagementService {
                 rs.getString("property_address"),
                 rs.getObject("service_type_id", UUID.class),
                 rs.getString("service_name"),
+                serviceTemplate(rs.getString("maintenance_record_template")),
                 rs.getString("title"),
                 rs.getString("description"),
                 rs.getString("status"),
@@ -640,10 +1327,14 @@ public class WorkOrderManagementService {
         var materials = materialsByWorkOrder(tenantId, workOrderIds);
         var assets = assetsByWorkOrder(tenantId, workOrderIds);
         var tasks = tasksByWorkOrder(tenantId, workOrderIds);
+        var routeStops = routeStopsByWorkOrder(tenantId, workOrderIds);
+        var linkedWorkOrders = linkedWorkOrdersByWorkOrder(tenantId, workOrderIds);
+        var linkedFromWorkOrders = linkedFromWorkOrdersByWorkOrder(tenantId, workOrderIds);
         return rows.stream()
                 .map(row -> new WorkOrderDto(
                         row.id(),
                         row.workOrderNumber(),
+                        row.workOrderType(),
                         row.ownerId(),
                         row.ownerName(),
                         row.propertyId(),
@@ -651,6 +1342,7 @@ public class WorkOrderManagementService {
                         row.propertyAddress(),
                         row.serviceTypeId(),
                         row.serviceName(),
+                        row.maintenanceRecordTemplate(),
                         row.title(),
                         row.description(),
                         row.status(),
@@ -667,7 +1359,10 @@ public class WorkOrderManagementService {
                         assignments.getOrDefault(row.id(), List.of()),
                         materials.getOrDefault(row.id(), List.of()),
                         assets.getOrDefault(row.id(), List.of()),
-                        tasks.getOrDefault(row.id(), List.of())
+                        tasks.getOrDefault(row.id(), List.of()),
+                        routeStops.getOrDefault(row.id(), List.of()),
+                        linkedWorkOrders.getOrDefault(row.id(), List.of()),
+                        linkedFromWorkOrders.getOrDefault(row.id(), List.of())
                 ))
                 .toList();
     }
@@ -734,6 +1429,34 @@ public class WorkOrderManagementService {
         ), tenantId, workOrderId);
     }
 
+    private List<WorkOrderMaintenanceRecordDto> maintenanceRecords(UUID tenantId, UUID workOrderId) {
+        return jdbcTemplate.query("""
+                SELECT womr.id, womr.work_order_id, womr.worker_id, womr.actor_user_id,
+                       coalesce(w.display_name, au.display_name, 'Field worker') AS worker_name,
+                       coalesce(w.email, au.email, '') AS worker_email,
+                       womr.template_snapshot::text AS template_snapshot,
+                       womr.record_data::text AS record_data,
+                       womr.note, womr.created_at, womr.updated_at
+                FROM work_order_maintenance_records womr
+                LEFT JOIN workers w ON w.id = womr.worker_id AND w.tenant_id = womr.tenant_id
+                LEFT JOIN app_users au ON au.id = womr.actor_user_id
+                WHERE womr.tenant_id = ? AND womr.work_order_id = ?
+                ORDER BY womr.updated_at DESC
+                """, (rs, rowNum) -> new WorkOrderMaintenanceRecordDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("work_order_id", UUID.class),
+                rs.getObject("worker_id", UUID.class),
+                rs.getObject("actor_user_id", UUID.class),
+                rs.getString("worker_name"),
+                rs.getString("worker_email"),
+                serviceTemplate(rs.getString("template_snapshot")),
+                metadata(rs.getString("record_data")),
+                rs.getString("note"),
+                instant("created_at", rs),
+                instant("updated_at", rs)
+        ), tenantId, workOrderId);
+    }
+
     private List<WorkOrderReviewDto.EvidenceDto> evidence(UUID tenantId, UUID workOrderId) {
         var photos = new ArrayList<WorkOrderReviewDto.EvidenceDto>();
         jdbcTemplate.query("""
@@ -784,7 +1507,7 @@ public class WorkOrderManagementService {
                 WHERE al.tenant_id = ?
                   AND al.resource_type = 'WORK_ORDER'
                   AND al.resource_id = ?
-                  AND al.action = 'WORKER_PURCHASE_RECEIPT_UPLOADED'
+                  AND al.action IN ('WORKER_PURCHASE_RECEIPT_UPLOADED', 'ADMIN_PURCHASE_RECEIPT_UPLOADED')
                   AND jsonb_exists(al.metadata, 'documentId')
                 ORDER BY al.created_at DESC
                 """, (RowCallbackHandler) rs -> photos.add(new WorkOrderReviewDto.EvidenceDto(
@@ -807,6 +1530,62 @@ public class WorkOrderManagementService {
         return photos.stream()
                 .sorted((left, right) -> nullLast(right.createdAt()).compareTo(nullLast(left.createdAt())))
                 .toList();
+    }
+
+    private List<WorkOrderReviewDto.WorkerActivityDto> workerActivities(UUID tenantId, WorkOrderDto workOrder) {
+        var workerIds = workOrder.assignments().stream()
+                .map(WorkOrderDto.AssignmentDto::workerId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (workerIds.isEmpty()) {
+            return List.of();
+        }
+        var zoneId = tenantZoneId(tenantId);
+        var fromDate = workOrder.scheduledStart() == null
+                ? LocalDate.now(zoneId)
+                : workOrder.scheduledStart().atZone(zoneId).toLocalDate();
+        var toDate = workOrder.scheduledEnd() == null
+                ? fromDate
+                : workOrder.scheduledEnd().atZone(zoneId).toLocalDate();
+        var placeholders = String.join(",", java.util.Collections.nCopies(workerIds.size(), "?"));
+        var args = new ArrayList<Object>();
+        args.add(tenantId);
+        args.addAll(workerIds);
+        args.add(fromDate);
+        args.add(toDate);
+        return jdbcTemplate.query("""
+                SELECT wda.id, wda.worker_id,
+                       coalesce(au.display_name, w.display_name, 'Field worker') AS worker_name,
+                       coalesce(au.email, w.email, '') AS worker_email,
+                       wda.activity_type, wda.title, wda.location_name, wda.address, wda.notes,
+                       wda.started_at, wda.ended_at,
+                       CASE WHEN wda.ended_at IS NULL THEN NULL
+                            ELSE floor(extract(epoch from (wda.ended_at - wda.started_at)) / 60)::bigint
+                       END AS duration_minutes
+                FROM worker_daily_activities wda
+                JOIN workers w ON w.id = wda.worker_id AND w.tenant_id = wda.tenant_id
+                LEFT JOIN app_users au ON au.id = w.user_id
+                WHERE wda.tenant_id = ?
+                  AND wda.worker_id IN (%s)
+                  AND wda.activity_date >= ?
+                  AND wda.activity_date <= ?
+                ORDER BY wda.started_at DESC
+                """.formatted(placeholders), (rs, rowNum) -> new WorkOrderReviewDto.WorkerActivityDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("worker_id", UUID.class),
+                rs.getString("worker_name"),
+                rs.getString("worker_email"),
+                rs.getString("activity_type"),
+                rs.getString("title"),
+                rs.getString("location_name"),
+                rs.getString("address"),
+                rs.getString("notes"),
+                instant("started_at", rs),
+                instant("ended_at", rs),
+                (Long) rs.getObject("duration_minutes"),
+                instant("ended_at", rs) == null
+        ), args.toArray());
     }
 
     private List<WorkOrderReviewDto.TimeEntryDto> timeEntries(UUID tenantId, UUID workOrderId) {
@@ -862,11 +1641,22 @@ public class WorkOrderManagementService {
 
     private List<WorkOrderReviewDto.InvoiceDto> invoices(UUID tenantId, UUID workOrderId) {
         return jdbcTemplate.query("""
-                SELECT id, invoice_number, status::text AS status, issued_on::text AS issued_on,
-                       due_on::text AS due_on, subtotal::text AS subtotal, tax_total::text AS tax_total, total::text AS total
-                FROM invoices
-                WHERE tenant_id = ? AND work_order_id = ? AND status <> 'VOID'
-                ORDER BY created_at DESC
+                SELECT i.id, i.invoice_number, i.status::text AS status, i.issued_on::text AS issued_on,
+                       i.due_on::text AS due_on, i.subtotal::text AS subtotal, i.tax_total::text AS tax_total, i.total::text AS total
+                FROM invoices i
+                WHERE i.tenant_id = ?
+                  AND i.status <> 'VOID'
+                  AND (
+                    i.work_order_id = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM invoice_work_orders iwo
+                        WHERE iwo.tenant_id = i.tenant_id
+                          AND iwo.invoice_id = i.id
+                          AND iwo.work_order_id = ?
+                    )
+                  )
+                ORDER BY i.created_at DESC
                 """, (rs, rowNum) -> new WorkOrderReviewDto.InvoiceDto(
                 rs.getObject("id", UUID.class),
                 rs.getString("invoice_number"),
@@ -876,7 +1666,7 @@ public class WorkOrderManagementService {
                 rs.getString("subtotal"),
                 rs.getString("tax_total"),
                 rs.getString("total")
-        ), tenantId, workOrderId);
+        ), tenantId, workOrderId, workOrderId);
     }
 
     private List<WorkOrderReviewDto.CommunicationDto> communications(UUID tenantId, UUID workOrderId) {
@@ -899,7 +1689,17 @@ public class WorkOrderManagementService {
                 FROM email_delivery_logs edl
                 LEFT JOIN invoices i ON i.id = edl.invoice_id AND i.tenant_id = edl.tenant_id
                 WHERE edl.tenant_id = ?
-                  AND (edl.work_order_id = ? OR i.work_order_id = ?)
+                  AND (
+                    edl.work_order_id = ?
+                    OR i.work_order_id = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM invoice_work_orders iwo
+                        WHERE iwo.tenant_id = i.tenant_id
+                          AND iwo.invoice_id = i.id
+                          AND iwo.work_order_id = ?
+                    )
+                  )
                 ORDER BY edl.created_at DESC
                 LIMIT 100
                 """, (rs, rowNum) -> new WorkOrderReviewDto.CommunicationDto(
@@ -914,7 +1714,7 @@ public class WorkOrderManagementService {
                 rs.getString("provider_message"),
                 instant("sent_at", rs),
                 instant("created_at", rs)
-        ), tenantId, workOrderId, workOrderId);
+        ), tenantId, workOrderId, workOrderId, workOrderId);
     }
 
     private List<WorkOrderReviewDto.AuditEntryDto> auditEntries(UUID tenantId, UUID workOrderId) {
@@ -1008,6 +1808,13 @@ public class WorkOrderManagementService {
                 LocalDate.now().toString().replace("-", ""),
                 UUID.randomUUID().toString().substring(0, 6).toUpperCase()
         );
+    }
+
+    private String invoiceLineType(String sourceType) {
+        if ("MATERIAL".equals(sourceType)) {
+            return "MATERIAL";
+        }
+        return "LABOR";
     }
 
     private void requireWorkOrder(UUID tenantId, UUID workOrderId) {
@@ -1287,20 +2094,64 @@ public class WorkOrderManagementService {
         if (workOrderIds.isEmpty()) {
             return Map.of();
         }
+        var placeholders = placeholders(workOrderIds);
+        var args = new ArrayList<Object>();
+        args.add(tenantId);
+        args.addAll(workOrderIds);
+        args.add(tenantId);
+        args.addAll(workOrderIds);
+        args.add(tenantId);
+        args.addAll(workOrderIds);
         var assignments = new LinkedHashMap<UUID, List<WorkOrderDto.AssignmentDto>>();
         jdbcTemplate.query("""
+                WITH field_timing AS (
+                    SELECT al.resource_id AS work_order_id,
+                           (al.metadata ->> 'workerId')::uuid AS worker_id,
+                           MIN(al.created_at) FILTER (WHERE al.action = 'WORKER_ARRIVE_ON_SITE') AS actual_arrived_at,
+                           MIN(al.created_at) FILTER (WHERE al.action = 'WORKER_START_WORK') AS actual_work_started_at,
+                           MAX(al.created_at) FILTER (WHERE al.action = 'WORKER_COMPLETE_WORK') AS actual_finished_at
+                    FROM audit_logs al
+                    WHERE al.tenant_id = ?
+                      AND al.resource_type = 'WORK_ORDER'
+                      AND al.resource_id IN (%s)
+                      AND al.action IN ('WORKER_ARRIVE_ON_SITE', 'WORKER_START_WORK', 'WORKER_COMPLETE_WORK')
+                      AND jsonb_exists(al.metadata, 'workerId')
+                    GROUP BY al.resource_id, (al.metadata ->> 'workerId')::uuid
+                ),
+                work_minutes AS (
+                    SELECT wote.work_order_id, wote.worker_id,
+                           floor(sum(extract(epoch from (coalesce(wote.ended_at, now()) - wote.started_at))) / 60)::bigint AS actual_work_minutes
+                    FROM work_order_time_entries wote
+                    WHERE wote.tenant_id = ?
+                      AND wote.work_order_id IN (%s)
+                    GROUP BY wote.work_order_id, wote.worker_id
+                )
                 SELECT woa.work_order_id, woa.worker_id,
                        COALESCE(u.display_name, w.display_name) AS display_name,
                        COALESCE(u.email, w.email) AS email,
                        woa.lead_worker,
-                       woa.assignment_status::text AS assignment_status, woa.assignment_role, woa.notes
+                       COALESCE(wao.assignment_status, woa.assignment_status)::text AS assignment_status,
+                       woa.assignment_role, woa.notes,
+                       COALESCE(wao.actual_arrived_at, ft.actual_arrived_at) AS actual_arrived_at,
+                       COALESCE(wao.actual_work_started_at, ft.actual_work_started_at) AS actual_work_started_at,
+                       COALESCE(wao.actual_finished_at, ft.actual_finished_at) AS actual_finished_at,
+                       COALESCE(wao.actual_work_minutes, wm.actual_work_minutes) AS actual_work_minutes,
+                       wao.id IS NOT NULL AS timing_override,
+                       wao.reason AS override_reason,
+                       wao.updated_at AS override_updated_at
                 FROM work_order_assignments woa
                 JOIN workers w ON w.id = woa.worker_id AND w.tenant_id = woa.tenant_id
                 LEFT JOIN app_users u ON u.id = w.user_id
+                LEFT JOIN field_timing ft ON ft.work_order_id = woa.work_order_id AND ft.worker_id = woa.worker_id
+                LEFT JOIN work_minutes wm ON wm.work_order_id = woa.work_order_id AND wm.worker_id = woa.worker_id
+                LEFT JOIN work_order_assignment_overrides wao
+                    ON wao.tenant_id = woa.tenant_id
+                   AND wao.work_order_id = woa.work_order_id
+                   AND wao.worker_id = woa.worker_id
                 WHERE woa.tenant_id = ?
                   AND woa.work_order_id IN (%s)
                 ORDER BY woa.lead_worker DESC, COALESCE(u.display_name, w.display_name)
-                """.formatted(placeholders(workOrderIds)), (RowCallbackHandler) rs -> assignments.computeIfAbsent(rs.getObject("work_order_id", UUID.class), ignored -> new ArrayList<>()).add(
+                """.formatted(placeholders, placeholders, placeholders), (RowCallbackHandler) rs -> assignments.computeIfAbsent(rs.getObject("work_order_id", UUID.class), ignored -> new ArrayList<>()).add(
                 new WorkOrderDto.AssignmentDto(
                         rs.getObject("worker_id", UUID.class),
                         rs.getString("display_name"),
@@ -1308,9 +2159,16 @@ public class WorkOrderManagementService {
                         rs.getBoolean("lead_worker"),
                         rs.getString("assignment_status"),
                         rs.getString("assignment_role"),
-                        rs.getString("notes")
+                        rs.getString("notes"),
+                        instant("actual_arrived_at", rs),
+                        instant("actual_work_started_at", rs),
+                        instant("actual_finished_at", rs),
+                        (Long) rs.getObject("actual_work_minutes"),
+                        rs.getBoolean("timing_override"),
+                        rs.getString("override_reason"),
+                        instant("override_updated_at", rs)
                 )
-        ), tenantAndWorkOrderArgs(tenantId, workOrderIds));
+        ), args.toArray());
         return assignments;
     }
 
@@ -1398,6 +2256,121 @@ public class WorkOrderManagementService {
         return tasks;
     }
 
+    private Map<UUID, List<WorkOrderDto.RouteStopDto>> routeStopsByWorkOrder(UUID tenantId, Set<UUID> workOrderIds) {
+        if (workOrderIds.isEmpty()) {
+            return Map.of();
+        }
+        var routeStops = new LinkedHashMap<UUID, List<WorkOrderDto.RouteStopDto>>();
+        jdbcTemplate.query("""
+                SELECT id, work_order_id, stop_order, stop_type, name, address, instructions, planned_arrival, arrived_at, completed_at, skipped_at, skipped_reason
+                FROM work_order_route_stops
+                WHERE tenant_id = ?
+                  AND work_order_id IN (%s)
+                ORDER BY stop_order, name
+                """.formatted(placeholders(workOrderIds)), (RowCallbackHandler) rs -> routeStops.computeIfAbsent(rs.getObject("work_order_id", UUID.class), ignored -> new ArrayList<>()).add(
+                new WorkOrderDto.RouteStopDto(
+                        rs.getObject("id", UUID.class),
+                        rs.getInt("stop_order"),
+                        rs.getString("stop_type"),
+                        rs.getString("name"),
+                        rs.getString("address"),
+                        rs.getString("instructions"),
+                        instant("planned_arrival", rs),
+                        instant("arrived_at", rs),
+                        instant("completed_at", rs),
+                        instant("skipped_at", rs),
+                        rs.getString("skipped_reason")
+                )
+        ), tenantAndWorkOrderArgs(tenantId, workOrderIds));
+        return routeStops;
+    }
+
+    private Map<UUID, List<WorkOrderDto.LinkedWorkOrderDto>> linkedWorkOrdersByWorkOrder(UUID tenantId, Set<UUID> workOrderIds) {
+        if (workOrderIds.isEmpty()) {
+            return Map.of();
+        }
+        var linkedWorkOrders = new LinkedHashMap<UUID, List<WorkOrderDto.LinkedWorkOrderDto>>();
+        jdbcTemplate.query("""
+                SELECT wol.work_order_id, wol.linked_work_order_id, linked.work_order_number, linked.title,
+                       p.name AS property_name, linked.status::text AS status, wol.link_type, wol.notes
+                FROM work_order_links wol
+                JOIN work_orders linked ON linked.id = wol.linked_work_order_id AND linked.tenant_id = wol.tenant_id
+                JOIN properties p ON p.id = linked.property_id AND p.tenant_id = linked.tenant_id
+                WHERE wol.tenant_id = ?
+                  AND wol.work_order_id IN (%s)
+                ORDER BY linked.scheduled_start NULLS LAST, linked.updated_at DESC
+                """.formatted(placeholders(workOrderIds)), (RowCallbackHandler) rs -> linkedWorkOrders.computeIfAbsent(rs.getObject("work_order_id", UUID.class), ignored -> new ArrayList<>()).add(
+                new WorkOrderDto.LinkedWorkOrderDto(
+                        rs.getObject("linked_work_order_id", UUID.class),
+                        rs.getString("work_order_number"),
+                        rs.getString("title"),
+                        rs.getString("property_name"),
+                        rs.getString("status"),
+                        rs.getString("link_type"),
+                        rs.getString("notes")
+                )
+        ), tenantAndWorkOrderArgs(tenantId, workOrderIds));
+        return linkedWorkOrders;
+    }
+
+    private Map<UUID, List<WorkOrderDto.LinkedWorkOrderDto>> linkedFromWorkOrdersByWorkOrder(UUID tenantId, Set<UUID> workOrderIds) {
+        if (workOrderIds.isEmpty()) {
+            return Map.of();
+        }
+        var linkedFromWorkOrders = new LinkedHashMap<UUID, List<WorkOrderDto.LinkedWorkOrderDto>>();
+        jdbcTemplate.query("""
+                SELECT wol.linked_work_order_id AS work_order_id, wol.work_order_id AS source_work_order_id,
+                       source.work_order_number, source.title, p.name AS property_name,
+                       source.status::text AS status, wol.link_type, wol.notes
+                FROM work_order_links wol
+                JOIN work_orders source ON source.id = wol.work_order_id AND source.tenant_id = wol.tenant_id
+                JOIN properties p ON p.id = source.property_id AND p.tenant_id = source.tenant_id
+                WHERE wol.tenant_id = ?
+                  AND wol.linked_work_order_id IN (%s)
+                ORDER BY source.scheduled_start NULLS LAST, source.updated_at DESC
+                """.formatted(placeholders(workOrderIds)), (RowCallbackHandler) rs -> linkedFromWorkOrders.computeIfAbsent(rs.getObject("work_order_id", UUID.class), ignored -> new ArrayList<>()).add(
+                new WorkOrderDto.LinkedWorkOrderDto(
+                        rs.getObject("source_work_order_id", UUID.class),
+                        rs.getString("work_order_number"),
+                        rs.getString("title"),
+                        rs.getString("property_name"),
+                        rs.getString("status"),
+                        rs.getString("link_type"),
+                        rs.getString("notes")
+                )
+        ), tenantAndWorkOrderArgs(tenantId, workOrderIds));
+        return linkedFromWorkOrders;
+    }
+
+    private void requireLinkedDependenciesComplete(UUID tenantId, UUID workOrderId) {
+        var openDependencies = jdbcTemplate.query("""
+                SELECT blocking.work_order_number, blocking.title, blocking.status::text AS status
+                FROM (
+                    SELECT wol.work_order_id AS dependency_work_order_id
+                    FROM work_order_links wol
+                    WHERE wol.tenant_id = ?
+                      AND wol.linked_work_order_id = ?
+                      AND wol.link_type IN ('BLOCKS', 'PICKUP_FOR')
+                    UNION ALL
+                    SELECT wol.linked_work_order_id AS dependency_work_order_id
+                    FROM work_order_links wol
+                    WHERE wol.tenant_id = ?
+                      AND wol.work_order_id = ?
+                      AND wol.link_type = 'FOLLOWS'
+                ) dependency
+                JOIN work_orders blocking ON blocking.id = dependency.dependency_work_order_id AND blocking.tenant_id = ?
+                WHERE blocking.status::text NOT IN ('PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID')
+                ORDER BY blocking.scheduled_start NULLS LAST, blocking.updated_at DESC
+                """, (rs, rowNum) -> "%s %s (%s)".formatted(
+                rs.getString("work_order_number"),
+                rs.getString("title"),
+                rs.getString("status")
+        ), tenantId, workOrderId, tenantId, workOrderId, tenantId);
+        if (!openDependencies.isEmpty()) {
+            throw new BadRequestException("Complete linked dependency work first: " + String.join("; ", openDependencies));
+        }
+    }
+
     private void auditWorkOrderChanges(
             UUID tenantId,
             UUID actorUserId,
@@ -1414,6 +2387,10 @@ public class WorkOrderManagementService {
         var assetAfter = assetAudit(after.assets());
         var taskBefore = taskAudit(before.tasks());
         var taskAfter = taskAudit(after.tasks());
+        var routeStopBefore = routeStopAudit(before.routeStops());
+        var routeStopAfter = routeStopAudit(after.routeStops());
+        var linkedWorkOrderBefore = linkedWorkOrderAudit(before.linkedWorkOrders());
+        var linkedWorkOrderAfter = linkedWorkOrderAudit(after.linkedWorkOrders());
 
         var collectionNames = new ArrayList<String>();
         if (!assignmentBefore.equals(assignmentAfter)) {
@@ -1427,6 +2404,12 @@ public class WorkOrderManagementService {
         }
         if (!taskBefore.equals(taskAfter)) {
             collectionNames.add("tasks");
+        }
+        if (!routeStopBefore.equals(routeStopAfter)) {
+            collectionNames.add("routeStops");
+        }
+        if (!linkedWorkOrderBefore.equals(linkedWorkOrderAfter)) {
+            collectionNames.add("linkedWorkOrders");
         }
         if (fieldChanges.isEmpty() && collectionNames.isEmpty()) {
             return;
@@ -1444,6 +2427,8 @@ public class WorkOrderManagementService {
         auditCollectionChange(tenantId, actorUserId, workOrderId, after, "WORK_ORDER_MATERIALS_UPDATED", materialBefore, materialAfter);
         auditCollectionChange(tenantId, actorUserId, workOrderId, after, "WORK_ORDER_ASSETS_UPDATED", assetBefore, assetAfter);
         auditCollectionChange(tenantId, actorUserId, workOrderId, after, "WORK_ORDER_TASKS_UPDATED", taskBefore, taskAfter);
+        auditCollectionChange(tenantId, actorUserId, workOrderId, after, "WORK_ORDER_ROUTE_STOPS_UPDATED", routeStopBefore, routeStopAfter);
+        auditCollectionChange(tenantId, actorUserId, workOrderId, after, "WORK_ORDER_LINKS_UPDATED", linkedWorkOrderBefore, linkedWorkOrderAfter);
     }
 
     private void auditCollectionChange(
@@ -1474,6 +2459,7 @@ public class WorkOrderManagementService {
         putChange(changes, "propertyName", before.propertyName(), after.propertyName());
         putChange(changes, "serviceTypeId", before.serviceTypeId(), after.serviceTypeId());
         putChange(changes, "serviceName", before.serviceName(), after.serviceName());
+        putChange(changes, "workOrderType", before.workOrderType(), after.workOrderType());
         putChange(changes, "title", before.title(), after.title());
         putChange(changes, "description", before.description(), after.description());
         putChange(changes, "status", before.status(), after.status());
@@ -1575,6 +2561,42 @@ public class WorkOrderManagementService {
                 .toList();
     }
 
+    private List<Map<String, Object>> routeStopAudit(List<WorkOrderDto.RouteStopDto> routeStops) {
+        return routeStops.stream()
+                .map(routeStop -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", routeStop.id().toString());
+                    item.put("stopOrder", routeStop.stopOrder());
+                    item.put("stopType", routeStop.stopType());
+                    item.put("name", routeStop.name());
+                    item.put("address", routeStop.address());
+                    item.put("instructions", routeStop.instructions());
+                    item.put("plannedArrival", routeStop.plannedArrival() == null ? null : routeStop.plannedArrival().toString());
+                    item.put("arrivedAt", routeStop.arrivedAt() == null ? null : routeStop.arrivedAt().toString());
+                    item.put("completedAt", routeStop.completedAt() == null ? null : routeStop.completedAt().toString());
+                    item.put("skippedAt", routeStop.skippedAt() == null ? null : routeStop.skippedAt().toString());
+                    item.put("skippedReason", routeStop.skippedReason());
+                    return item;
+                })
+                .toList();
+    }
+
+    private List<Map<String, Object>> linkedWorkOrderAudit(List<WorkOrderDto.LinkedWorkOrderDto> linkedWorkOrders) {
+        return linkedWorkOrders.stream()
+                .map(linkedWorkOrder -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("linkedWorkOrderId", linkedWorkOrder.linkedWorkOrderId().toString());
+                    item.put("workOrderNumber", linkedWorkOrder.workOrderNumber());
+                    item.put("title", linkedWorkOrder.title());
+                    item.put("propertyName", linkedWorkOrder.propertyName());
+                    item.put("status", linkedWorkOrder.status());
+                    item.put("linkType", linkedWorkOrder.linkType());
+                    item.put("notes", linkedWorkOrder.notes());
+                    return item;
+                })
+                .toList();
+    }
+
     private Instant instant(String column, java.sql.ResultSet rs) throws java.sql.SQLException {
         var timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toInstant();
@@ -1601,6 +2623,7 @@ public class WorkOrderManagementService {
     private record WorkOrderRow(
             UUID id,
             String workOrderNumber,
+            String workOrderType,
             UUID ownerId,
             String ownerName,
             UUID propertyId,
@@ -1608,6 +2631,7 @@ public class WorkOrderManagementService {
             String propertyAddress,
             UUID serviceTypeId,
             String serviceName,
+            Map<String, Object> maintenanceRecordTemplate,
             String title,
             String description,
             String status,
@@ -1826,6 +2850,70 @@ public class WorkOrderManagementService {
         }
     }
 
+    private void replaceRouteStops(UUID tenantId, UUID workOrderId, UUID actorUserId, List<CreateWorkOrderRequest.RouteStopRequest> routeStops) {
+        if (routeStops == null) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM work_order_route_stops WHERE tenant_id = ? AND work_order_id = ?", tenantId, workOrderId);
+        var order = 1;
+        for (var routeStop : routeStops) {
+            if (routeStop == null || routeStop.name() == null || routeStop.name().isBlank()) {
+                continue;
+            }
+            jdbcTemplate.update("""
+                    INSERT INTO work_order_route_stops (
+                        tenant_id, work_order_id, stop_order, stop_type, name, address, instructions, planned_arrival, created_by, updated_by
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    tenantId,
+                    workOrderId,
+                    order++,
+                    routeStopType(routeStop.stopType()),
+                    routeStop.name().trim(),
+                    blankToNull(routeStop.address()),
+                    blankToNull(routeStop.instructions()),
+                    timestamp(routeStop.plannedArrival()),
+                    actorUserId,
+                    actorUserId
+            );
+        }
+    }
+
+    private void replaceWorkOrderLinks(UUID tenantId, UUID workOrderId, UUID actorUserId, List<CreateWorkOrderRequest.WorkOrderLinkRequest> linkedWorkOrders) {
+        if (linkedWorkOrders == null) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM work_order_links WHERE tenant_id = ? AND work_order_id = ?", tenantId, workOrderId);
+        for (var link : linkedWorkOrders) {
+            if (link == null || link.linkedWorkOrderId() == null) {
+                continue;
+            }
+            if (workOrderId.equals(link.linkedWorkOrderId())) {
+                throw new BadRequestException("A work order cannot be linked to itself.");
+            }
+            requireWorkOrder(tenantId, link.linkedWorkOrderId());
+            jdbcTemplate.update("""
+                    INSERT INTO work_order_links (
+                        tenant_id, work_order_id, linked_work_order_id, link_type, notes, created_by, updated_by
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (tenant_id, work_order_id, linked_work_order_id, link_type)
+                    DO UPDATE SET notes = excluded.notes,
+                                  updated_by = excluded.updated_by,
+                                  updated_at = now()
+                    """,
+                    tenantId,
+                    workOrderId,
+                    link.linkedWorkOrderId(),
+                    workOrderLinkType(link.linkType()),
+                    blankToNull(link.notes()),
+                    actorUserId,
+                    actorUserId
+            );
+        }
+    }
+
     private InventoryItemRef inventoryItem(UUID tenantId, UUID inventoryItemId) {
         if (inventoryItemId == null) {
             return null;
@@ -1863,6 +2951,41 @@ public class WorkOrderManagementService {
 
     private String source(String source) {
         return source == null || source.isBlank() ? "TENANT_PORTAL" : source;
+    }
+
+    private String workOrderType(String workOrderType) {
+        if (workOrderType == null || workOrderType.isBlank()) {
+            return "SERVICE";
+        }
+        var normalized = workOrderType.trim().toUpperCase(Locale.ROOT);
+        return WORK_ORDER_TYPES.contains(normalized) ? normalized : "SERVICE";
+    }
+
+    private String routeStopType(String stopType) {
+        if (stopType == null || stopType.isBlank()) {
+            return "PICKUP";
+        }
+        var normalized = stopType.trim().toUpperCase(Locale.ROOT);
+        return Set.of("PICKUP", "DELIVERY", "RETURN", "KEYS", "SUPPLIER", "WAREHOUSE", "OWNER", "OTHER").contains(normalized) ? normalized : "OTHER";
+    }
+
+    private void validatePickupRouteStops(String workOrderType, List<CreateWorkOrderRequest.RouteStopRequest> routeStops) {
+        if (!"PICKUP_DELIVERY".equals(workOrderType)) {
+            return;
+        }
+        var hasStop = routeStops != null && routeStops.stream()
+                .anyMatch(routeStop -> routeStop != null && routeStop.name() != null && !routeStop.name().isBlank());
+        if (!hasStop) {
+            throw new BadRequestException("Pickup or delivery work orders require at least one route stop.");
+        }
+    }
+
+    private String workOrderLinkType(String linkType) {
+        if (linkType == null || linkType.isBlank()) {
+            return "RELATED";
+        }
+        var normalized = linkType.trim().toUpperCase(Locale.ROOT);
+        return Set.of("RELATED", "BLOCKS", "FOLLOWS", "SAME_RECURRENCE", "PICKUP_FOR").contains(normalized) ? normalized : "RELATED";
     }
 
     private String status(String requestedStatus, String source, Set<UUID> assignedWorkerIds, Instant scheduledStart) {
@@ -1908,6 +3031,14 @@ public class WorkOrderManagementService {
         return value == null || value.isBlank() ? null : value;
     }
 
+    private String requiredCaption(String caption) {
+        var normalized = blankToNull(caption);
+        if (normalized == null) {
+            throw new BadRequestException("Caption is required for uploaded evidence.");
+        }
+        return normalized.trim();
+    }
+
     private String normalizeReviewAction(String action) {
         if (action == null || action.isBlank()) {
             throw new BadRequestException("Review action is required.");
@@ -1919,12 +3050,63 @@ public class WorkOrderManagementService {
         return normalized;
     }
 
+    private String normalizeEvidenceAction(String action) {
+        if (action == null || action.isBlank()) {
+            throw new BadRequestException("Evidence action is required.");
+        }
+        var normalized = action.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("ADD_PHOTO", "ADD_PURCHASE_RECEIPT").contains(normalized)) {
+            throw new BadRequestException("Evidence action is not supported.");
+        }
+        return normalized;
+    }
+
+    private String normalizePhotoType(String photoType) {
+        var normalized = photoType == null || photoType.isBlank() ? "OTHER" : photoType.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("BEFORE", "AFTER", "ISSUE", "OTHER").contains(normalized)) {
+            throw new BadRequestException("Photo type is not supported.");
+        }
+        return normalized;
+    }
+
     private Map<String, Object> metadata(String value) {
         try {
             return objectMapper.readValue(value == null ? "{}" : value, METADATA_TYPE);
         } catch (Exception exception) {
             return Map.of("raw", value == null ? "{}" : value);
         }
+    }
+
+    private Map<String, Object> serviceTemplate(String value) {
+        try {
+            return normalizedTemplate(objectMapper.readValue(value == null ? "{}" : value, METADATA_TYPE));
+        } catch (Exception exception) {
+            return EMPTY_MAINTENANCE_RECORD_TEMPLATE;
+        }
+    }
+
+    private Map<String, Object> normalizedTemplate(Map<String, Object> template) {
+        if (template == null || template.isEmpty()) {
+            return EMPTY_MAINTENANCE_RECORD_TEMPLATE;
+        }
+        var normalized = new LinkedHashMap<String, Object>();
+        normalized.put("enabled", Boolean.TRUE.equals(template.get("enabled")));
+        normalized.put("title", stringOrDefault(template.get("title"), "Maintenance record"));
+        normalized.put("callTypes", listOrEmpty(template.get("callTypes")));
+        normalized.put("checks", listOrEmpty(template.get("checks")));
+        normalized.put("measurements", listOrEmpty(template.get("measurements")));
+        normalized.put("chemicals", listOrEmpty(template.get("chemicals")));
+        normalized.put("deliveries", listOrEmpty(template.get("deliveries")));
+        normalized.put("noteLabel", stringOrDefault(template.get("noteLabel"), "Client note"));
+        return normalized;
+    }
+
+    private List<?> listOrEmpty(Object value) {
+        return value instanceof List<?> list ? list : List.of();
+    }
+
+    private String stringOrDefault(Object value, String fallback) {
+        return value instanceof String text && !text.isBlank() ? text : fallback;
     }
 
     private boolean isLockedForGeneralUpdate(String status) {

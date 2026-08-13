@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { InventoryCatalog } from '@lorne/contracts';
+import type { InventoryCatalog, InventoryItem } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import { InventoryItemListComponent } from './inventory-item-list.component';
@@ -24,7 +24,13 @@ import { InventoryItemListComponent } from './inventory-item-list.component';
           </div>
         </div>
       </div>
-      <lorne-inventory-item-list [items]="catalog().items" />
+      <lorne-inventory-item-list
+        [items]="catalog().items"
+        (updateItem)="updateItem.emit($event)"
+        (adjustStock)="adjustStock.emit($event)"
+        (updateItemStatus)="updateItemStatus.emit($event)"
+        (deleteItem)="deleteItem.emit($event)"
+      />
     </section>
   `
 })
@@ -32,4 +38,8 @@ export class InventoryStockPanelComponent {
   readonly catalog = input.required<InventoryCatalog>();
   readonly addItem = output<void>();
   readonly addCategory = output<void>();
+  readonly updateItem = output<InventoryItem>();
+  readonly adjustStock = output<InventoryItem>();
+  readonly updateItemStatus = output<{ item: InventoryItem; active: boolean }>();
+  readonly deleteItem = output<InventoryItem>();
 }

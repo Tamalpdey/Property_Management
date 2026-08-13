@@ -8,7 +8,9 @@ import java.util.UUID;
 public record WorkOrderReviewDto(
         WorkOrderDto workOrder,
         List<FieldNoteDto> fieldNotes,
+        List<WorkOrderMaintenanceRecordDto> maintenanceRecords,
         List<EvidenceDto> evidence,
+        List<WorkerActivityDto> workerActivities,
         List<TimeEntryDto> timeEntries,
         List<InvoiceDto> invoices,
         List<CommunicationDto> communications,
@@ -52,6 +54,23 @@ public record WorkOrderReviewDto(
             Instant startedAt,
             Instant endedAt,
             Long durationMinutes
+    ) {
+    }
+
+    public record WorkerActivityDto(
+            UUID id,
+            UUID workerId,
+            String workerName,
+            String workerEmail,
+            String activityType,
+            String title,
+            String locationName,
+            String address,
+            String notes,
+            Instant startedAt,
+            Instant endedAt,
+            Long durationMinutes,
+            boolean open
     ) {
     }
 

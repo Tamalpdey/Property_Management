@@ -15,6 +15,8 @@ public record InvoiceDto(
         BigDecimal subtotal,
         BigDecimal taxTotal,
         BigDecimal total,
+        BigDecimal paidTotal,
+        BigDecimal balanceDue,
         UUID customerId,
         String ownerName,
         String ownerEmail,
@@ -25,14 +27,42 @@ public record InvoiceDto(
         String propertyName,
         String propertyAddress,
         Instant createdAt,
-        List<InvoiceLineDto> lines
+        List<InvoiceWorkOrderDto> workOrders,
+        List<InvoiceLineDto> lines,
+        List<PaymentDto> payments
 ) {
+    public record InvoiceWorkOrderDto(
+            UUID workOrderId,
+            String workOrderNumber,
+            String title,
+            String propertyName,
+            String propertyAddress,
+            String status,
+            String serviceName
+    ) {
+    }
+
     public record InvoiceLineDto(
             UUID id,
+            String lineType,
             String description,
             BigDecimal quantity,
             BigDecimal unitPrice,
-            BigDecimal lineTotal
+            BigDecimal lineTotal,
+            boolean taxable,
+            BigDecimal taxRate
+    ) {
+    }
+
+    public record PaymentDto(
+            UUID id,
+            String status,
+            String paymentMethod,
+            BigDecimal amount,
+            Instant paidAt,
+            String reference,
+            String note,
+            Instant createdAt
     ) {
     }
 }

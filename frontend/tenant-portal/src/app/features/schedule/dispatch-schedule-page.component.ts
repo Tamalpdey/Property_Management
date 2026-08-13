@@ -8,27 +8,30 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { TagModule } from 'primeng/tag';
-import {
-  CreateRecurringWorkTemplateRequest,
-  CreateWorkOrderRequest,
-  GeneratedRecurringDraft,
+import type {
+  WorkOrderStatus,
   PropertyRecord,
-  RecurringWorkTemplate,
   ServiceType,
-  WorkerAvailabilityOption,
   WorkerRecord,
   WorkOrderRecord,
   WorkOrderReview,
   WorkOrderReviewActionRequest,
-  WorkOrderStatus
+  RecurringWorkTemplate,
+  CreateRecurringWorkTemplateRequest,
+  GeneratedRecurringDraft,
+  WorkerAvailabilityOption,
+  CreateWorkOrderRequest,
+  TenantSettingsRecord
 } from '@lorne/contracts';
 import { PropertyService } from '../properties/services/property.service';
 import { ServiceCatalogService } from '../services/services/service-catalog.service';
 import { WorkerManagementService } from '../workers/services/worker-management.service';
 import { InvoiceService } from '../finance/services/invoice.service';
 import { WorkOrderReviewComponent, WorkOrderReviewTab } from '../work-orders/components/work-order-review.component';
+import { maintenanceRecordPrintHtml } from '../work-orders/work-order-maintenance-record';
 import { WorkOrderService } from '../work-orders/services/work-order.service';
 import { RecurringWorkService } from './services/recurring-work.service';
+import { TenantSettingsService } from '../settings/services/tenant-settings.service';
 
 @Component({
   selector: 'lorne-dispatch-schedule-page',
@@ -428,6 +431,7 @@ import { RecurringWorkService } from './services/recurring-work.service';
           (notifyOwner)="notifyOwner()"
           (sendInvoiceEmail)="sendInvoiceEmail($event)"
           (printWorkOrder)="printReview()"
+          (printMaintenanceRecord)="printMaintenanceRecord()"
         />
       </p-dialog>
 
@@ -537,6 +541,7 @@ export class DispatchSchedulePageComponent {
   private readonly propertyService = inject(PropertyService);
   private readonly serviceCatalogService = inject(ServiceCatalogService);
   private readonly invoiceService = inject(InvoiceService);
+  private readonly tenantSettingsService = inject(TenantSettingsService);
 
   protected readonly selectedDate = signal(toDateInput(new Date()));
   protected readonly workOrders = signal<WorkOrderRecord[]>([]);
@@ -544,6 +549,7 @@ export class DispatchSchedulePageComponent {
   protected readonly recurringTemplates = signal<RecurringWorkTemplate[]>([]);
   protected readonly properties = signal<PropertyRecord[]>([]);
   protected readonly serviceTypes = signal<ServiceType[]>([]);
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly error = signal('');
   protected readonly planningWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly savingPlanner = signal(false);
@@ -596,18 +602,20 @@ export class DispatchSchedulePageComponent {
   async load(): Promise<void> {
     this.error.set('');
     try {
-      const [workOrders, workers, recurringTemplates, properties, catalog] = await Promise.all([
+      const [workOrders, workers, recurringTemplates, properties, catalog, tenantSettings] = await Promise.all([
         firstValueFrom(this.workOrderService.list()),
         firstValueFrom(this.workerManagementService.list()),
         firstValueFrom(this.recurringWorkService.list()),
         firstValueFrom(this.propertyService.list()),
-        firstValueFrom(this.serviceCatalogService.catalog())
+        firstValueFrom(this.serviceCatalogService.catalog()),
+        firstValueFrom(this.tenantSettingsService.get())
       ]);
       this.workOrders.set(workOrders);
       this.workers.set(workers.filter((worker) => worker.status === 'ACTIVE'));
       this.recurringTemplates.set(recurringTemplates);
       this.properties.set(properties);
       this.serviceTypes.set(catalog.serviceTypes);
+      this.tenantSettings.set(tenantSettings);
     } catch {
       this.error.set('Unable to load schedule. Check backend status and tenant permissions.');
     }
@@ -919,7 +927,24 @@ export class DispatchSchedulePageComponent {
       return;
     }
     printWindow.document.open();
-    printWindow.document.write(workOrderPrintHtml(review));
+    printWindow.document.write(workOrderPrintHtml(review, this.tenantSettings()));
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+  }
+
+  protected printMaintenanceRecord(): void {
+    const review = this.review();
+    if (!review) {
+      return;
+    }
+    const printWindow = window.open('', '_blank', 'width=900,height=1100');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(maintenanceRecordPrintHtml(review, this.tenantSettings()));
     printWindow.document.close();
     printWindow.focus();
     window.setTimeout(() => printWindow.print(), 250);
@@ -1241,6 +1266,7 @@ export class DispatchSchedulePageComponent {
     return {
       propertyId: workOrder.propertyId,
       serviceTypeId: workOrder.serviceTypeId,
+      workOrderType: workOrder.workOrderType,
       title: workOrder.title,
       description: workOrder.description,
       source: workOrder.source,
@@ -1385,8 +1411,9 @@ function isClosedForDispatch(status: string): boolean {
   return ['COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(status);
 }
 
-function workOrderPrintHtml(review: WorkOrderReview): string {
+function workOrderPrintHtml(review: WorkOrderReview, settings?: TenantSettingsRecord | null): string {
   const workOrder = review.workOrder;
+  const brand = printTenantBrand(settings);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(workOrder.workOrderNumber)}</title><style>
     @page { size: letter; margin: 0.45in; }
     * { box-sizing: border-box; }
@@ -1402,9 +1429,21 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; }
     .right { text-align: right; }
     .eyebrow { color: #0f766e; font-size: 8pt; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .brand-heading { display: flex; gap: 10pt; align-items: flex-start; }
+    .brand-logo { width: 44pt; height: 34pt; border: 1px solid #d1d5db; object-fit: contain; padding: 2pt; }
   </style></head><body>
     <header>
-      <div><p class="eyebrow">Work order</p><h1>${escapeHtml(workOrder.workOrderNumber)}</h1><p>${escapeHtml(workOrder.title)}</p></div>
+      <div class="brand-heading">
+        ${brand.logoUrl ? `<img class="brand-logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
+        <div>
+          <p class="eyebrow">${escapeHtml(brand.name)}</p>
+          <h1>${escapeHtml(workOrder.workOrderNumber)}</h1>
+          <p>${escapeHtml(workOrder.title)}</p>
+          ${brand.legalName ? `<p>${escapeHtml(brand.legalName)}</p>` : ''}
+          ${brand.address ? `<p>${escapeHtml(brand.address)}</p>` : ''}
+          ${brand.contact ? `<p>${escapeHtml(brand.contact)}</p>` : ''}
+        </div>
+      </div>
       <div class="right"><strong>${escapeHtml(statusText(workOrder.status))}</strong><p>${escapeHtml(workOrder.scheduledStart || 'Unscheduled')}</p></div>
     </header>
     <div class="grid">
@@ -1419,6 +1458,57 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
   </body></html>`;
 }
 
+function printTenantBrand(settings?: TenantSettingsRecord | null): { name: string; legalName: string; address: string; contact: string; logoUrl: string } {
+  const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
+  const legalName = firstNonBlank(settings?.legalName);
+  return {
+    name,
+    legalName: legalName && !sameText(name, legalName) ? legalName : '',
+    address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
+    contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
+    logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
+  };
+}
+
+function firstNonBlank(...values: Array<string | undefined>): string {
+  return values.find((value) => value && value.trim())?.trim() || '';
+}
+
+function joinText(delimiter: string, ...values: Array<string | undefined>): string {
+  return values
+    .map((value) => value?.trim() || '')
+    .filter(Boolean)
+    .join(delimiter);
+}
+
+function absoluteAssetUrl(value: string): string {
+  if (!value) {
+    return '';
+  }
+  try {
+    return new URL(value, window.location.origin).toString();
+  } catch {
+    return value;
+  }
+}
+
+function sameText(left: string, right: string): boolean {
+  const normalizedLeft = normalizeCompanyName(left);
+  const normalizedRight = normalizeCompanyName(right);
+  return !!normalizedLeft && !!normalizedRight && (
+    normalizedLeft === normalizedRight
+    || normalizedLeft.startsWith(normalizedRight)
+    || normalizedRight.startsWith(normalizedLeft)
+  );
+}
+
+function normalizeCompanyName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|company|co)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 function statusText(value: string): string {
   return value.toLowerCase().replaceAll('_', ' ');
 }
@@ -1430,6 +1520,10 @@ function escapeHtml(value: string | number | boolean): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function escapeAttribute(value: string | number | boolean): string {
+  return escapeHtml(value);
 }
 
 function nextTemplateDate(template: RecurringWorkTemplate): Date | null {
@@ -1485,6 +1579,7 @@ function workOrderRequest(workOrder: WorkOrderRecord, overrides: Partial<CreateW
   return {
     propertyId: workOrder.propertyId,
     serviceTypeId: workOrder.serviceTypeId,
+    workOrderType: workOrder.workOrderType,
     title: workOrder.title,
     description: workOrder.description,
     source: workOrder.source,

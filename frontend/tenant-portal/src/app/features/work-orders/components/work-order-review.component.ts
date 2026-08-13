@@ -1,19 +1,23 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, effect, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
-import {
-  WorkOrderAssignment,
-  WorkOrderAuditEntry,
-  WorkOrderCommunication,
-  WorkOrderEvidence,
+import type {
   WorkOrderReview,
-  WorkOrderReviewActionRequest,
   WorkOrderReviewFieldNote,
+  WorkOrderEvidence,
+  WorkOrderTimeEntry,
+  WorkOrderCommunication,
+  WorkOrderAuditEntry,
+  WorkOrderReviewActionRequest,
+  WorkOrderAssignment,
   WorkOrderTask,
-  WorkOrderTimeEntry
+  WorkOrderType,
+  WorkOrderLink,
+  WorkOrderRouteStop,
+  WorkOrderMaintenanceRecord
 } from '@lorne/contracts';
 
 export type WorkOrderReviewTab = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOURCES' | 'INVOICE' | 'COMMUNICATION' | 'TIME' | 'AUDIT';
@@ -33,7 +37,7 @@ interface WorkOrderWorkerSummary {
 @Component({
   selector: 'lorne-work-order-review',
   standalone: true,
-  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, TagModule],
+  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, NgTemplateOutlet, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host .lorne-review-tab-active {
@@ -57,16 +61,20 @@ interface WorkOrderWorkerSummary {
           <div class="rounded-lg border border-slate-200 bg-slate-950 px-4 py-3 text-white">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="min-w-0">
-              <p class="text-xs font-black uppercase tracking-wide text-teal-200">{{ data.workOrder.workOrderNumber }}</p>
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-200">{{ data.workOrder.workOrderNumber }}</p>
+                <span [class]="workOrderTypeClass(data.workOrder.workOrderType)">{{ workOrderTypeLabel(data.workOrder.workOrderType) }}</span>
+              </div>
               <h2 class="mt-1 text-2xl font-black leading-tight">{{ data.workOrder.propertyName }}</h2>
               <p class="mt-1 text-sm font-bold text-slate-200">{{ data.workOrder.title }}</p>
             </div>
             <div class="flex flex-wrap items-center gap-2 md:justify-end">
               <p-tag [value]="statusLabel(data.workOrder.status)" [severity]="statusSeverity(data.workOrder.status)" />
-              @if (canGenerateInvoice(data) && data.invoices.length === 0) {
+              @if (canManageBilling() && canGenerateInvoice(data) && data.invoices.length === 0) {
                 <button pButton type="button" size="small" icon="pi pi-file-edit" label="Generate invoice" [loading]="busy()" (click)="generateInvoice.emit()"></button>
               }
               <button pButton type="button" size="small" severity="secondary" icon="pi pi-print" label="Print" (click)="printWorkOrder.emit()"></button>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-clipboard" label="Maintenance record" (click)="printMaintenanceRecord.emit()"></button>
             </div>
           </div>
           </div>
@@ -98,6 +106,70 @@ interface WorkOrderWorkerSummary {
                 <p class="text-xs font-black uppercase tracking-wide text-teal-700">Dispatch instructions</p>
                 <p class="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{{ data.workOrder.description || 'No dispatch instructions.' }}</p>
               </div>
+              @if (data.workOrder.routeStops.length || data.workOrder.linkedWorkOrders.length || data.workOrder.linkedFromWorkOrders.length) {
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div class="rounded-lg border border-slate-200 bg-white p-3">
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Route stops</p>
+                    <div class="mt-2 grid gap-2">
+                      @for (stop of data.workOrder.routeStops; track stop.id) {
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="text-sm font-black text-slate-950">{{ stop.stopOrder }}. {{ routeStopTypeLabel(stop.stopType) }} · {{ stop.name }}</span>
+                            <span [class]="routeStopStatusClass(stop)">{{ routeStopStatusLabel(stop) }}</span>
+                          </div>
+                          <div class="mt-2 flex flex-wrap gap-1.5 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                            @if (stop.plannedArrival) {
+                              <span class="rounded-full bg-white px-2 py-1">Planned {{ stop.plannedArrival | date:'MMM d, h:mm a' }}</span>
+                            }
+                            @if (stop.arrivedAt) {
+                              <span class="rounded-full bg-teal-50 px-2 py-1 text-teal-700">Arrived {{ stop.arrivedAt | date:'MMM d, h:mm a' }}</span>
+                            }
+                            @if (stop.completedAt) {
+                              <span class="rounded-full bg-green-50 px-2 py-1 text-green-700">Done {{ stop.completedAt | date:'MMM d, h:mm a' }}</span>
+                            }
+                            @if (stop.skippedAt) {
+                              <span class="rounded-full bg-amber-50 px-2 py-1 text-amber-700">Skipped {{ stop.skippedAt | date:'MMM d, h:mm a' }}</span>
+                            }
+                          </div>
+                          @if (stop.address) {
+                            <p class="mt-1 text-xs font-bold text-slate-600">{{ stop.address }}</p>
+                          }
+                          @if (stop.instructions) {
+                            <p class="mt-1 whitespace-pre-wrap text-xs font-semibold leading-5 text-slate-600">{{ stop.instructions }}</p>
+                          }
+                          @if (stop.skippedReason) {
+                            <p class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">Skipped reason: {{ stop.skippedReason }}</p>
+                          }
+                        </div>
+                      } @empty {
+                        <p class="text-sm font-semibold text-slate-500">No route stops.</p>
+                      }
+                    </div>
+                  </div>
+                  <div class="rounded-lg border border-slate-200 bg-white p-3">
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Linked work orders</p>
+                    <div class="mt-2 grid gap-2">
+                      @for (link of data.workOrder.linkedWorkOrders; track link.linkedWorkOrderId + link.linkType) {
+                        <button type="button" class="w-full rounded-lg bg-slate-50 px-3 py-2 text-left transition hover:bg-teal-50" (click)="openLinkedWorkOrder.emit(link.linkedWorkOrderId)">
+                          <ng-container *ngTemplateOutlet="linkedWorkOrderContent; context: { $implicit: link, direction: 'outbound' }"></ng-container>
+                        </button>
+                      } @empty {
+                        <p class="text-sm font-semibold text-slate-500">No linked work orders.</p>
+                      }
+                    </div>
+                    @if (data.workOrder.linkedFromWorkOrders.length) {
+                      <p class="mt-3 text-xs font-black uppercase tracking-wide text-teal-700">Linked from</p>
+                      <div class="mt-2 grid gap-2">
+                        @for (link of data.workOrder.linkedFromWorkOrders; track link.linkedWorkOrderId + link.linkType) {
+                          <button type="button" class="w-full rounded-lg bg-slate-50 px-3 py-2 text-left transition hover:bg-teal-50" (click)="openLinkedWorkOrder.emit(link.linkedWorkOrderId)">
+                            <ng-container *ngTemplateOutlet="linkedWorkOrderContent; context: { $implicit: link, direction: 'inbound' }"></ng-container>
+                          </button>
+                        }
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
               <div class="grid gap-3 md:grid-cols-2">
                 <div class="rounded-lg border border-slate-200 bg-white p-3">
                   <p class="text-xs font-black uppercase tracking-wide text-teal-700">Pre-start checklist</p>
@@ -136,6 +208,35 @@ interface WorkOrderWorkerSummary {
                     </div>
                   } @empty {
                     <p class="text-sm font-semibold text-slate-500">No field notes.</p>
+                  }
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Maintenance records</p>
+                    <p class="text-sm font-semibold text-slate-500">Structured records submitted from the worker app.</p>
+                  </div>
+                  <p-tag [value]="maintenanceRecords(data).length + ' saved'" severity="info" />
+                </div>
+                <div class="mt-3 grid gap-2">
+                  @for (record of maintenanceRecords(data); track record.id) {
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p class="text-sm font-black text-slate-950">{{ recordTitle(record) }}</p>
+                          <p class="text-xs font-bold text-slate-500">{{ record.workerName }} · {{ record.updatedAt | date:'MMM d, h:mm a' }}</p>
+                        </div>
+                        <p-tag [value]="recordSummary(record)" severity="success" />
+                      </div>
+                      @if (record.recordData.clientNote) {
+                        <p class="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{{ record.recordData.clientNote }}</p>
+                      }
+                    </div>
+                  } @empty {
+                    <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
+                      No maintenance record has been submitted for this work order yet.
+                    </p>
                   }
                 </div>
               </div>
@@ -297,7 +398,12 @@ interface WorkOrderWorkerSummary {
         }
 
         @if (activeTab() === 'EVIDENCE') {
-          <section class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <section class="space-y-3">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p class="text-sm font-bold text-slate-700">Evidence is read-only in review. Use the work-order actions menu to upload photos or receipts through Operations override.</p>
+            </div>
+
+            <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             @for (item of data.evidence; track item.documentId + item.createdAt; let index = $index) {
               <button type="button" class="grid grid-cols-[5rem_1fr] overflow-hidden rounded-lg border border-slate-200 bg-white p-0 text-left shadow-sm transition hover:border-teal-300 hover:shadow-md" (click)="openEvidence(index)">
                 <div class="h-20 bg-slate-100">
@@ -325,6 +431,7 @@ interface WorkOrderWorkerSummary {
             } @empty {
               <p class="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-500 md:col-span-2 xl:col-span-3">No photos or receipts uploaded yet.</p>
             }
+            </div>
           </section>
         }
 
@@ -419,7 +526,7 @@ interface WorkOrderWorkerSummary {
                   <h3 class="mt-1 text-lg font-black text-slate-950">Billing generated from approved work</h3>
                   <p class="mt-1 text-xs font-semibold text-slate-500">Draft invoices use the service charge plus materials marked used. Email delivery is handled from the invoices workflow.</p>
                 </div>
-                @if (canGenerateInvoice(data) && data.invoices.length === 0) {
+                @if (canManageBilling() && canGenerateInvoice(data) && data.invoices.length === 0) {
                   <button pButton type="button" size="small" icon="pi pi-file-edit" label="Generate invoice" [loading]="busy()" (click)="generateInvoice.emit()"></button>
                 }
               </div>
@@ -700,7 +807,7 @@ interface WorkOrderWorkerSummary {
           </section>
         }
 
-        @if (data.workOrder.status === 'PENDING_COMPLETION') {
+        @if (canManageWorkOrders() && data.workOrder.status === 'PENDING_COMPLETION') {
           <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
             <label class="block">
               <span class="mb-1 block text-sm font-black text-amber-900">Review note</span>
@@ -709,7 +816,7 @@ interface WorkOrderWorkerSummary {
             <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button pButton type="button" severity="secondary" icon="pi pi-replay" label="Send back" [loading]="busy()" (click)="sendBack()"></button>
               <button pButton type="button" icon="pi pi-check-circle" label="Approve work" [loading]="busy()" (click)="approve()"></button>
-              <button pButton type="button" severity="success" icon="pi pi-file-edit" label="Approve + invoice" [loading]="busy()" (click)="approveAndInvoice()"></button>
+              <button pButton type="button" severity="success" icon="pi pi-file-edit" label="Approve + invoice" [disabled]="!canManageBilling()" [loading]="busy()" (click)="approveAndInvoice()"></button>
             </div>
           </div>
         }
@@ -882,6 +989,18 @@ interface WorkOrderWorkerSummary {
         <p class="text-sm font-bold text-slate-500">{{ loading() ? 'Loading review...' : 'Select a work order to review.' }}</p>
       </section>
     }
+
+    <ng-template #linkedWorkOrderContent let-link let-direction="direction">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-sm font-black text-teal-800">{{ link.workOrderNumber }}</span>
+        <p-tag [value]="linkRelationshipLabel(link, direction)" severity="info" />
+      </div>
+      <p class="mt-1 text-sm font-bold text-slate-950">{{ link.title }}</p>
+      <p class="text-xs font-semibold text-slate-500">{{ link.propertyName }} · {{ statusLabel(link.status) }}</p>
+      @if (link.notes) {
+        <p class="mt-1 whitespace-pre-wrap text-xs font-semibold leading-5 text-slate-600">{{ link.notes }}</p>
+      }
+    </ng-template>
   `
 })
 export class WorkOrderReviewComponent {
@@ -890,11 +1009,15 @@ export class WorkOrderReviewComponent {
   readonly busy = input(false);
   readonly error = input('');
   readonly initialTab = input<WorkOrderReviewTab>('SUMMARY');
+  readonly canManageWorkOrders = input(true);
+  readonly canManageBilling = input(true);
   readonly reviewAction = output<WorkOrderReviewActionRequest>();
   readonly generateInvoice = output<void>();
   readonly notifyOwner = output<void>();
   readonly sendInvoiceEmail = output<string>();
   readonly printWorkOrder = output<void>();
+  readonly printMaintenanceRecord = output<void>();
+  readonly openLinkedWorkOrder = output<string>();
 
   protected readonly tabs: Array<{ value: WorkOrderReviewTab; label: string; icon: string }> = [
     { value: 'SUMMARY', label: 'Summary', icon: 'pi pi-file' },
@@ -1014,6 +1137,20 @@ export class WorkOrderReviewComponent {
         .reduce((sum, entry) => sum + (entry.durationMinutes ?? 0), 0);
       return { assignment, notes, evidence, timeEntries, tasks, auditEntries, materialEvents, totalWorkMinutes };
     });
+  }
+
+  protected recordTitle(record: WorkOrderMaintenanceRecord): string {
+    return record.templateSnapshot?.title || 'Maintenance record';
+  }
+
+  protected maintenanceRecords(data: WorkOrderReview): WorkOrderMaintenanceRecord[] {
+    return data.maintenanceRecords ?? [];
+  }
+
+  protected recordSummary(record: WorkOrderMaintenanceRecord): string {
+    const checks = Object.values(record.recordData?.serviceChecks ?? {}).filter(Boolean).length;
+    const deliveries = Object.values(record.recordData?.deliveries ?? {}).filter((value) => String(value ?? '').trim()).length;
+    return `${checks} checks · ${deliveries} deliveries`;
   }
 
   protected completedTaskCount(tasks: WorkOrderTask[]): number {
@@ -1224,6 +1361,83 @@ export class WorkOrderReviewComponent {
     return status.toLowerCase().replaceAll('_', ' ');
   }
 
+  protected workOrderTypeLabel(type: WorkOrderType | undefined): string {
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return 'pickup';
+      case 'INSPECTION':
+        return 'inspection';
+      case 'FOLLOW_UP':
+        return 'follow-up';
+      default:
+        return 'service';
+    }
+  }
+
+  protected workOrderTypeClass(type: WorkOrderType | undefined): string {
+    const base = 'rounded-full border px-2 py-0.5 text-[0.68rem] font-black uppercase';
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return `${base} border-amber-200 bg-amber-50 text-amber-700`;
+      case 'INSPECTION':
+        return `${base} border-violet-200 bg-violet-50 text-violet-700`;
+      case 'FOLLOW_UP':
+        return `${base} border-sky-200 bg-sky-50 text-sky-700`;
+      default:
+        return `${base} border-teal-200 bg-teal-50 text-teal-700`;
+    }
+  }
+
+  protected routeStopTypeLabel(stopType: string): string {
+    return stopType.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected routeStopStatusLabel(stop: WorkOrderRouteStop): string {
+    if (stop.completedAt) {
+      return 'Done';
+    }
+    if (stop.skippedAt) {
+      return 'Skipped';
+    }
+    if (stop.arrivedAt) {
+      return 'Arrived';
+    }
+    return 'Open';
+  }
+
+  protected routeStopStatusClass(stop: WorkOrderRouteStop): string {
+    const base = 'rounded-full px-2 py-1 text-xs font-black';
+    if (stop.completedAt) {
+      return `${base} bg-green-100 text-green-700`;
+    }
+    if (stop.skippedAt) {
+      return `${base} bg-amber-100 text-amber-700`;
+    }
+    if (stop.arrivedAt) {
+      return `${base} bg-teal-100 text-teal-700`;
+    }
+    return `${base} bg-slate-100 text-slate-600`;
+  }
+
+  protected linkTypeLabel(linkType: string): string {
+    return linkType.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected linkRelationshipLabel(link: WorkOrderLink, direction: 'outbound' | 'inbound'): string {
+    switch (link.linkType) {
+      case 'PICKUP_FOR':
+        return direction === 'outbound' ? 'pickup for' : 'pickup job';
+      case 'BLOCKS':
+        return direction === 'outbound' ? 'blocks' : 'blocked by';
+      case 'FOLLOWS':
+        return direction === 'outbound' ? 'follows' : 'follow-up';
+      case 'SAME_RECURRENCE':
+        return 'same recurrence';
+      default:
+        return 'related';
+    }
+  }
+
   protected canGenerateInvoice(data: WorkOrderReview): boolean {
     return ['APPROVED', 'CUSTOMER_NOTIFIED'].includes(data.workOrder.status);
   }
@@ -1357,6 +1571,7 @@ const ACTION_LABELS: Record<string, string> = {
   WORK_ORDER_CUSTOMER_NOTIFIED: 'Customer notified',
   WORK_ORDER_SENT_BACK: 'Sent back',
   WORK_ORDER_OVERRIDE_COMPLETED: 'Override completed',
+  WORK_ORDER_FIELD_OVERRIDE_APPLIED: 'Field data override',
   WORK_ORDER_INVOICE_GENERATED: 'Invoice generated'
 };
 

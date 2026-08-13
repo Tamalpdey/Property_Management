@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -48,44 +49,19 @@ public class DocumentStorageService {
             throw new BadRequestException(documentType.equals("PURCHASE_RECEIPT") ? "Receipt file size is not valid." : "Image size is not valid.");
         }
         var objectKey = objectKey(tenantId, workOrderId, request.fileName(), documentType);
-        var documentId = jdbcTemplate.queryForObject("""
-                INSERT INTO documents (
-                    tenant_id, owner_type, owner_id, bucket, object_key, content_type, byte_size, created_by, updated_by
-                )
-                VALUES (?, 'WORK_ORDER', ?, ?, ?, ?, ?, ?, ?)
-                RETURNING id
-                """, UUID.class,
-                tenantId,
-                workOrderId,
-                properties.bucket(),
-                objectKey,
-                contentType,
-                byteSize,
-                actorUserId,
-                actorUserId
-        );
+        return createPresignedUpload(tenantId, actorUserId, "WORK_ORDER", workOrderId, objectKey, contentType, byteSize);
+    }
 
-        var expiresAt = Instant.now().plusSeconds(properties.uploadExpiresSeconds());
-        var putObject = PutObjectRequest.builder()
-                .bucket(properties.bucket())
-                .key(objectKey)
-                .contentType(contentType)
-                .build();
-        var presignRequest = PutObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofSeconds(properties.uploadExpiresSeconds()))
-                .putObjectRequest(putObject)
-                .build();
-        try (var presigner = presigner()) {
-            var presigned = presigner.presignPutObject(presignRequest);
-            return new PresignedPhotoUpload(
-                    documentId,
-                    properties.bucket(),
-                    objectKey,
-                    presigned.url().toString(),
-                    expiresAt,
-                    Map.of("Content-Type", contentType)
-            );
+    @Transactional
+    public PresignedPhotoUpload createTenantLogoUpload(UUID tenantId, UUID actorUserId, PhotoUploadRequest request) {
+        requireConfigured();
+        var contentType = logoContentType(request.contentType());
+        var byteSize = request.byteSize() == null ? 0 : request.byteSize();
+        if (byteSize <= 0 || byteSize > properties.maxImageBytes()) {
+            throw new BadRequestException("Logo file size is not valid.");
         }
+        var objectKey = tenantLogoObjectKey(tenantId, request.fileName());
+        return createPresignedUpload(tenantId, actorUserId, "TENANT_LOGO", tenantId, objectKey, contentType, byteSize);
     }
 
     public void requireWorkOrderDocument(UUID tenantId, UUID workOrderId, UUID documentId) {
@@ -116,6 +92,34 @@ public class DocumentStorageService {
         try (var presigner = presigner()) {
             return presigner.presignGetObject(request).url().toString();
         }
+    }
+
+    public String createTenantLogoReadUrl(UUID documentId) {
+        var documents = jdbcTemplate.query("""
+                SELECT bucket, object_key
+                FROM documents
+                WHERE id = ? AND owner_type = 'TENANT_LOGO'
+                """, (rs, rowNum) -> new StoredDocument(
+                rs.getString("bucket"),
+                rs.getString("object_key")
+        ), documentId);
+        var document = documents.stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant logo was not found."));
+        return createReadUrl(document.bucket(), document.objectKey());
+    }
+
+    public StoredLogo tenantLogo(UUID tenantId, UUID documentId) {
+        requireConfigured();
+        var documents = jdbcTemplate.query("""
+                SELECT bucket, object_key, content_type
+                FROM documents
+                WHERE tenant_id = ? AND id = ? AND owner_type = 'TENANT_LOGO'
+                """, (rs, rowNum) -> new StoredLogo(
+                rs.getString("content_type"),
+                objectBytes(rs.getString("bucket"), rs.getString("object_key"))
+        ), tenantId, documentId);
+        return documents.stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant logo was not found."));
     }
 
     @Transactional
@@ -174,9 +178,68 @@ public class DocumentStorageService {
         }
     }
 
+    private byte[] objectBytes(String bucket, String objectKey) {
+        try (var client = s3Client()) {
+            return client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(objectKey)
+                    .build()).asByteArray();
+        }
+    }
+
     private void requireConfigured() {
         if (isBlank(properties.bucket()) || isBlank(properties.accessKeyId()) || isBlank(properties.secretAccessKey()) || isBlank(properties.endpoint())) {
             throw new BadRequestException("Object storage is not configured.");
+        }
+    }
+
+    private PresignedPhotoUpload createPresignedUpload(
+            UUID tenantId,
+            UUID actorUserId,
+            String ownerType,
+            UUID ownerId,
+            String objectKey,
+            String contentType,
+            long byteSize
+    ) {
+        var documentId = jdbcTemplate.queryForObject("""
+                INSERT INTO documents (
+                    tenant_id, owner_type, owner_id, bucket, object_key, content_type, byte_size, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """, UUID.class,
+                tenantId,
+                ownerType,
+                ownerId,
+                properties.bucket(),
+                objectKey,
+                contentType,
+                byteSize,
+                actorUserId,
+                actorUserId
+        );
+
+        var expiresAt = Instant.now().plusSeconds(properties.uploadExpiresSeconds());
+        var putObject = PutObjectRequest.builder()
+                .bucket(properties.bucket())
+                .key(objectKey)
+                .contentType(contentType)
+                .build();
+        var presignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofSeconds(properties.uploadExpiresSeconds()))
+                .putObjectRequest(putObject)
+                .build();
+        try (var presigner = presigner()) {
+            var presigned = presigner.presignPutObject(presignRequest);
+            return new PresignedPhotoUpload(
+                    documentId,
+                    properties.bucket(),
+                    objectKey,
+                    presigned.url().toString(),
+                    expiresAt,
+                    Map.of("Content-Type", contentType)
+            );
         }
     }
 
@@ -199,6 +262,14 @@ public class DocumentStorageService {
         return normalized;
     }
 
+    private String logoContentType(String contentType) {
+        var normalized = contentType == null || contentType.isBlank() ? "image/png" : contentType.trim().toLowerCase(Locale.ROOT);
+        if (!Set.of("image/png", "image/jpeg", "image/webp", "image/gif").contains(normalized)) {
+            throw new BadRequestException("Logo must be a PNG, JPG, WEBP, or GIF image.");
+        }
+        return normalized;
+    }
+
     private String objectKey(UUID tenantId, UUID workOrderId, String fileName, String documentType) {
         var today = LocalDate.now();
         var folder = documentType.equals("PURCHASE_RECEIPT") ? "receipts" : "photos";
@@ -214,6 +285,18 @@ public class DocumentStorageService {
         );
     }
 
+    private String tenantLogoObjectKey(UUID tenantId, String fileName) {
+        var today = LocalDate.now();
+        return "tenants/%s/branding/logos/%04d/%02d/%02d/%s-%s".formatted(
+                tenantId,
+                today.getYear(),
+                today.getMonthValue(),
+                today.getDayOfMonth(),
+                UUID.randomUUID(),
+                safeFileName(fileName == null || fileName.isBlank() ? "logo.png" : fileName)
+        );
+    }
+
     private String safeFileName(String fileName) {
         var fallback = "photo.jpg";
         var candidate = fileName == null || fileName.isBlank() ? fallback : fileName.trim();
@@ -225,5 +308,11 @@ public class DocumentStorageService {
     }
 
     public record DeletedDocument(UUID documentId, String bucket, String objectKey) {
+    }
+
+    public record StoredLogo(String contentType, byte[] bytes) {
+    }
+
+    private record StoredDocument(String bucket, String objectKey) {
     }
 }

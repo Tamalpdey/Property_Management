@@ -1,5 +1,8 @@
 package com.lorne.platform.workorder.internal.controller;
 
+import com.lorne.platform.document.DocumentStorageService;
+import com.lorne.platform.document.PhotoUploadRequest;
+import com.lorne.platform.document.PresignedPhotoUpload;
 import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
 import com.lorne.platform.workorder.internal.dto.CancelWorkOrderRequest;
@@ -7,6 +10,8 @@ import com.lorne.platform.workorder.internal.dto.CreateWorkOrderRequest;
 import com.lorne.platform.workorder.internal.dto.SendWorkOrderOwnerEmailRequest;
 import com.lorne.platform.workorder.internal.dto.WorkerAvailabilityDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderDto;
+import com.lorne.platform.workorder.internal.dto.WorkOrderEvidenceActionRequest;
+import com.lorne.platform.workorder.internal.dto.WorkOrderFieldOverrideRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderReviewActionRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderReviewDto;
 import com.lorne.platform.workorder.internal.service.WorkOrderManagementService;
@@ -30,9 +35,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/tenant/work-orders")
 class WorkOrderManagementController {
     private final WorkOrderManagementService workOrderManagementService;
+    private final DocumentStorageService documentStorageService;
 
-    WorkOrderManagementController(WorkOrderManagementService workOrderManagementService) {
+    WorkOrderManagementController(
+            WorkOrderManagementService workOrderManagementService,
+            DocumentStorageService documentStorageService
+    ) {
         this.workOrderManagementService = workOrderManagementService;
+        this.documentStorageService = documentStorageService;
     }
 
     @GetMapping
@@ -110,11 +120,58 @@ class WorkOrderManagementController {
             @PathVariable UUID workOrderId,
             @RequestBody WorkOrderReviewActionRequest request
     ) {
-        return ApiResponse.ok(workOrderManagementService.reviewAction(principal.tenantId(), principal.userId(), workOrderId, request));
+        return ApiResponse.ok(workOrderManagementService.reviewAction(
+                principal.tenantId(),
+                principal.userId(),
+                principal.roles(),
+                workOrderId,
+                request
+        ));
+    }
+
+    @PatchMapping("/{workOrderId}/field-override")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<WorkOrderReviewDto> fieldOverride(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @Valid @RequestBody WorkOrderFieldOverrideRequest request
+    ) {
+        return ApiResponse.ok(workOrderManagementService.fieldOverride(
+                principal.tenantId(),
+                principal.userId(),
+                workOrderId,
+                request
+        ));
+    }
+
+    @PostMapping("/{workOrderId}/evidence/upload-url")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<PresignedPhotoUpload> evidenceUploadUrl(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @RequestBody PhotoUploadRequest request
+    ) {
+        workOrderManagementService.requireWorkOrderExists(principal.tenantId(), workOrderId);
+        return ApiResponse.ok(documentStorageService.createWorkOrderPhotoUpload(
+                principal.tenantId(),
+                principal.userId(),
+                workOrderId,
+                request
+        ));
+    }
+
+    @PostMapping("/{workOrderId}/evidence/actions")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<WorkOrderReviewDto> evidenceAction(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workOrderId,
+            @Valid @RequestBody WorkOrderEvidenceActionRequest request
+    ) {
+        return ApiResponse.ok(workOrderManagementService.evidenceAction(principal.tenantId(), principal.userId(), workOrderId, request));
     }
 
     @PostMapping("/{workOrderId}/invoice")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
     ApiResponse<WorkOrderReviewDto> generateInvoice(
             @AuthenticationPrincipal JwtPrincipal principal,
             @PathVariable UUID workOrderId

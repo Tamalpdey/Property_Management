@@ -92,9 +92,19 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   accessToken: string;
+  refreshToken: string;
   tokenType: 'Bearer';
   expiresInSeconds: number;
+  refreshExpiresInSeconds: number;
   user: CurrentUser;
+}
+
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+export interface LogoutRequest {
+  refreshToken?: string;
 }
 
 export interface WorkerTodayResponse {
@@ -128,6 +138,9 @@ export type WorkerJobAction =
   | 'RESUME_WORK'
   | 'COMPLETE_WORK'
   | 'COMPLETE_CHECKLIST'
+  | 'ARRIVE_ROUTE_STOP'
+  | 'COMPLETE_ROUTE_STOP'
+  | 'SKIP_ROUTE_STOP'
   | 'ADD_NOTE'
   | 'ADD_MATERIAL_USED'
   | 'RETURN_TOOL'
@@ -136,6 +149,7 @@ export type WorkerJobAction =
   | 'UPDATE_NOTE'
   | 'LEAVE_EMERGENCY'
   | 'VIEW_DISPATCH'
+  | 'VIEW_LINKED_WORK_ORDERS'
   | 'VIEW_PRE_START_CHECKLIST'
   | 'VIEW_COMPLETION_CHECKLIST'
   | 'VIEW_TIMELINE';
@@ -159,11 +173,13 @@ export interface WorkerShiftClockRequest {
 export interface WorkerAssignedJob {
   id: string;
   workOrderNumber: string;
+  workOrderType: WorkOrderType;
   title: string;
   propertyName: string;
   ownerName: string;
   address: string;
   serviceName?: string;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
   status: WorkOrderStatus;
   priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   scheduledStart?: string;
@@ -174,9 +190,44 @@ export interface WorkerAssignedJob {
   checklist: WorkerJobChecklistItem[];
   materials: WorkerJobMaterial[];
   assets: WorkerJobAsset[];
+  routeStops: WorkOrderRouteStop[];
+  linkedWorkOrders: WorkOrderLink[];
+  linkedFromWorkOrders: WorkOrderLink[];
   fieldNotes: WorkerFieldNote[];
   evidence: WorkerJobEvidence[];
   executionEvents: WorkerExecutionEvent[];
+}
+
+export interface WorkOrderMaintenanceRecord {
+  id: string;
+  workOrderId: string;
+  workerId?: string;
+  actorUserId?: string;
+  workerName: string;
+  workerEmail?: string;
+  templateSnapshot: MaintenanceRecordTemplate;
+  recordData: MaintenanceRecordData;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaintenanceRecordData {
+  callTypes?: Record<string, boolean>;
+  otherCallType?: string;
+  serviceChecks?: Record<string, boolean>;
+  measurements?: Record<string, string>;
+  chemicalValues?: Record<string, string>;
+  adjusted?: Record<string, boolean>;
+  withinRange?: Record<string, boolean>;
+  deliveries?: Record<string, string>;
+  clientNote?: string;
+}
+
+export interface UpsertWorkOrderMaintenanceRecordRequest {
+  templateSnapshot: MaintenanceRecordTemplate;
+  recordData: MaintenanceRecordData;
+  note?: string;
 }
 
 export interface WorkerJobChecklistItem {
@@ -206,11 +257,26 @@ export interface WorkerJobAsset {
   identifier?: string;
 }
 
+export interface WorkOrderRouteStop {
+  id: string;
+  stopOrder: number;
+  stopType: 'PICKUP' | 'DELIVERY' | 'RETURN' | 'KEYS' | 'SUPPLIER' | 'WAREHOUSE' | 'OWNER' | 'OTHER';
+  name: string;
+  address?: string;
+  instructions?: string;
+  plannedArrival?: string;
+  arrivedAt?: string;
+  completedAt?: string;
+  skippedAt?: string;
+  skippedReason?: string;
+}
+
 export interface WorkerJobActionRequest {
   action: WorkerJobAction;
   note?: string;
   noteId?: string;
   taskId?: string;
+  routeStopId?: string;
   materialId?: string;
   inventoryItemId?: string;
   materialDescription?: string;
@@ -280,6 +346,80 @@ export interface PresignedPhotoUpload {
 export interface WorkerJobActionResponse {
   job: WorkerAssignedJob;
   message: string;
+}
+
+export interface WorkerDailyLoadout {
+  id: string;
+  date: string;
+  workerId: string;
+  workerName: string;
+  status: 'PLANNED' | 'PARTIAL' | 'CHECKED_OUT' | 'RETURNED' | 'ISSUE_REPORTED' | string;
+  scheduledJobs: number;
+  toolCount: number;
+  checkedOutCount: number;
+  returnedCount: number;
+  issueCount: number;
+  tools: WorkerLoadoutTool[];
+  materials: WorkerLoadoutMaterial[];
+  activities: WorkerActivity[];
+}
+
+export interface WorkerLoadoutTool {
+  assetId: string;
+  workOrderId: string;
+  workOrderNumber: string;
+  workOrderTitle: string;
+  propertyName: string;
+  assetType: string;
+  name: string;
+  identifier?: string;
+  status: 'PLANNED' | 'CHECKED_OUT' | 'RETURNED' | 'DAMAGED' | 'MISSING' | string;
+  issueNote?: string;
+}
+
+export interface WorkerLoadoutMaterial {
+  materialId: string;
+  inventoryItemId?: string;
+  workOrderId: string;
+  workOrderNumber: string;
+  workOrderTitle: string;
+  propertyName: string;
+  itemName?: string;
+  description?: string;
+  quantity: number;
+  unit?: string;
+  used: boolean;
+}
+
+export interface WorkerLoadoutToolActionRequest {
+  workOrderId: string;
+  assetId: string;
+  note?: string;
+}
+
+export interface WorkerActivity {
+  id: string;
+  activityType: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'BREAK' | 'OTHER' | string;
+  title: string;
+  locationName?: string;
+  address?: string;
+  notes?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMinutes?: number;
+  open: boolean;
+}
+
+export interface WorkerActivityRecord extends WorkerActivity {
+  workerId: string;
+}
+
+export interface WorkerActivityRequest {
+  activityType?: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'BREAK' | 'OTHER' | string;
+  title?: string;
+  locationName?: string;
+  address?: string;
+  notes?: string;
 }
 
 export interface SuperAdminOverviewResponse {
@@ -381,6 +521,11 @@ export interface CreateServiceTypeRequest {
   description?: string;
   defaultDurationMinutes?: number;
   basePrice?: number;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
+}
+
+export interface UpdateServiceTypeStatusRequest {
+  active: boolean;
 }
 
 export interface ServiceCategory {
@@ -397,7 +542,51 @@ export interface ServiceType {
   description?: string;
   defaultDurationMinutes: number;
   basePrice?: number;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
   active: boolean;
+}
+
+export interface MaintenanceRecordTemplate {
+  enabled: boolean;
+  title?: string;
+  callTypes?: MaintenanceTemplateOption[];
+  checks?: MaintenanceTemplateItem[];
+  measurements?: MaintenanceTemplateMeasurement[];
+  chemicals?: MaintenanceTemplateChemical[];
+  deliveries?: MaintenanceTemplateDelivery[];
+  noteLabel?: string;
+}
+
+export interface MaintenanceTemplateOption {
+  key: string;
+  label: string;
+  defaultSelected?: boolean;
+  match?: string[];
+}
+
+export interface MaintenanceTemplateItem {
+  key: string;
+  label: string;
+  defaultSelected?: boolean;
+  match?: string[];
+}
+
+export interface MaintenanceTemplateMeasurement {
+  key: string;
+  label: string;
+  unit?: string;
+}
+
+export interface MaintenanceTemplateChemical {
+  key: string;
+  label: string;
+  unit?: string;
+}
+
+export interface MaintenanceTemplateDelivery {
+  key: string;
+  label: string;
+  inventoryKeywords?: string[];
 }
 
 export interface InventoryCatalog {
@@ -419,6 +608,7 @@ export interface InventoryItem {
   quantityOnHand: number;
   reorderLevel?: number;
   storageLocation?: string;
+  active: boolean;
 }
 
 export interface CreateInventoryCategoryRequest {
@@ -479,6 +669,14 @@ export interface CreateAssetRequest {
   assignedWorkerId?: string;
 }
 
+export interface UpdateInventoryItemStatusRequest {
+  active: boolean;
+}
+
+export interface UpdateAssetStatusRequest {
+  active: boolean;
+}
+
 export interface WorkerRecord {
   id: string;
   employeeNumber?: string;
@@ -498,6 +696,14 @@ export interface WorkerRecord {
   certifications: WorkerCertification[];
   serviceSkills: WorkerServiceSkill[];
   shifts: WorkerShiftTemplate[];
+}
+
+export interface WorkerClockEntryRecord {
+  id: string;
+  workerId: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMinutes?: number;
 }
 
 export type WorkerEngagementType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACTOR' | 'SEASONAL';
@@ -557,6 +763,7 @@ export interface UpdateWorkerStatusRequest {
 export interface WorkOrderRecord {
   id: string;
   workOrderNumber: string;
+  workOrderType: WorkOrderType;
   ownerId: string;
   ownerName: string;
   propertyId: string;
@@ -564,6 +771,7 @@ export interface WorkOrderRecord {
   propertyAddress: string;
   serviceTypeId?: string;
   serviceName?: string;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
   title: string;
   description?: string;
   status: WorkOrderStatus;
@@ -581,12 +789,29 @@ export interface WorkOrderRecord {
   materials: WorkOrderMaterial[];
   assets: WorkOrderAsset[];
   tasks: WorkOrderTask[];
+  routeStops: WorkOrderRouteStop[];
+  linkedWorkOrders: WorkOrderLink[];
+  linkedFromWorkOrders: WorkOrderLink[];
 }
+
+export interface WorkOrderLink {
+  linkedWorkOrderId: string;
+  workOrderNumber: string;
+  title: string;
+  propertyName: string;
+  status: WorkOrderStatus;
+  linkType: 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 'PICKUP_FOR';
+  notes?: string;
+}
+
+export type WorkOrderType = 'SERVICE' | 'PICKUP_DELIVERY' | 'INSPECTION' | 'FOLLOW_UP';
 
 export interface WorkOrderReview {
   workOrder: WorkOrderRecord;
   fieldNotes: WorkOrderReviewFieldNote[];
+  maintenanceRecords: WorkOrderMaintenanceRecord[];
   evidence: WorkOrderEvidence[];
+  workerActivities: WorkerActivityRecord[];
   timeEntries: WorkOrderTimeEntry[];
   invoices: WorkOrderInvoice[];
   communications: WorkOrderCommunication[];
@@ -663,12 +888,14 @@ export interface SendWorkOrderOwnerEmailRequest {
 export interface InvoiceRecord {
   id: string;
   invoiceNumber: string;
-  status: 'DRAFT' | 'SENT' | 'PARTIALLY_PAID' | 'PAID' | 'VOID';
+  status: InvoiceStatus;
   issuedOn?: string;
   dueOn?: string;
   subtotal: number;
   taxTotal: number;
   total: number;
+  paidTotal: number;
+  balanceDue: number;
   customerId: string;
   ownerName: string;
   ownerEmail?: string;
@@ -679,21 +906,85 @@ export interface InvoiceRecord {
   propertyName?: string;
   propertyAddress?: string;
   createdAt: string;
+  workOrders: InvoiceWorkOrderRecord[];
   lines: InvoiceLineRecord[];
+  payments: InvoicePaymentRecord[];
+}
+
+export type InvoiceStatus = 'DRAFT' | 'SENT' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'VOID';
+
+export interface InvoiceWorkOrderRecord {
+  workOrderId: string;
+  workOrderNumber: string;
+  title: string;
+  propertyName?: string;
+  propertyAddress?: string;
+  status?: string;
+  serviceName?: string;
 }
 
 export interface InvoiceLineRecord {
   id: string;
+  lineType: 'LABOR' | 'MATERIAL' | 'CUSTOM' | 'DISCOUNT';
   description: string;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  taxable: boolean;
+  taxRate: number;
 }
 
 export interface InvoiceLineRequest {
+  lineType?: 'LABOR' | 'MATERIAL' | 'CUSTOM' | 'DISCOUNT';
   description: string;
   quantity: number;
   unitPrice: number;
+  taxable?: boolean;
+  taxRate?: number;
+}
+
+export interface CreateBatchInvoiceRequest {
+  ownerId: string;
+  propertyId?: string;
+  workOrderIds: string[];
+  additionalLines?: InvoiceLineRequest[];
+  issuedOn?: string;
+  dueOn?: string;
+}
+
+export interface InvoicePaymentRecord {
+  id: string;
+  status: 'PENDING' | 'RECEIVED' | 'FAILED' | 'REFUNDED';
+  paymentMethod: 'CASH' | 'CHEQUE' | 'E_TRANSFER' | 'CARD' | 'BANK_TRANSFER' | 'OTHER';
+  amount: number;
+  paidAt?: string;
+  reference?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface RecordInvoicePaymentRequest {
+  amount: number;
+  paymentMethod: 'CASH' | 'CHEQUE' | 'E_TRANSFER' | 'CARD' | 'BANK_TRANSFER' | 'OTHER';
+  paidAt?: string;
+  reference?: string;
+  note?: string;
+}
+
+export interface UpdateInvoiceStatusRequest {
+  status: InvoiceStatus;
+  reason?: string;
+}
+
+export interface OwnerStatementRecord {
+  ownerId: string;
+  ownerName: string;
+  ownerEmail?: string;
+  ownerBillingEmail?: string;
+  invoicedTotal: number;
+  paidTotal: number;
+  balanceDue: number;
+  invoices: InvoiceRecord[];
 }
 
 export interface EmailTemplateRecord {
@@ -709,6 +1000,66 @@ export interface EmailTemplateRecord {
 export interface UpdateEmailTemplateRequest {
   subject: string;
   body: string;
+}
+
+export interface TenantSettingsRecord {
+  tenantName: string;
+  legalName: string;
+  timezone: string;
+  countryCode: string;
+  organizationName?: string;
+  billingEmail?: string;
+  supportEmail?: string;
+  phone?: string;
+  websiteUrl?: string;
+  addressLine1?: string;
+  city?: string;
+  provinceCode?: string;
+  postalCode?: string;
+  invoicePrefix: string;
+  invoiceFooter?: string;
+  paymentTerms?: string;
+  logoUrl?: string;
+  themePrimaryColor: string;
+  themeAccentColor: string;
+  emailProvider: 'SYSTEM' | 'TENANT_SMTP';
+  emailSenderName?: string;
+  emailFromAddress?: string;
+  emailReplyToAddress?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUsername?: string;
+  smtpPasswordConfigured: boolean;
+  smtpUseTls: boolean;
+}
+
+export interface UpdateTenantSettingsRequest {
+  organizationName?: string;
+  billingEmail?: string;
+  supportEmail?: string;
+  phone?: string;
+  websiteUrl?: string;
+  addressLine1?: string;
+  city?: string;
+  provinceCode?: string;
+  postalCode?: string;
+  countryCode?: string;
+  invoicePrefix?: string;
+  invoiceFooter?: string;
+  paymentTerms?: string;
+  logoUrl?: string;
+  themePrimaryColor?: string;
+  themeAccentColor?: string;
+  emailProvider?: 'SYSTEM' | 'TENANT_SMTP';
+  emailSenderName?: string;
+  emailFromAddress?: string;
+  emailReplyToAddress?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUsername?: string;
+  smtpPassword?: string;
+  clearSmtpPassword?: boolean;
+  smtpUseTls?: boolean;
 }
 
 export interface SendInvoiceEmailRequest {
@@ -738,6 +1089,87 @@ export interface WorkOrderAuditEntry {
 export interface WorkOrderReviewActionRequest {
   action: 'APPROVE' | 'APPROVE_AND_INVOICE' | 'SEND_BACK' | 'OVERRIDE_COMPLETE';
   note?: string;
+}
+
+export interface WorkOrderEvidenceActionRequest {
+  action: 'ADD_PHOTO' | 'ADD_PURCHASE_RECEIPT';
+  documentId: string;
+  photoType?: 'BEFORE' | 'AFTER' | 'ISSUE' | 'OTHER';
+  caption?: string;
+  receiptAmount?: number;
+  vendorName?: string;
+}
+
+export interface WorkOrderFieldOverrideRequest {
+  reason: string;
+  assignments?: WorkOrderAssignmentOverride[];
+  workerActivities?: WorkOrderWorkerActivityOverride[];
+  tasks?: WorkOrderTaskOverride[];
+  routeStops?: WorkOrderRouteStopOverride[];
+  materials?: WorkOrderMaterialOverride[];
+  fieldNotes?: WorkOrderFieldNoteOverride[];
+}
+
+export interface WorkOrderAssignmentOverride {
+  workerId: string;
+  assignmentStatus?: string;
+  leadWorker?: boolean;
+  notes?: string;
+  actualArrivedAt?: string;
+  actualWorkStartedAt?: string;
+  actualFinishedAt?: string;
+  actualWorkMinutes?: number;
+}
+
+export interface WorkOrderWorkerActivityOverride {
+  activityId?: string;
+  workerId?: string;
+  delete?: boolean;
+  activityType?: WorkerActivity['activityType'];
+  title?: string;
+  locationName?: string;
+  address?: string;
+  notes?: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface WorkOrderTaskOverride {
+  taskId: string;
+  completed?: boolean;
+  taskStatus?: WorkOrderTask['taskStatus'];
+  notes?: string;
+  completedAt?: string;
+}
+
+export interface WorkOrderRouteStopOverride {
+  routeStopId?: string;
+  delete?: boolean;
+  stopType?: WorkOrderRouteStop['stopType'];
+  name?: string;
+  address?: string;
+  instructions?: string;
+  plannedArrival?: string;
+  arrivedAt?: string;
+  completedAt?: string;
+  skippedAt?: string;
+  skippedReason?: string;
+}
+
+export interface WorkOrderMaterialOverride {
+  materialId?: string;
+  description?: string;
+  inventoryItemId?: string;
+  used?: boolean;
+  usedAt?: string;
+  quantity?: number;
+  unitCost?: number;
+}
+
+export interface WorkOrderFieldNoteOverride {
+  noteId?: string;
+  workerId?: string;
+  note: string;
 }
 
 export interface RecurringWorkTemplate {
@@ -804,6 +1236,13 @@ export interface WorkOrderAssignment {
   assignmentStatus: string;
   assignmentRole?: string;
   notes?: string;
+  actualArrivedAt?: string;
+  actualWorkStartedAt?: string;
+  actualFinishedAt?: string;
+  actualWorkMinutes?: number;
+  timingOverride?: boolean;
+  overrideReason?: string;
+  overrideUpdatedAt?: string;
 }
 
 export interface WorkerAvailabilityOption {
@@ -854,6 +1293,7 @@ export interface WorkOrderTask {
 export interface CreateWorkOrderRequest {
   propertyId: string;
   serviceTypeId?: string;
+  workOrderType?: WorkOrderType;
   assignedWorkerId?: string;
   assignedWorkerIds?: string[];
   leadWorkerId?: string;
@@ -874,6 +1314,8 @@ export interface CreateWorkOrderRequest {
   assetIds?: string[];
   tasks?: string[];
   taskItems?: CreateWorkOrderTaskRequest[];
+  routeStops?: CreateWorkOrderRouteStopRequest[];
+  linkedWorkOrders?: CreateWorkOrderLinkRequest[];
   allowAvailabilityOverride?: boolean;
   allowAvailabilityOverrideReason?: string;
 }
@@ -897,5 +1339,20 @@ export interface CreateWorkOrderTaskRequest {
   assignedWorkerId?: string;
   phase?: 'PRE_START' | 'COMPLETION';
   required?: boolean;
+  notes?: string;
+}
+
+export interface CreateWorkOrderRouteStopRequest {
+  id?: string;
+  stopType?: WorkOrderRouteStop['stopType'];
+  name: string;
+  address?: string;
+  instructions?: string;
+  plannedArrival?: string;
+}
+
+export interface CreateWorkOrderLinkRequest {
+  linkedWorkOrderId: string;
+  linkType?: WorkOrderLink['linkType'];
   notes?: string;
 }

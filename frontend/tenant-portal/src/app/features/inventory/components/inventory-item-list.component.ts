@@ -1,6 +1,6 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core';
-import { InventoryItem } from '@lorne/contracts';
+import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import type { InventoryItem } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
@@ -55,7 +55,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                   <td class="px-3 py-3 font-semibold text-slate-700">{{ item.quantityOnHand | number:'1.0-2' }} {{ item.unit }}</td>
                   <td class="px-3 py-3 text-slate-600">{{ item.reorderLevel ?? 0 | number:'1.0-2' }} {{ item.unit }}</td>
                   <td class="px-3 py-3">
-                    <p-tag [value]="isLow(item) ? 'Reorder' : 'Ready'" [severity]="isLow(item) ? 'warn' : 'success'" />
+                    <p-tag
+                      [value]="item.active ? (isLow(item) ? 'Reorder' : 'Ready') : 'Inactive'"
+                      [severity]="item.active ? (isLow(item) ? 'warn' : 'success') : 'secondary'"
+                    />
                   </td>
                   <td class="px-3 py-3 text-right">
                     <button pButton type="button" text rounded icon="pi pi-ellipsis-v" (click)="openItemMenu(item, $event, itemMenu)"></button>
@@ -85,6 +88,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class InventoryItemListComponent {
   readonly items = input.required<InventoryItem[]>();
+  readonly updateItem = output<InventoryItem>();
+  readonly adjustStock = output<InventoryItem>();
+  readonly updateItemStatus = output<{ item: InventoryItem; active: boolean }>();
+  readonly deleteItem = output<InventoryItem>();
   protected readonly selectedItem = signal<InventoryItem | null>(null);
   protected readonly itemMenuItems = signal<MenuItem[]>([]);
   protected readonly collection = new DenseCollectionState<InventoryItem>(
@@ -107,11 +114,11 @@ export class InventoryItemListComponent {
   protected openItemMenu(item: InventoryItem, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedItem.set(item);
     this.itemMenuItems.set([
-      { label: 'Update item', icon: 'pi pi-pencil', disabled: true },
-      { label: 'Adjust stock', icon: 'pi pi-plus-circle', disabled: true },
-      { label: 'Usage history', icon: 'pi pi-history', disabled: true },
+      { label: 'Update item', icon: 'pi pi-pencil', command: () => this.updateItem.emit(item) },
+      { label: 'Adjust stock', icon: 'pi pi-plus-circle', command: () => this.adjustStock.emit(item) },
       { separator: true },
-      { label: 'Deactivate item', icon: 'pi pi-ban', disabled: true }
+      { label: item.active ? 'Deactivate item' : 'Activate item', icon: item.active ? 'pi pi-ban' : 'pi pi-check-circle', command: () => this.updateItemStatus.emit({ item, active: !item.active }) },
+      { label: 'Delete item', icon: 'pi pi-trash', styleClass: 'text-red-600', command: () => this.deleteItem.emit(item) }
     ]);
     menu.toggle(event);
   }

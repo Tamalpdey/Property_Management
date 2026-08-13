@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { WorkerJobChecklistItem } from '@lorne/contracts';
+import type { WorkerJobChecklistItem } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
 

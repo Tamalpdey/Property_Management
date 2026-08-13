@@ -1,12 +1,12 @@
 import { Injectable, inject } from '@angular/core';
-import {
-  InventoryItem,
-  InvoiceRecord,
+import type {
   PropertyOwner,
   PropertyRecord,
+  InventoryItem,
   TenantAsset,
+  WorkerRecord,
   WorkOrderRecord,
-  WorkerRecord
+  InvoiceRecord
 } from '@lorne/contracts';
 import { forkJoin, map } from 'rxjs';
 import { InvoiceService } from '../../finance/services/invoice.service';
@@ -113,7 +113,10 @@ function buildAnalytics(input: {
 }): TenantAnalytics {
   const now = new Date();
   const todayKey = dayKey(now);
-  const invoiceWorkOrderIds = new Set(input.invoices.map((invoice) => invoice.workOrderId).filter(Boolean));
+  const invoiceWorkOrderIds = new Set(input.invoices.flatMap((invoice) => [
+    invoice.workOrderId,
+    ...(invoice.workOrders || []).map((workOrder) => workOrder.workOrderId)
+  ]).filter(Boolean));
   const openWorkOrders = input.workOrders.filter((workOrder) => !terminalWorkOrderStatuses.has(workOrder.status));
   const pendingReview = input.workOrders.filter((workOrder) => workOrder.status === 'PENDING_COMPLETION');
   const readyToInvoice = input.workOrders.filter((workOrder) =>

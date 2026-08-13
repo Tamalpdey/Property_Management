@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { SuperAdminOverviewResponse } from '@lorne/contracts';
+import type { SuperAdminOverviewResponse } from '@lorne/contracts';
 import { CardModule } from 'primeng/card';
 import { TagModule } from 'primeng/tag';
 

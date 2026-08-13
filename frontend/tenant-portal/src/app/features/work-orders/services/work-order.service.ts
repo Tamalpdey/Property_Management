@@ -1,6 +1,19 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, CancelWorkOrderRequest, CreateWorkOrderRequest, SendWorkOrderOwnerEmailRequest, WorkerAvailabilityOption, WorkOrderRecord, WorkOrderReview, WorkOrderReviewActionRequest } from '@lorne/contracts';
+import type {
+  ApiResponse,
+  CancelWorkOrderRequest,
+  CreateWorkOrderRequest,
+  PhotoUploadRequest,
+  PresignedPhotoUpload,
+  SendWorkOrderOwnerEmailRequest,
+  WorkerAvailabilityOption,
+  WorkOrderEvidenceActionRequest,
+  WorkOrderFieldOverrideRequest,
+  WorkOrderRecord,
+  WorkOrderReview,
+  WorkOrderReviewActionRequest
+} from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -51,6 +64,31 @@ export class WorkOrderService {
   reviewAction(workOrderId: string, request: WorkOrderReviewActionRequest) {
     return this.http
       .post<ApiResponse<WorkOrderReview>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/review/actions`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  fieldOverride(workOrderId: string, request: WorkOrderFieldOverrideRequest) {
+    return this.http
+      .patch<ApiResponse<WorkOrderReview>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/field-override`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  evidenceUploadUrl(workOrderId: string, request: PhotoUploadRequest) {
+    return this.http
+      .post<ApiResponse<PresignedPhotoUpload>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/evidence/upload-url`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  uploadEvidence(upload: PresignedPhotoUpload, file: File) {
+    return this.http.put(upload.uploadUrl, file, {
+      headers: upload.headers,
+      responseType: 'text'
+    });
+  }
+
+  evidenceAction(workOrderId: string, request: WorkOrderEvidenceActionRequest) {
+    return this.http
+      .post<ApiResponse<WorkOrderReview>>(`${environment.apiBaseUrl}/tenant/work-orders/${workOrderId}/evidence/actions`, request)
       .pipe(map((response) => response.data));
   }
 

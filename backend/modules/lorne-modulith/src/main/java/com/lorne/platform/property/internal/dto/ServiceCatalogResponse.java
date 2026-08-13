@@ -2,6 +2,7 @@ package com.lorne.platform.property.internal.dto;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record ServiceCatalogResponse(List<ServiceCategoryDto> categories, List<ServiceTypeDto> serviceTypes) {
@@ -16,6 +17,7 @@ public record ServiceCatalogResponse(List<ServiceCategoryDto> categories, List<S
             String description,
             int defaultDurationMinutes,
             BigDecimal basePrice,
+            Map<String, Object> maintenanceRecordTemplate,
             boolean active
     ) {
     }

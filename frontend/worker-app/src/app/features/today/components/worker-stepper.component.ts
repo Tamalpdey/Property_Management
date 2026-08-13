@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { WorkerTodayResponse, WorkerStepKey } from '@lorne/contracts';
+import type { WorkerTodayResponse, WorkerStepKey } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-worker-stepper',

@@ -16,7 +16,8 @@ public record InventoryCatalogResponse(List<InventoryCategoryDto> categories, Li
             String unit,
             BigDecimal quantityOnHand,
             BigDecimal reorderLevel,
-            String storageLocation
+            String storageLocation,
+            boolean active
     ) {
     }
 }

@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, CreateRecurringWorkTemplateRequest, RecurringWorkGenerationResult, RecurringWorkTemplate } from '@lorne/contracts';
+import type { ApiResponse, CreateRecurringWorkTemplateRequest, RecurringWorkGenerationResult, RecurringWorkTemplate } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 

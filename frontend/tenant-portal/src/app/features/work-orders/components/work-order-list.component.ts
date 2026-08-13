@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { WorkOrderRecord, WorkOrderStatus } from '@lorne/contracts';
+import type { WorkOrderRecord, WorkOrderStatus, WorkOrderType } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
@@ -23,6 +23,11 @@ export type WorkOrderReviewTarget = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOUR
 export interface WorkOrderReviewRequest {
   workOrder: WorkOrderRecord;
   target: WorkOrderReviewTarget;
+}
+
+export interface WorkOrderOverrideRequest {
+  workOrder: WorkOrderRecord;
+  target?: 'WORKERS' | 'ACTIVITY' | 'ROUTES' | 'CHECKLIST' | 'MATERIALS' | 'EVIDENCE' | 'NOTES';
 }
 
 export type WorkOrderStatusFilter = WorkOrderStatus | 'ALL' | 'OPEN' | 'REVIEW' | 'BILLING';
@@ -91,7 +96,7 @@ export interface WorkOrderListFilterChange {
               <input class="rounded-lg border border-slate-300 px-2 py-1 text-[0.9rem] font-semibold text-slate-700" type="date" [ngModel]="customTo()" (ngModelChange)="setCustomTo($event)" />
             }
             @if (collection.selectedCount() > 0) {
-              <button pButton type="button" size="small" severity="info" icon="pi pi-users" label="Bulk assign" (click)="bulkAssign()"></button>
+              <button pButton type="button" size="small" severity="info" icon="pi pi-users" label="Bulk assign" [disabled]="!canManageWorkOrders()" (click)="bulkAssign()"></button>
             }
             <button pButton type="button" size="small" severity="secondary" icon="pi pi-filter-slash" label="Clear" [disabled]="!hasFilters()" (click)="clearFilters()"></button>
           </div>
@@ -126,6 +131,7 @@ export interface WorkOrderListFilterChange {
                   <td class="px-3 py-3">
                     <div class="flex flex-wrap items-center gap-2">
                       <p class="font-bold text-slate-950">{{ workOrder.title }}</p>
+                      <span [class]="workOrderTypeClass(workOrder.workOrderType)">{{ workOrderTypeLabel(workOrder.workOrderType) }}</span>
                       <p-tag [value]="workOrder.priority" [severity]="workOrder.priority === 'URGENT' || workOrder.priority === 'HIGH' ? 'warn' : 'secondary'" />
                     </div>
                     <p class="mt-1 text-xs font-bold text-teal-700">{{ workOrder.workOrderNumber }}</p>
@@ -206,11 +212,14 @@ export class WorkOrderListComponent {
   readonly dateFilter = input<WorkOrderDateFilter>('ALL');
   readonly customFrom = input('');
   readonly customTo = input('');
+  readonly canManageWorkOrders = input(true);
+  readonly canManageBilling = input(true);
   readonly editWorkOrder = output<WorkOrderEditRequest>();
   readonly reviewWorkOrder = output<WorkOrderReviewRequest>();
   readonly generateInvoiceWorkOrder = output<WorkOrderRecord>();
   readonly cancelWorkOrder = output<WorkOrderRecord>();
   readonly bulkAssignWorkOrders = output<WorkOrderRecord[]>();
+  readonly overrideWorkOrder = output<WorkOrderOverrideRequest>();
   readonly filtersChanged = output<WorkOrderListFilterChange>();
   protected readonly selectedWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly workOrderMenuItems = signal<MenuItem[]>([]);
@@ -265,6 +274,33 @@ export class WorkOrderListComponent {
     return status.toLowerCase().replaceAll('_', ' ');
   }
 
+  protected workOrderTypeLabel(type: WorkOrderType | undefined): string {
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return 'Pickup';
+      case 'INSPECTION':
+        return 'Inspection';
+      case 'FOLLOW_UP':
+        return 'Follow-up';
+      default:
+        return 'Service';
+    }
+  }
+
+  protected workOrderTypeClass(type: WorkOrderType | undefined): string {
+    const base = 'rounded-full px-2 py-0.5 text-[0.68rem] font-black uppercase';
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return `${base} bg-amber-50 text-amber-700`;
+      case 'INSPECTION':
+        return `${base} bg-violet-50 text-violet-700`;
+      case 'FOLLOW_UP':
+        return `${base} bg-sky-50 text-sky-700`;
+      default:
+        return `${base} bg-teal-50 text-teal-700`;
+    }
+  }
+
   protected sourceLabel(source: string): string {
     return source.toLowerCase().replaceAll('_', ' ');
   }
@@ -291,6 +327,9 @@ export class WorkOrderListComponent {
   }
 
   protected bulkAssign(): void {
+    if (!this.canManageWorkOrders()) {
+      return;
+    }
     const selectedIds = this.collection.selectedIds();
     const selectedWorkOrders = this.workOrders().filter((workOrder) => selectedIds.has(workOrder.id) && !isReviewLocked(workOrder.status));
     this.bulkAssignWorkOrders.emit(selectedWorkOrders);
@@ -303,26 +342,24 @@ export class WorkOrderListComponent {
   protected openWorkOrderMenu(workOrder: WorkOrderRecord, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedWorkOrder.set(workOrder);
     const locked = isReviewLocked(workOrder.status);
+    const canManageWork = this.canManageWorkOrders();
+    const canManageBilling = this.canManageBilling();
     this.workOrderMenuItems.set([
-      { label: workOrder.status === 'PENDING_COMPLETION' ? 'Review completion' : '360 view', icon: 'pi pi-search', command: () => this.review(workOrder, 'SUMMARY') },
+      { label: workOrder.status === 'PENDING_COMPLETION' ? 'Review completion' : 'View / review', icon: 'pi pi-search', command: () => this.review(workOrder, 'SUMMARY') },
+      { label: 'Timeline & audit', icon: 'pi pi-history', command: () => this.review(workOrder, 'AUDIT') },
       { label: 'Print view', icon: 'pi pi-print', command: () => this.review(workOrder, 'SUMMARY') },
-      { label: 'Workers', icon: 'pi pi-users', command: () => this.review(workOrder, 'WORKERS') },
-      { label: 'Evidence', icon: 'pi pi-camera', command: () => this.review(workOrder, 'EVIDENCE') },
-      { label: 'Resources', icon: 'pi pi-box', command: () => this.review(workOrder, 'RESOURCES') },
+      { separator: true },
+      { label: 'Override worker data', icon: 'pi pi-pencil', disabled: !canManageWork, command: () => this.override(workOrder, 'WORKERS') },
+      { label: 'Update evidence', icon: 'pi pi-camera', disabled: !canManageWork, command: () => this.override(workOrder, 'EVIDENCE') },
+      { separator: true },
+      { label: 'Update work order', icon: 'pi pi-file-edit', disabled: !canManageWork || locked, command: () => this.edit(workOrder, 0) },
+      { label: 'Schedule / assign', icon: 'pi pi-calendar-clock', disabled: !canManageWork || locked, command: () => this.edit(workOrder, 1) },
+      { label: 'Resources', icon: 'pi pi-box', disabled: !canManageWork || locked, command: () => this.edit(workOrder, 4, 'INVENTORY') },
+      { separator: true },
       { label: 'Invoice', icon: 'pi pi-receipt', command: () => this.review(workOrder, 'INVOICE') },
-      { label: 'Communication', icon: 'pi pi-envelope', command: () => this.review(workOrder, 'COMMUNICATION') },
-      { label: 'Timeline', icon: 'pi pi-clock', command: () => this.review(workOrder, 'TIME') },
-      { label: 'Audit log', icon: 'pi pi-history', command: () => this.review(workOrder, 'AUDIT') },
-      { label: 'Generate invoice', icon: 'pi pi-file-edit', disabled: !canGenerateInvoice(workOrder.status), command: () => this.generateInvoice(workOrder) },
+      { label: 'Generate invoice', icon: 'pi pi-file-edit', disabled: !canManageBilling || !canGenerateInvoice(workOrder.status), command: () => this.generateInvoice(workOrder) },
       { separator: true },
-      { label: 'Update details', icon: 'pi pi-pencil', disabled: locked, command: () => this.edit(workOrder, 0) },
-      { label: 'Schedule', icon: 'pi pi-calendar-clock', disabled: locked, command: () => this.edit(workOrder, 1) },
-      { label: 'Assign workers', icon: 'pi pi-users', disabled: locked, command: () => this.edit(workOrder, 2) },
-      { label: 'Checklist', icon: 'pi pi-list-check', disabled: locked, command: () => this.edit(workOrder, 3) },
-      { label: 'Materials', icon: 'pi pi-box', disabled: locked, command: () => this.edit(workOrder, 4, 'INVENTORY') },
-      { label: 'Tools & equipment', icon: 'pi pi-wrench', disabled: locked, command: () => this.edit(workOrder, 4, 'TOOLS') },
-      { separator: true },
-      { label: 'Cancel order', icon: 'pi pi-ban', disabled: !canCancel(workOrder.status), command: () => this.cancel(workOrder) }
+      { label: 'Cancel order', icon: 'pi pi-ban', disabled: !canManageWork || !canCancel(workOrder.status), command: () => this.cancel(workOrder) }
     ]);
     menu.toggle(event);
   }
@@ -335,6 +372,11 @@ export class WorkOrderListComponent {
   protected review(workOrder: WorkOrderRecord, target: WorkOrderReviewTarget): void {
     this.selectedWorkOrder.set(null);
     this.reviewWorkOrder.emit({ workOrder, target });
+  }
+
+  protected override(workOrder: WorkOrderRecord, target: WorkOrderOverrideRequest['target'] = 'WORKERS'): void {
+    this.selectedWorkOrder.set(null);
+    this.overrideWorkOrder.emit({ workOrder, target });
   }
 
   protected generateInvoice(workOrder: WorkOrderRecord): void {

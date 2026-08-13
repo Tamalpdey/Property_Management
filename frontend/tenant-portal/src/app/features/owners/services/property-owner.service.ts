@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { ApiResponse, CreatePropertyOwnerRequest, PropertyOwner } from '@lorne/contracts';
+import type { ApiResponse, CreatePropertyOwnerRequest, PropertyOwner } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 

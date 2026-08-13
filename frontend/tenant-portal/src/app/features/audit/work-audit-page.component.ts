@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { AuditLogRecord } from '@lorne/contracts';
+import type { AuditLogRecord } from '@lorne/contracts';
 import { AuditLogListComponent } from './components/audit-log-list.component';
 import { TenantAuditService } from './services/tenant-audit.service';
 

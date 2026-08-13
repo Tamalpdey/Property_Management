@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { WorkerJobAction, WorkerJobActionRequest } from '@lorne/contracts';
+import type { WorkerJobAction, WorkerJobActionRequest } from '@lorne/contracts';
 
 @Injectable({ providedIn: 'root' })
 export class WorkerActionDraftService {

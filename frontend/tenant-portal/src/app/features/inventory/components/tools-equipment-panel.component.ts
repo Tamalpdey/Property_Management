@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { AssetCatalog } from '@lorne/contracts';
+import type { AssetCatalog, TenantAsset } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import { AssetListComponent } from './asset-list.component';
@@ -21,11 +21,21 @@ import { AssetListComponent } from './asset-list.component';
           <button pButton type="button" icon="pi pi-briefcase" label="Add equipment" (click)="addAsset.emit()"></button>
         </div>
       </div>
-      <lorne-asset-list [assets]="catalog().assets" />
+      <lorne-asset-list
+        [assets]="catalog().assets"
+        (updateAsset)="updateAsset.emit($event)"
+        (assignWorker)="assignWorker.emit($event)"
+        (updateAssetStatus)="updateAssetStatus.emit($event)"
+        (deleteAsset)="deleteAsset.emit($event)"
+      />
     </section>
   `
 })
 export class ToolsEquipmentPanelComponent {
   readonly catalog = input.required<AssetCatalog>();
   readonly addAsset = output<void>();
+  readonly updateAsset = output<TenantAsset>();
+  readonly assignWorker = output<TenantAsset>();
+  readonly updateAssetStatus = output<{ asset: TenantAsset; active: boolean }>();
+  readonly deleteAsset = output<TenantAsset>();
 }

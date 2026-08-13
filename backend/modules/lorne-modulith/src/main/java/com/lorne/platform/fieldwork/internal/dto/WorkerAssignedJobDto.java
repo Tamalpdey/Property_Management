@@ -3,16 +3,19 @@ package com.lorne.platform.fieldwork.internal.dto;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record WorkerAssignedJobDto(
         UUID id,
         String workOrderNumber,
+        String workOrderType,
         String title,
         String propertyName,
         String ownerName,
         String address,
         String serviceName,
+        Map<String, Object> maintenanceRecordTemplate,
         String status,
         String priority,
         Instant scheduledStart,
@@ -23,6 +26,9 @@ public record WorkerAssignedJobDto(
         List<ChecklistItemDto> checklist,
         List<MaterialDto> materials,
         List<AssetDto> assets,
+        List<RouteStopDto> routeStops,
+        List<LinkedWorkOrderDto> linkedWorkOrders,
+        List<LinkedWorkOrderDto> linkedFromWorkOrders,
         List<FieldNoteDto> fieldNotes,
         List<EvidenceDto> evidence,
         List<ExecutionEventDto> executionEvents
@@ -54,6 +60,32 @@ public record WorkerAssignedJobDto(
             String assetType,
             String name,
             String identifier
+    ) {
+    }
+
+    public record RouteStopDto(
+            UUID id,
+            int stopOrder,
+            String stopType,
+            String name,
+            String address,
+            String instructions,
+            Instant plannedArrival,
+            Instant arrivedAt,
+            Instant completedAt,
+            Instant skippedAt,
+            String skippedReason
+    ) {
+    }
+
+    public record LinkedWorkOrderDto(
+            UUID linkedWorkOrderId,
+            String workOrderNumber,
+            String title,
+            String propertyName,
+            String status,
+            String linkType,
+            String notes
     ) {
     }
 

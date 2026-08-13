@@ -1,6 +1,6 @@
 import { CurrencyPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
-import { WorkerRecord } from '@lorne/contracts';
+import type { WorkerRecord } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
@@ -128,12 +128,14 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class WorkerListComponent {
   readonly workers = input.required<WorkerRecord[]>();
+  readonly canManageAppLogins = input(false);
   readonly viewWorker = output<WorkerRecord>();
   readonly createAppLogin = output<WorkerRecord>();
   readonly editWorker = output<WorkerRecord>();
   readonly editWorkerSection = output<{ worker: WorkerRecord; tabIndex: number }>();
   readonly updateWorkerStatus = output<{ worker: WorkerRecord; status: string }>();
   readonly markWorkerOnLeave = output<WorkerRecord>();
+  readonly assignWorkOrder = output<WorkerRecord>();
   readonly assignEquipment = output<WorkerRecord>();
   readonly deleteWorker = output<WorkerRecord>();
   protected readonly selectedWorker = signal<WorkerRecord | null>(null);
@@ -178,29 +180,33 @@ export class WorkerListComponent {
 
   protected openWorkerMenu(worker: WorkerRecord, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedWorker.set(worker);
+    const appLoginItems: MenuItem[] = this.canManageAppLogins()
+      ? [
+          { separator: true },
+          {
+            label: worker.appLoginEnabled ? 'Reset app login' : 'Create app login',
+            icon: 'pi pi-key',
+            command: () => this.createAppLogin.emit(worker)
+          }
+        ]
+      : [];
+
     this.workerMenuItems.set([
       {
         label: 'View 360',
         icon: 'pi pi-id-card',
         command: () => this.viewWorker.emit(worker)
       },
-      { separator: true },
-      {
-        label: worker.appLoginEnabled ? 'Reset app login' : 'Create app login',
-        icon: 'pi pi-key',
-        command: () => this.createAppLogin.emit(worker)
-      },
+      { label: 'Assign work order', icon: 'pi pi-calendar-plus', command: () => this.assignWorkOrder.emit(worker) },
+      ...appLoginItems,
       { separator: true },
       { label: 'Update worker', icon: 'pi pi-pencil', command: () => this.editWorker.emit(worker) },
-      { label: 'Shift schedule', icon: 'pi pi-calendar-clock', command: () => this.editWorkerSection.emit({ worker, tabIndex: 2 }) },
-      { label: 'Service skills', icon: 'pi pi-wrench', command: () => this.editWorkerSection.emit({ worker, tabIndex: 1 }) },
-      { label: 'Safety and certifications', icon: 'pi pi-verified', command: () => this.editWorkerSection.emit({ worker, tabIndex: 3 }) },
       { label: 'Assign equipment', icon: 'pi pi-briefcase', command: () => this.assignEquipment.emit(worker) },
+      { label: 'Mark on leave', icon: 'pi pi-pause-circle', command: () => this.markWorkerOnLeave.emit(worker) },
       { separator: true },
       worker.status === 'ACTIVE'
         ? { label: 'Deactivate worker', icon: 'pi pi-ban', command: () => this.updateWorkerStatus.emit({ worker, status: 'INACTIVE' }) }
         : { label: 'Activate worker', icon: 'pi pi-check-circle', command: () => this.updateWorkerStatus.emit({ worker, status: 'ACTIVE' }) },
-      { label: 'Mark on leave', icon: 'pi pi-pause-circle', command: () => this.markWorkerOnLeave.emit(worker) },
       { label: 'Terminate worker', icon: 'pi pi-times-circle', command: () => this.updateWorkerStatus.emit({ worker, status: 'TERMINATED' }) },
       { label: 'Delete worker', icon: 'pi pi-trash', command: () => this.deleteWorker.emit(worker) }
     ]);

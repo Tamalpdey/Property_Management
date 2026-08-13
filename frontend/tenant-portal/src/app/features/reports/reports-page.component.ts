@@ -1,10 +1,25 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
+import type { WorkOrderRecord } from '@lorne/contracts';
 import { TenantAnalytics, TenantAnalyticsService } from '../analytics/services/tenant-analytics.service';
+import {
+  actualMinutes,
+  closedReportStatuses,
+  completedReportStatuses,
+  dateRangeLabel,
+  statusLabel,
+  workOrdersInDateRange
+} from './report-generation';
+
+interface ReportBucket {
+  label: string;
+  count: number;
+}
 
 @Component({
   selector: 'report-total',
@@ -19,7 +34,7 @@ import { TenantAnalytics, TenantAnalyticsService } from '../analytics/services/t
 })
 export class ReportTotalComponent {
   readonly label = input.required<string>();
-  readonly value = input.required<number>();
+  readonly value = input.required<number | string>();
   readonly detail = input.required<string>();
 }
 
@@ -28,9 +43,12 @@ export class ReportTotalComponent {
   standalone: true,
   template: `
     <article class="flex h-full min-h-56 flex-col rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-      <div class="min-h-10">
-        <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ eyebrow() }}</p>
-        <h2 class="mt-0.5 text-base font-black text-slate-950">{{ title() }}</h2>
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ eyebrow() }}</p>
+          <h2 class="mt-0.5 text-base font-black text-slate-950">{{ title() }}</h2>
+        </div>
+        <ng-content select="[panelAction]" />
       </div>
       <div class="mt-2 grid flex-1 content-start gap-1.5">
         <ng-content />
@@ -101,7 +119,7 @@ export class EmptyReportComponent {
 @Component({
   selector: 'lorne-reports-page',
   standalone: true,
-  imports: [BarRowComponent, ButtonModule, DatePipe, EmptyReportComponent, MoneyCardComponent, ReportPanelComponent, ReportTotalComponent, RouterLink, TagModule],
+  imports: [BarRowComponent, ButtonModule, DatePipe, EmptyReportComponent, FormsModule, MoneyCardComponent, ReportPanelComponent, ReportTotalComponent, RouterLink, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-2.5">
@@ -123,31 +141,55 @@ export class EmptyReportComponent {
       }
 
       @if (analytics(); as data) {
-        <div class="grid items-stretch gap-2.5 md:grid-cols-4">
+        <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div class="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p class="text-xs font-black uppercase tracking-wide text-teal-700">Snapshot filters</p>
+              <h2 class="text-base font-black text-slate-950">Operational report summary</h2>
+              <p class="mt-0.5 text-xs font-semibold text-slate-500">{{ dateRangeLabel(snapshotDateFrom, snapshotDateTo) || 'Showing all available work orders' }}</p>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-[10rem_10rem_auto]">
+              <label class="block">
+                <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">From</span>
+                <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" type="date" name="snapshotDateFrom" [(ngModel)]="snapshotDateFrom" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">To</span>
+                <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" type="date" name="snapshotDateTo" [(ngModel)]="snapshotDateTo" />
+              </label>
+              <button pButton type="button" severity="secondary" icon="pi pi-filter-slash" label="Reset" (click)="resetSnapshotDates()"></button>
+            </div>
+          </div>
+        </section>
+
+        <div class="grid items-stretch gap-2.5 md:grid-cols-4 xl:grid-cols-6">
           <report-total label="Owners" [value]="data.owners.length" detail="Portfolio records" />
           <report-total label="Properties" [value]="data.properties.length" detail="Managed locations" />
           <report-total label="Workers" [value]="data.workers.length" detail="All field profiles" />
-          <report-total label="Invoices" [value]="data.finance.invoiceCount" detail="Non-void records" />
+          <report-total label="Work orders" [value]="snapshotWorkOrders(data).length" detail="Matching date filters" />
+          <report-total label="Completed" [value]="snapshotCompletedCount(data)" detail="Completed or later" />
+          <report-total label="Actual hours" [value]="snapshotActualHours(data)" detail="Worker field time" />
         </div>
 
         <section class="grid items-stretch gap-2.5 xl:grid-cols-2">
           <report-panel title="Work order status" eyebrow="Operations">
-            @for (bucket of data.statusBuckets; track bucket.label) {
-              <bar-row [label]="bucket.label" [value]="bucket.count" [max]="maxCount(data.statusBuckets)" />
+            @for (bucket of snapshotStatusBuckets(data); track bucket.label) {
+              <bar-row [label]="bucket.label" [value]="bucket.count" [max]="maxCount(snapshotStatusBuckets(data))" />
             } @empty {
-              <empty-report label="No work-order status data." />
+              <empty-report label="No work-order status data for this date range." />
             }
           </report-panel>
 
           <report-panel title="Service demand" eyebrow="Services">
-            @for (bucket of data.serviceBuckets; track bucket.label) {
-              <bar-row [label]="bucket.label" [value]="bucket.count" [max]="maxCount(data.serviceBuckets)" />
+            @for (bucket of snapshotServiceBuckets(data); track bucket.label) {
+              <bar-row [label]="bucket.label" [value]="bucket.count" [max]="maxCount(snapshotServiceBuckets(data))" />
             } @empty {
-              <empty-report label="No service demand yet." />
+              <empty-report label="No service demand for this date range." />
             }
           </report-panel>
 
           <report-panel title="Finance snapshot" eyebrow="Revenue">
+            <span panelAction class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">{{ snapshotInvoiceCount(data) }} linked</span>
             <div class="grid gap-2 sm:grid-cols-2">
               <money-card label="Receivables" [amount]="data.finance.receivables" detail="Draft, sent, partially paid" tone="amber" />
               <money-card label="Paid" [amount]="data.finance.paidTotal" detail="Collected invoices" tone="teal" />
@@ -159,25 +201,19 @@ export class EmptyReportComponent {
             </div>
           </report-panel>
 
-          <report-panel title="Worker utilization" eyebrow="People">
-            <div class="overflow-hidden rounded-lg border border-slate-200">
-              <table class="w-full min-w-[34rem] border-collapse text-sm">
-                <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <tr><th class="px-3 py-2">Worker</th><th class="px-3 py-2">Type</th><th class="px-3 py-2 text-right">Active</th><th class="px-3 py-2 text-right">Today</th></tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                  @for (worker of data.workerLoad.slice(0, 10); track worker.workerId) {
-                    <tr>
-                      <td class="px-3 py-2 font-black text-slate-950">{{ worker.workerName }}</td>
-                      <td class="px-3 py-2 text-slate-600">{{ worker.status.toLowerCase().replaceAll('_', ' ') }}</td>
-                      <td class="px-3 py-2 text-right font-black">{{ worker.activeJobs }}</td>
-                      <td class="px-3 py-2 text-right font-black">{{ worker.scheduledToday }}</td>
-                    </tr>
-                  } @empty {
-                    <tr><td colspan="4" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No active worker load.</td></tr>
-                  }
-                </tbody>
-              </table>
+          <report-panel title="Worker load" eyebrow="People">
+            <div class="grid gap-2">
+              @for (worker of data.workerLoad.slice(0, 8); track worker.workerId) {
+                <div class="rounded-lg bg-slate-50 px-3 py-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="font-black text-slate-950">{{ worker.workerName }}</p>
+                    <span class="rounded-full bg-white px-2 py-1 text-xs font-black text-teal-700">{{ worker.activeJobs }} active</span>
+                  </div>
+                  <p class="mt-0.5 text-xs font-semibold text-slate-500">{{ worker.status.toLowerCase().replaceAll('_', ' ') }} · {{ worker.scheduledToday }} today</p>
+                </div>
+              } @empty {
+                <empty-report label="No active worker load." />
+              }
             </div>
           </report-panel>
 
@@ -210,6 +246,10 @@ export class ReportsPageComponent {
   protected readonly analytics = signal<TenantAnalytics | null>(null);
   protected readonly loading = signal(false);
   protected readonly error = signal('');
+  protected snapshotDateFrom = '';
+  protected snapshotDateTo = '';
+
+  protected readonly dateRangeLabel = dateRangeLabel;
 
   constructor() {
     void this.load();
@@ -227,6 +267,42 @@ export class ReportsPageComponent {
     }
   }
 
+  protected resetSnapshotDates(): void {
+    this.snapshotDateFrom = '';
+    this.snapshotDateTo = '';
+  }
+
+  protected snapshotWorkOrders(data: TenantAnalytics): WorkOrderRecord[] {
+    return workOrdersInDateRange(data.workOrders, this.snapshotDateFrom, this.snapshotDateTo);
+  }
+
+  protected snapshotStatusBuckets(data: TenantAnalytics): ReportBucket[] {
+    return countBuckets(this.snapshotWorkOrders(data).map((workOrder) => statusLabel(workOrder.status)));
+  }
+
+  protected snapshotServiceBuckets(data: TenantAnalytics): ReportBucket[] {
+    return countBuckets(this.snapshotWorkOrders(data).map((workOrder) => workOrder.serviceName || 'General service')).slice(0, 8);
+  }
+
+  protected snapshotCompletedCount(data: TenantAnalytics): number {
+    return this.snapshotWorkOrders(data).filter((workOrder) => completedReportStatuses.has(workOrder.status)).length;
+  }
+
+  protected snapshotOpenCount(data: TenantAnalytics): number {
+    return this.snapshotWorkOrders(data).filter((workOrder) => !closedReportStatuses.has(workOrder.status)).length;
+  }
+
+  protected snapshotInvoiceCount(data: TenantAnalytics): number {
+    const workOrderIds = new Set(this.snapshotWorkOrders(data).map((workOrder) => workOrder.id));
+    return data.invoices.filter((invoice) => invoice.workOrderId && workOrderIds.has(invoice.workOrderId)).length;
+  }
+
+  protected snapshotActualHours(data: TenantAnalytics): number {
+    const minutes = this.snapshotWorkOrders(data)
+      .reduce((total, workOrder) => total + actualMinutes(workOrder, 'PROPERTY', workOrder.propertyId), 0);
+    return Math.round((minutes / 60) * 10) / 10;
+  }
+
   protected maxCount(buckets: Array<{ count: number }>): number {
     return Math.max(1, ...buckets.map((bucket) => bucket.count));
   }
@@ -234,4 +310,14 @@ export class ReportsPageComponent {
   protected topOwners(data: TenantAnalytics) {
     return [...data.owners].sort((left, right) => right.propertyCount - left.propertyCount || left.displayName.localeCompare(right.displayName));
   }
+}
+
+function countBuckets(labels: string[]): ReportBucket[] {
+  const counts = new Map<string, number>();
+  for (const label of labels) {
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
 }

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateInventoryCategoryRequest } from '@lorne/contracts';
+import type { CreateInventoryCategoryRequest } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-inventory-category-form',

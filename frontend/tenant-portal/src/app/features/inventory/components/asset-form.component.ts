@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateAssetRequest, WorkerOption } from '@lorne/contracts';
+import type { CreateAssetRequest, TenantAsset, WorkerOption } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-asset-form',
@@ -14,7 +14,7 @@ import { CreateAssetRequest, WorkerOption } from '@lorne/contracts';
     <form class="space-y-4" (ngSubmit)="submit()">
       <div>
         <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Tool / equipment</p>
-        <h2 class="mt-1 text-xl font-bold text-slate-950">Assign equipment</h2>
+        <h2 class="mt-1 text-xl font-bold text-slate-950">{{ asset() ? 'Update equipment' : 'Assign equipment' }}</h2>
       </div>
       <label class="block">
         <span class="mb-1 block text-sm font-semibold text-slate-700">Type</span>
@@ -52,12 +52,13 @@ import { CreateAssetRequest, WorkerOption } from '@lorne/contracts';
           }
         </select>
       </label>
-      <button pButton type="submit" class="w-full" icon="pi pi-plus" [loading]="saving()" label="Add equipment"></button>
+      <button pButton type="submit" class="w-full" [icon]="asset() ? 'pi pi-save' : 'pi pi-plus'" [loading]="saving()" [label]="asset() ? 'Update equipment' : 'Add equipment'"></button>
     </form>
   `
 })
 export class AssetFormComponent {
   readonly workers = input.required<WorkerOption[]>();
+  readonly asset = input<TenantAsset | null>(null);
   readonly saving = input(false);
   readonly createAsset = output<CreateAssetRequest>();
   protected form: CreateAssetRequest = this.blankForm();
@@ -82,6 +83,17 @@ export class AssetFormComponent {
 
   selectWorker(workerId: string): void {
     this.form = { ...this.form, assignedWorkerId: workerId };
+  }
+
+  loadAsset(asset: TenantAsset): void {
+    this.form = {
+      assetType: asset.assetType,
+      name: asset.name,
+      identifier: asset.identifier ?? '',
+      quantityOnHand: asset.quantityOnHand,
+      storageLocation: asset.storageLocation ?? '',
+      assignedWorkerId: asset.assignedWorkerId ?? ''
+    };
   }
 
   private blankForm(): CreateAssetRequest {

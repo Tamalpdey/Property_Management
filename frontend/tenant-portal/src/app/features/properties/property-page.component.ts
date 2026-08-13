@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { CreatePropertyRequest, PropertyOwner, PropertyRecord, ServiceType } from '@lorne/contracts';
+import type { CreatePropertyRequest, PropertyOwner, PropertyRecord, ServiceType } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';

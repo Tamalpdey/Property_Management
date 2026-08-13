@@ -8,6 +8,7 @@ public record WorkerJobActionRequest(
         String note,
         UUID noteId,
         UUID taskId,
+        UUID routeStopId,
         UUID materialId,
         UUID inventoryItemId,
         String materialDescription,

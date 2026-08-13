@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateInventoryItemRequest, InventoryCategory } from '@lorne/contracts';
+import type { CreateInventoryItemRequest, InventoryCategory, InventoryItem } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-inventory-item-form',
@@ -14,7 +14,7 @@ import { CreateInventoryItemRequest, InventoryCategory } from '@lorne/contracts'
     <form class="space-y-4" (ngSubmit)="submit()">
       <div>
         <p class="text-xs font-bold uppercase tracking-wide text-blue-700">Consumable product</p>
-        <h2 class="mt-1 text-xl font-bold text-slate-950">Add stock item</h2>
+        <h2 class="mt-1 text-xl font-bold text-slate-950">{{ item() ? 'Update stock item' : 'Add stock item' }}</h2>
       </div>
       <label class="block">
         <span class="mb-1 block text-sm font-semibold text-slate-700">Category</span>
@@ -47,12 +47,13 @@ import { CreateInventoryItemRequest, InventoryCategory } from '@lorne/contracts'
           <p-inputnumber styleClass="w-full" inputStyleClass="w-full" name="reorderLevel" [min]="0" [minFractionDigits]="0" [maxFractionDigits]="2" [(ngModel)]="form.reorderLevel" />
         </label>
       </div>
-      <button pButton type="submit" class="w-full" icon="pi pi-plus" [loading]="saving()" label="Add item"></button>
+      <button pButton type="submit" class="w-full" [icon]="item() ? 'pi pi-save' : 'pi pi-plus'" [loading]="saving()" [label]="item() ? 'Update item' : 'Add item'"></button>
     </form>
   `
 })
 export class InventoryItemFormComponent {
   readonly categories = input.required<InventoryCategory[]>();
+  readonly item = input<InventoryItem | null>(null);
   readonly saving = input(false);
   readonly createItem = output<CreateInventoryItemRequest>();
   protected form: CreateInventoryItemRequest = this.blankForm();
@@ -73,6 +74,17 @@ export class InventoryItemFormComponent {
 
   reset(): void {
     this.form = this.blankForm();
+  }
+
+  loadItem(item: InventoryItem): void {
+    this.form = {
+      categoryId: item.categoryId ?? '',
+      name: item.name,
+      unit: item.unit,
+      quantityOnHand: item.quantityOnHand,
+      reorderLevel: item.reorderLevel,
+      storageLocation: item.storageLocation ?? ''
+    };
   }
 
   private blankForm(): CreateInventoryItemRequest {

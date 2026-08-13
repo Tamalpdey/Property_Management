@@ -60,6 +60,10 @@ lorne:
   jwt:
     secret: ${JWT_SECRET:lorne-local-development-secret-must-be-over-sixty-four-characters-change-in-production}
     access-token-expiration-ms: ${JWT_ACCESS_TOKEN_EXPIRATION_MS:3600000}
+    refresh-token:
+      worker-expiration-days: ${LORNE_REFRESH_TOKEN_WORKER_EXPIRATION_DAYS:30}
+      tenant-expiration-days: ${LORNE_REFRESH_TOKEN_TENANT_EXPIRATION_DAYS:7}
+      admin-expiration-days: ${LORNE_REFRESH_TOKEN_ADMIN_EXPIRATION_DAYS:1}
   security:
     allowed-origins: ${LORNE_ALLOWED_ORIGINS:http://localhost:4500,http://localhost:4501,http://localhost:4502}
   storage:

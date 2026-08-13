@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { WorkerAssignedJob } from '@lorne/contracts';
+import type { WorkerAssignedJob } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 
 @Component({

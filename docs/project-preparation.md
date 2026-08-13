@@ -538,15 +538,20 @@ Prefer aggregates rather than anemic table-by-table services:
 12. Implement property-owner, property, service-catalog, property-service assignment, inventory, equipment/assets, tenant user management, worker onboarding, customer, and work order CRUD APIs and replace mock frontend repositories module by module.
 13. Add server-side search, filtering, and pagination for owners, properties, service types, workers, inventory, and assets before production-scale tenant imports.
 14. Implement the work order state machine, field worker time tracking, photo upload metadata, approvals, and owner completion email flow. Owner completion notification should fire after operations approves worker-submitted work, not before review, and it should be logged separately from invoice delivery.
+14.1. Allow tenant admin and operations users to add work-order review evidence after field submission, including before/after/issue photos and purchase receipts, using the shared R2 document flow and work-order audit trail.
 15. Build the dedicated `worker-app` mobile/tablet flow as tap-first screens with prefilled data, large actions, photo capture, offline drafts, and minimal typing.
 15.1. Strengthen worker execution usability with searchable assigned-job queues, status/timing filters, Today navigation, route links, disabled-state guidance, validation messages, and locally saved action drafts.
-15.1.1. Keep worker app navigation simple: `/today` is the assigned-job list/calendar, while `/jobs/:id` is the work-order execution workspace with timing, checklist, materials/purchases, before/after/issue photos, tools/equipment return, notes, and completion actions.
+15.1.1. Keep worker app navigation simple: `/today` is the assigned-job list/calendar, `/loadout` is the worker's daily tools/equipment/materials checklist, and `/jobs/:id` is the work-order execution workspace with timing, checklist, materials/purchases, before/after/issue photos, tools/equipment return, notes, and completion actions.
 15.1.2. Add worker shift clock-in/clock-out after login as a fieldwork session API, then replace the temporary local shift clock state with backend-backed open-session status and audit events.
+15.1.3. Add daily loadout and tool return workflow: aggregate assigned work-order tools/equipment/materials by worker/date, require clock-in for checkout/return/issue actions, update the work-order tool release state on return, and audit every loadout tap.
 15.2. Add retry queues for offline/poor-network worker actions and R2 photo uploads, including visible pending/synced states and audit correlation IDs.
 15.3. Add GPS/time/device metadata capture for travel, arrival, work start, pauses, completion, photo evidence, material usage, and tool return actions.
 16. Add invoice generation, invoice PDF download, invoice owner email delivery, basic payment status tracking, payroll validation, and operational dashboards from real queries. Email templates for completion notices and invoices should remain separate tenant-admin settings.
 16.1. Build the payment lifecycle after invoice generation: record payment amount/method/date/reference, keep payment history against each invoice, auto-mark invoices as partially paid or paid, auto-mark the work order paid when fully settled, and audit every payment event.
 16.2. Dashboard and reports should expose real tenant operating data: open work, pending review, ready-to-invoice work orders, today schedule, worker load, receivables, overdue invoices, service demand, portfolio coverage, low inventory, and unassigned tools/equipment.
+16.3. Reports should be filterable and printable by worker or property, summarizing matching work orders, schedule, status, assigned workers, linked invoices, and billed totals.
+16.4. Tenant settings should own company profile, invoice branding, theme colors, payment terms, footer copy, and email sender configuration so invoice PDFs and owner emails can be tenant-branded.
+16.5. Email templates and email sender configuration are separate concerns: templates control copy, tenant settings control from/reply-to/SMTP identity, and delivery logs/audit prove what was sent or recorded.
 17. Harden with integration tests, module tests, security tests, migration validation, audit completeness tests, and idempotency checks for notifications/invoices/payroll.
 
 ## Open Product Questions
@@ -562,4 +567,6 @@ Prefer aggregates rather than anemic table-by-table services:
 
 ## Immediate Next Step
 
-The strongest next product slice is payment lifecycle plus notification history: record payments against invoices, show paid/balance state in work-order review and finance screens, show owner completion-email delivery history, and add retry/resend for failed completion notices. In parallel, the worker app still needs offline retry queues for field actions and R2 uploads so mobile/tablet usage remains reliable in weak network areas.
+The strongest next product slice is offline reliability for the worker app: queue field actions, notes, photo metadata, loadout actions, and R2 upload completion records locally when connectivity is weak, then retry with visible pending/synced states and audit correlation IDs.
+
+For tenant administration, the next finance/communication slice is to harden tenant-branded invoices and outbound mail settings: professional invoice PDF layout, tenant SMTP sender configuration, sender identity, theme colors, payment terms, and audited delivery results.

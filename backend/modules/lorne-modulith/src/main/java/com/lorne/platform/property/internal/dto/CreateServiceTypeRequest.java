@@ -2,6 +2,7 @@ package com.lorne.platform.property.internal.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.UUID;
 
 public record CreateServiceTypeRequest(
@@ -9,6 +10,7 @@ public record CreateServiceTypeRequest(
         @NotBlank String name,
         String description,
         Integer defaultDurationMinutes,
-        BigDecimal basePrice
+        BigDecimal basePrice,
+        Map<String, Object> maintenanceRecordTemplate
 ) {
 }

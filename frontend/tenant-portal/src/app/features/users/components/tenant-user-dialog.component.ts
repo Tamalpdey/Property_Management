@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
+import type { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';

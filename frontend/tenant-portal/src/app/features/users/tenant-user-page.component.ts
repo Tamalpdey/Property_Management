@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
+import type { CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
 import { WorkerManagementService } from '../workers/services/worker-management.service';
 import { TenantUserDialogComponent } from './components/tenant-user-dialog.component';
 import { TenantUserListComponent } from './components/tenant-user-list.component';

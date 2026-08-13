@@ -1,12 +1,17 @@
 package com.lorne.platform.finance.internal.controller;
 
 import com.lorne.platform.finance.internal.dto.InvoiceDto;
+import com.lorne.platform.finance.internal.dto.CreateBatchInvoiceRequest;
 import com.lorne.platform.finance.internal.dto.InvoiceLineRequest;
+import com.lorne.platform.finance.internal.dto.OwnerStatementDto;
+import com.lorne.platform.finance.internal.dto.RecordPaymentRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
+import com.lorne.platform.finance.internal.dto.UpdateInvoiceStatusRequest;
 import com.lorne.platform.finance.internal.service.InvoiceService;
 import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ContentDisposition;
@@ -19,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +53,24 @@ class InvoiceController {
         return ApiResponse.ok(invoiceService.get(principal.tenantId(), invoiceId));
     }
 
+    @GetMapping("/owners/{ownerId}/statement")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<OwnerStatementDto> ownerStatement(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID ownerId
+    ) {
+        return ApiResponse.ok(invoiceService.ownerStatement(principal.tenantId(), ownerId));
+    }
+
+    @PostMapping("/batch")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> createBatch(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @Valid @RequestBody CreateBatchInvoiceRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.createBatch(principal.tenantId(), principal.userId(), request));
+    }
+
     @GetMapping("/{invoiceId}/pdf")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
     ResponseEntity<byte[]> pdf(
@@ -69,7 +93,7 @@ class InvoiceController {
     ApiResponse<InvoiceDto> addLine(
             @AuthenticationPrincipal JwtPrincipal principal,
             @PathVariable UUID invoiceId,
-            @RequestBody InvoiceLineRequest request
+            @Valid @RequestBody InvoiceLineRequest request
     ) {
         return ApiResponse.ok(invoiceService.addLine(principal.tenantId(), principal.userId(), invoiceId, request));
     }
@@ -82,6 +106,26 @@ class InvoiceController {
             @PathVariable UUID lineId
     ) {
         return ApiResponse.ok(invoiceService.deleteLine(principal.tenantId(), principal.userId(), invoiceId, lineId));
+    }
+
+    @PatchMapping("/{invoiceId}/status")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> updateStatus(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID invoiceId,
+            @RequestBody UpdateInvoiceStatusRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.updateStatus(principal.tenantId(), principal.userId(), invoiceId, request));
+    }
+
+    @PostMapping("/{invoiceId}/payments")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> recordPayment(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID invoiceId,
+            @RequestBody RecordPaymentRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.recordPayment(principal.tenantId(), principal.userId(), invoiceId, request));
     }
 
     @PostMapping("/{invoiceId}/email")

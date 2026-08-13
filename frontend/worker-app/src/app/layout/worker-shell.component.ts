@@ -29,11 +29,17 @@ import { WorkerShiftClockComponent } from './worker-shift-clock.component';
         <router-outlet />
       </main>
 
-      <nav class="fixed inset-x-0 bottom-0 z-30 grid border-t border-teal-100 bg-white/95 shadow-[0_-12px_30px_rgba(15,118,110,0.12)] backdrop-blur">
-        <a routerLink="/today" routerLinkActive="text-teal-700" class="touch-action grid place-items-center gap-0.5 py-1.5 text-sm font-bold text-slate-500 no-underline sm:gap-1 sm:py-2">
-          <i class="pi pi-calendar"></i>
-          Jobs
-        </a>
+      <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-teal-100 bg-white/95 shadow-[0_-12px_30px_rgba(15,118,110,0.12)] backdrop-blur">
+        <div class="mx-auto grid max-w-xs grid-cols-2">
+          <a routerLink="/today" routerLinkActive="text-teal-700" class="touch-action grid place-items-center gap-0.5 py-1.5 text-sm font-bold text-slate-500 no-underline sm:gap-1 sm:py-2">
+            <i class="pi pi-calendar"></i>
+            Jobs
+          </a>
+          <a routerLink="/loadout" routerLinkActive="text-teal-700" class="touch-action grid place-items-center gap-0.5 py-1.5 text-sm font-bold text-slate-500 no-underline sm:gap-1 sm:py-2">
+            <i class="pi pi-briefcase"></i>
+            Loadout
+          </a>
+        </div>
       </nav>
     </div>
   `

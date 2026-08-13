@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { ApiResponse, CurrentUser, LoginRequest, LoginResponse } from '@lorne/contracts';
+import type { ApiResponse, CurrentUser, LoginRequest, LoginResponse } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
 

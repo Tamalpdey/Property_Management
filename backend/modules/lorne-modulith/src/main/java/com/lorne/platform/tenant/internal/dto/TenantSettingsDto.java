@@ -1,0 +1,33 @@
+package com.lorne.platform.tenant.internal.dto;
+
+public record TenantSettingsDto(
+        String tenantName,
+        String legalName,
+        String timezone,
+        String countryCode,
+        String organizationName,
+        String billingEmail,
+        String supportEmail,
+        String phone,
+        String websiteUrl,
+        String addressLine1,
+        String city,
+        String provinceCode,
+        String postalCode,
+        String invoicePrefix,
+        String invoiceFooter,
+        String paymentTerms,
+        String logoUrl,
+        String themePrimaryColor,
+        String themeAccentColor,
+        String emailProvider,
+        String emailSenderName,
+        String emailFromAddress,
+        String emailReplyToAddress,
+        String smtpHost,
+        Integer smtpPort,
+        String smtpUsername,
+        boolean smtpPasswordConfigured,
+        boolean smtpUseTls
+) {
+}

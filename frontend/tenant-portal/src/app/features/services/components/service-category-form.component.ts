@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateServiceCategoryRequest } from '@lorne/contracts';
+import type { CreateServiceCategoryRequest } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-service-category-form',

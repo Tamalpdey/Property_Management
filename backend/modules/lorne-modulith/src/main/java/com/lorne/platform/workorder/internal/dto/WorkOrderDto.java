@@ -4,11 +4,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public record WorkOrderDto(
         UUID id,
         String workOrderNumber,
+        String workOrderType,
         UUID ownerId,
         String ownerName,
         UUID propertyId,
@@ -16,6 +18,7 @@ public record WorkOrderDto(
         String propertyAddress,
         UUID serviceTypeId,
         String serviceName,
+        Map<String, Object> maintenanceRecordTemplate,
         String title,
         String description,
         String status,
@@ -32,7 +35,10 @@ public record WorkOrderDto(
         List<AssignmentDto> assignments,
         List<MaterialDto> materials,
         List<AssetDto> assets,
-        List<TaskDto> tasks
+        List<TaskDto> tasks,
+        List<RouteStopDto> routeStops,
+        List<LinkedWorkOrderDto> linkedWorkOrders,
+        List<LinkedWorkOrderDto> linkedFromWorkOrders
 ) {
     public record AssignmentDto(
             UUID workerId,
@@ -41,7 +47,14 @@ public record WorkOrderDto(
             boolean leadWorker,
             String assignmentStatus,
             String assignmentRole,
-            String notes
+            String notes,
+            Instant actualArrivedAt,
+            Instant actualWorkStartedAt,
+            Instant actualFinishedAt,
+            Long actualWorkMinutes,
+            boolean timingOverride,
+            String overrideReason,
+            Instant overrideUpdatedAt
     ) {
     }
 
@@ -77,6 +90,32 @@ public record WorkOrderDto(
             boolean required,
             boolean completed,
             String taskStatus,
+            String notes
+    ) {
+    }
+
+    public record RouteStopDto(
+            UUID id,
+            int stopOrder,
+            String stopType,
+            String name,
+            String address,
+            String instructions,
+            Instant plannedArrival,
+            Instant arrivedAt,
+            Instant completedAt,
+            Instant skippedAt,
+            String skippedReason
+    ) {
+    }
+
+    public record LinkedWorkOrderDto(
+            UUID linkedWorkOrderId,
+            String workOrderNumber,
+            String title,
+            String propertyName,
+            String status,
+            String linkType,
             String notes
     ) {
     }

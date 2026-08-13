@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
-import { PropertyRecord, ServiceType } from '@lorne/contracts';
+import type { PropertyRecord, ServiceType } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -66,7 +66,14 @@ import { PropertyServicePickerComponent } from './property-service-picker.compon
                       <span class="text-xs font-semibold text-amber-700">No services</span>
                     }
                     @if (property.services.length > 3) {
-                      <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">+{{ property.services.length - 3 }}</span>
+                      <button
+                        type="button"
+                        class="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 transition hover:bg-teal-50 hover:text-teal-800"
+                        [title]="hiddenServiceNames(property)"
+                        (click)="selectedProperty.set(property)"
+                      >
+                        +{{ property.services.length - 3 }} more
+                      </button>
                     }
                   </div>
                 </td>
@@ -164,5 +171,9 @@ export class PropertyListComponent {
       { label: 'Delete property', icon: 'pi pi-trash', command: () => this.deleteProperty.emit(property) }
     ]);
     menu.toggle(event);
+  }
+
+  protected hiddenServiceNames(property: PropertyRecord): string {
+    return property.services.slice(3).map((service) => service.serviceName).join('\n');
   }
 }

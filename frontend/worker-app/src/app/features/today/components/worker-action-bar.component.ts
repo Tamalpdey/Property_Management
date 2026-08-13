@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { WorkerJobAction } from '@lorne/contracts';
+import type { WorkerJobAction } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-worker-action-bar',

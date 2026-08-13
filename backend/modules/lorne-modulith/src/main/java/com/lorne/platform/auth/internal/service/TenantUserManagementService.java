@@ -187,6 +187,9 @@ public class TenantUserManagementService {
                 SET status = ?::user_status, updated_at = now(), updated_by = ?
                 WHERE id = ?
                 """, status, actorUserId, userId);
+        if ("DISABLED".equals(status)) {
+            revokeRefreshSessions(userId, tenantId);
+        }
         auditWriter.record(tenantId, actorUserId, status.equals("ACTIVE") ? "TENANT_USER_ACTIVATED" : "TENANT_USER_DEACTIVATED", "USER", userId, Map.of(
                 "status", status
         ));
@@ -219,6 +222,9 @@ public class TenantUserManagementService {
                     SET status = 'DISABLED'::user_status, updated_at = now(), updated_by = ?
                     WHERE id = ?
                     """, actorUserId, userId);
+            revokeRefreshSessions(userId, null);
+        } else {
+            revokeRefreshSessions(userId, tenantId);
         }
         auditWriter.record(tenantId, actorUserId, "TENANT_USER_REMOVED", "USER", userId, Map.of(
                 "remainingTenantRoles", remainingTenantRoles == null ? 0 : remainingTenantRoles
@@ -396,5 +402,24 @@ public class TenantUserManagementService {
                 .filter(user -> user.id().equals(userId))
                 .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant user not found."));
+    }
+
+    private void revokeRefreshSessions(UUID userId, UUID tenantId) {
+        if (tenantId == null) {
+            jdbcTemplate.update("""
+                    UPDATE auth_refresh_sessions
+                    SET revoked_at = now()
+                    WHERE user_id = ?
+                      AND revoked_at IS NULL
+                    """, userId);
+            return;
+        }
+        jdbcTemplate.update("""
+                UPDATE auth_refresh_sessions
+                SET revoked_at = now()
+                WHERE user_id = ?
+                  AND tenant_id = ?
+                  AND revoked_at IS NULL
+                """, userId, tenantId);
     }
 }

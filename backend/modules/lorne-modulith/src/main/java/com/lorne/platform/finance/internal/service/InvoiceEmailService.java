@@ -5,19 +5,17 @@ import com.lorne.platform.finance.internal.dto.InvoiceDto;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
 import com.lorne.platform.notification.EmailTemplateOperations;
+import com.lorne.platform.notification.OutboundEmailAttachment;
+import com.lorne.platform.notification.OutboundEmailMessage;
+import com.lorne.platform.notification.OutboundMailOperations;
+import com.lorne.platform.tenant.TenantSettingsOperations;
 import com.lorne.platform.shared.exception.BadRequestException;
-import jakarta.mail.MessagingException;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,26 +25,23 @@ public class InvoiceEmailService {
     private final AuditWriter auditWriter;
     private final EmailTemplateOperations emailTemplateOperations;
     private final InvoicePdfService invoicePdfService;
-    private final ObjectProvider<JavaMailSender> mailSenderProvider;
-    private final boolean mailEnabled;
-    private final String fromAddress;
+    private final OutboundMailOperations outboundMailOperations;
+    private final TenantSettingsOperations tenantSettingsOperations;
 
     public InvoiceEmailService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
             EmailTemplateOperations emailTemplateOperations,
             InvoicePdfService invoicePdfService,
-            ObjectProvider<JavaMailSender> mailSenderProvider,
-            @Value("${lorne.mail.enabled:false}") boolean mailEnabled,
-            @Value("${lorne.mail.from:no-reply@lorne.local}") String fromAddress
+            OutboundMailOperations outboundMailOperations,
+            TenantSettingsOperations tenantSettingsOperations
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.emailTemplateOperations = emailTemplateOperations;
         this.invoicePdfService = invoicePdfService;
-        this.mailSenderProvider = mailSenderProvider;
-        this.mailEnabled = mailEnabled;
-        this.fromAddress = fromAddress;
+        this.outboundMailOperations = outboundMailOperations;
+        this.tenantSettingsOperations = tenantSettingsOperations;
     }
 
     @Transactional
@@ -59,35 +54,16 @@ public class InvoiceEmailService {
         if (recipient == null) {
             throw new BadRequestException("Owner billing email is required before sending an invoice.");
         }
-        var values = templateValues(invoice);
+        var settings = tenantSettingsOperations.settings(tenantId);
+        var values = templateValues(invoice, settings.invoiceBrandName());
         var subject = emailTemplateOperations.render(firstNonBlank(safeRequest.subject(), template.subject()), values);
         var body = emailTemplateOperations.render(firstNonBlank(safeRequest.body(), template.body()), values);
-        var status = "RECORDED";
-        var providerMessage = "SMTP disabled. Email recorded for review.";
-        var sentAt = (Instant) null;
-
-        if (mailEnabled) {
-            try {
-                var mailSender = mailSenderProvider.getIfAvailable();
-                if (mailSender == null) {
-                    throw new IllegalStateException("JavaMailSender is not available.");
-                }
-                var message = mailSender.createMimeMessage();
-                var helper = new MimeMessageHelper(message, true);
-                helper.setFrom(fromAddress);
-                helper.setTo(recipient);
-                helper.setSubject(subject);
-                helper.setText(body, false);
-                helper.addAttachment(safeFilename(invoice.invoiceNumber()) + ".pdf", new ByteArrayResource(invoicePdfService.generate(invoice)));
-                mailSender.send(message);
-                status = "SENT";
-                providerMessage = "Sent by SMTP.";
-                sentAt = Instant.now();
-            } catch (MessagingException | RuntimeException exception) {
-                status = "FAILED";
-                providerMessage = exception.getMessage();
-            }
-        }
+        var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(
+                recipient,
+                subject,
+                body,
+                List.of(new OutboundEmailAttachment(safeFilename(invoice.invoiceNumber()) + ".pdf", invoicePdfService.generate(invoice, tenantId, settings), "application/pdf"))
+        ));
 
         var deliveryLogId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
@@ -104,13 +80,13 @@ public class InvoiceEmailService {
                 recipient,
                 subject,
                 body,
-                status,
-                providerMessage,
-                sentAt == null ? null : Timestamp.from(sentAt),
+                delivery.status(),
+                delivery.providerMessage(),
+                delivery.sentAt() == null ? null : Timestamp.from(delivery.sentAt()),
                 actorUserId,
                 actorUserId
         );
-        if ("SENT".equals(status)) {
+        if ("SENT".equals(delivery.status())) {
             jdbcTemplate.update("""
                     UPDATE invoices
                     SET status = 'SENT'::invoice_status, updated_by = ?, updated_at = now()
@@ -120,13 +96,14 @@ public class InvoiceEmailService {
         auditWriter.record(tenantId, actorUserId, "INVOICE_EMAIL_SENT", "INVOICE", invoice.id(), Map.of(
                 "invoiceNumber", invoice.invoiceNumber(),
                 "recipientEmail", recipient,
-                "status", status,
-                "mailEnabled", mailEnabled
+                "status", delivery.status(),
+                "provider", delivery.provider(),
+                "fromAddress", delivery.fromAddress()
         ));
-        return new SendInvoiceEmailResponse(deliveryLogId, status, recipient, sentAt);
+        return new SendInvoiceEmailResponse(deliveryLogId, delivery.status(), recipient, delivery.sentAt());
     }
 
-    private Map<String, String> templateValues(InvoiceDto invoice) {
+    private Map<String, String> templateValues(InvoiceDto invoice, String tenantName) {
         var values = new LinkedHashMap<String, String>();
         values.put("invoiceNumber", invoice.invoiceNumber());
         values.put("ownerName", invoice.ownerName());
@@ -139,7 +116,7 @@ public class InvoiceEmailService {
         values.put("invoiceTotal", money(invoice.total()));
         values.put("issuedOn", invoice.issuedOn() == null ? "" : invoice.issuedOn().toString());
         values.put("dueOn", invoice.dueOn() == null ? "" : invoice.dueOn().toString());
-        values.put("tenantName", "Lorne PropertyOps");
+        values.put("tenantName", tenantName);
         return values;
     }
 

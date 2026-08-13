@@ -1,9 +1,13 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import {
+import type {
   ApiResponse,
-  InvoiceLineRequest,
+  CreateBatchInvoiceRequest,
   InvoiceRecord,
+  InvoiceLineRequest,
+  RecordInvoicePaymentRequest,
+  UpdateInvoiceStatusRequest,
+  OwnerStatementRecord,
   SendInvoiceEmailRequest,
   SendInvoiceEmailResponse
 } from '@lorne/contracts';
@@ -17,6 +21,12 @@ export class InvoiceService {
   list() {
     return this.http
       .get<ApiResponse<InvoiceRecord[]>>(`${environment.apiBaseUrl}/tenant/invoices`)
+      .pipe(map((response) => response.data));
+  }
+
+  createBatch(request: CreateBatchInvoiceRequest) {
+    return this.http
+      .post<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/batch`, request)
       .pipe(map((response) => response.data));
   }
 
@@ -41,6 +51,24 @@ export class InvoiceService {
   deleteLine(invoiceId: string, lineId: string) {
     return this.http
       .delete<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/lines/${lineId}`)
+      .pipe(map((response) => response.data));
+  }
+
+  updateStatus(invoiceId: string, request: UpdateInvoiceStatusRequest) {
+    return this.http
+      .patch<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/status`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  recordPayment(invoiceId: string, request: RecordInvoicePaymentRequest) {
+    return this.http
+      .post<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/payments`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  ownerStatement(ownerId: string) {
+    return this.http
+      .get<ApiResponse<OwnerStatementRecord>>(`${environment.apiBaseUrl}/tenant/invoices/owners/${ownerId}/statement`)
       .pipe(map((response) => response.data));
   }
 

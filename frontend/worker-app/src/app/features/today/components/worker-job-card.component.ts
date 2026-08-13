@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { WorkerAssignedJob } from '@lorne/contracts';
+import type { WorkerAssignedJob } from '@lorne/contracts';
 import { TagModule } from 'primeng/tag';
 import { CardModule } from 'primeng/card';
 import { workerFacingStatus } from '../worker-job-ui';
@@ -32,6 +32,7 @@ import { workerFacingStatus } from '../worker-job-ui';
           <p class="text-xs font-black uppercase tracking-wide text-slate-500">Service address</p>
           <p class="mt-1 text-base font-bold leading-7 text-slate-800">{{ job().address }}</p>
           <div class="mt-3 flex flex-wrap gap-2">
+            <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-sky-800">{{ workTypeLabel() }}</span>
             <span class="rounded-full bg-teal-50 px-3 py-1 text-xs font-black text-teal-800">{{ job().serviceName || 'General service' }}</span>
             <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ job().ownerName }}</span>
           </div>
@@ -86,6 +87,19 @@ export class WorkerJobCardComponent {
 
   protected priorityLabel(): string {
     return this.job().priority.toUpperCase().replaceAll('_', ' ');
+  }
+
+  protected workTypeLabel(): string {
+    switch (this.job().workOrderType) {
+      case 'PICKUP_DELIVERY':
+        return 'Pickup';
+      case 'INSPECTION':
+        return 'Inspection';
+      case 'FOLLOW_UP':
+        return 'Follow-up';
+      default:
+        return 'Service';
+    }
   }
 
   protected priorityBadgeClass(): string {

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
 import { InputTextModule } from 'primeng/inputtext';
@@ -59,10 +59,13 @@ import { AuthService } from '../../core/services/auth.service';
 export class LoginComponent {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
-  protected email = 'worker@lorne.local';
-  protected password = 'Password123!';
+  private readonly route = inject(ActivatedRoute);
+  protected email = '';
+  protected password = '';
   protected readonly loading = signal(false);
-  protected readonly error = signal('');
+  protected readonly error = signal(this.route.snapshot.queryParamMap.get('session') === 'expired'
+    ? 'Your session expired. Sign in again to continue.'
+    : '');
 
   async login(): Promise<void> {
     if (this.loading()) {

@@ -1,6 +1,6 @@
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core';
-import { TenantAsset } from '@lorne/contracts';
+import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import type { TenantAsset } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
@@ -57,7 +57,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                   <td class="px-3 py-3 font-semibold text-slate-700">{{ asset.quantityOnHand | number:'1.0-2' }}</td>
                   <td class="px-3 py-3 font-semibold text-slate-700">{{ asset.assignedWorkerName || 'Unassigned' }}</td>
                   <td class="px-3 py-3">
-                    <p-tag [value]="asset.assignedWorkerName ? 'Assigned' : 'Available'" [severity]="asset.assignedWorkerName ? 'info' : 'success'" />
+                    <p-tag
+                      [value]="asset.active ? (asset.assignedWorkerName ? 'Assigned' : 'Available') : 'Inactive'"
+                      [severity]="asset.active ? (asset.assignedWorkerName ? 'info' : 'success') : 'secondary'"
+                    />
                   </td>
                   <td class="px-3 py-3 text-right">
                     <button pButton type="button" text rounded icon="pi pi-ellipsis-v" (click)="openAssetMenu(asset, $event, assetMenu)"></button>
@@ -87,6 +90,10 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class AssetListComponent {
   readonly assets = input.required<TenantAsset[]>();
+  readonly updateAsset = output<TenantAsset>();
+  readonly assignWorker = output<TenantAsset>();
+  readonly updateAssetStatus = output<{ asset: TenantAsset; active: boolean }>();
+  readonly deleteAsset = output<TenantAsset>();
   protected readonly selectedAsset = signal<TenantAsset | null>(null);
   protected readonly assetMenuItems = signal<MenuItem[]>([]);
   protected readonly collection = new DenseCollectionState<TenantAsset>(
@@ -106,11 +113,11 @@ export class AssetListComponent {
   protected openAssetMenu(asset: TenantAsset, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedAsset.set(asset);
     this.assetMenuItems.set([
-      { label: 'Update equipment', icon: 'pi pi-pencil', disabled: true },
-      { label: 'Assign worker', icon: 'pi pi-user-plus', disabled: true },
-      { label: 'Assignment history', icon: 'pi pi-history', disabled: true },
+      { label: 'Update equipment', icon: 'pi pi-pencil', command: () => this.updateAsset.emit(asset) },
+      { label: asset.assignedWorkerId ? 'Change assignment' : 'Assign worker', icon: 'pi pi-user-plus', command: () => this.assignWorker.emit(asset) },
       { separator: true },
-      { label: 'Deactivate equipment', icon: 'pi pi-ban', disabled: true }
+      { label: asset.active ? 'Deactivate equipment' : 'Activate equipment', icon: asset.active ? 'pi pi-ban' : 'pi pi-check-circle', command: () => this.updateAssetStatus.emit({ asset, active: !asset.active }) },
+      { label: 'Delete equipment', icon: 'pi pi-trash', styleClass: 'text-red-600', command: () => this.deleteAsset.emit(asset) }
     ]);
     menu.toggle(event);
   }

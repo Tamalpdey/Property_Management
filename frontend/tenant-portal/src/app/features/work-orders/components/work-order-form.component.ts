@@ -2,20 +2,23 @@ import { ChangeDetectionStrategy, Component, effect, input, output } from '@angu
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
-import {
-  CreateWorkOrderRequest,
-  InventoryItem,
+import type {
+  WorkOrderStatus,
+  WorkOrderSource,
   PropertyRecord,
   ServiceType,
+  InventoryItem,
   TenantAsset,
+  WorkerRecord,
   WorkOrderRecord,
-  WorkOrderSource,
-  WorkOrderStatus,
-  WorkerRecord
+  WorkOrderType,
+  CreateWorkOrderRequest
 } from '@lorne/contracts';
 
 type ChecklistPhase = 'PRE_START' | 'COMPLETION';
 type ResourceTab = 'INVENTORY' | 'TOOLS';
+type RouteStopType = 'PICKUP' | 'DELIVERY' | 'RETURN' | 'KEYS' | 'SUPPLIER' | 'WAREHOUSE' | 'OWNER' | 'OTHER';
+type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 'PICKUP_FOR';
 
 @Component({
   selector: 'lorne-work-order-form',
@@ -43,8 +46,8 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
       }
 
       <fieldset class="flex min-h-0 flex-1 flex-col gap-3" [disabled]="isLockedWorkOrder()">
-      <div class="flex-none grid grid-cols-5 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
-        @for (stepLabel of steps; track stepLabel; let index = $index) {
+      <div class="flex-none grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5" [style.grid-template-columns]="'repeat(' + currentSteps().length + ', minmax(0, 1fr))'">
+        @for (stepLabel of currentSteps(); track stepLabel; let index = $index) {
           <button
             pButton
             type="button"
@@ -52,7 +55,7 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
             [severity]="step === index ? 'primary' : 'secondary'"
             [text]="step !== index"
             [label]="stepLabel"
-            (click)="step = index"
+            (click)="setStep(index)"
           ></button>
         }
       </div>
@@ -61,6 +64,23 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
       @if (step === 0) {
         <div class="grid gap-2">
           <p class="text-xs font-semibold text-slate-500"><span class="font-black text-red-600">*</span> Required field</p>
+          @if (form.workOrderType !== 'SERVICE') {
+            <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-[13rem_1fr]">
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-slate-700">Work type</span>
+                <select class="w-full border border-slate-300 px-3 py-2" name="workOrderType" [(ngModel)]="form.workOrderType" (ngModelChange)="onWorkOrderTypeChange()">
+                  <option value="SERVICE">Service work</option>
+                  <option value="PICKUP_DELIVERY">Pickup / delivery</option>
+                  <option value="INSPECTION">Inspection</option>
+                  <option value="FOLLOW_UP">Follow-up</option>
+                </select>
+              </label>
+              <div class="rounded-lg border border-white bg-white px-3 py-2">
+                <p class="text-sm font-bold text-slate-950">{{ workOrderTypeLabel(form.workOrderType) }}</p>
+                <p class="mt-0.5 text-xs font-semibold leading-5 text-slate-500">{{ workOrderTypeHelp(form.workOrderType) }}</p>
+              </div>
+            </div>
+          }
           <div class="grid gap-2 md:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Owner <span class="text-red-600">*</span></span>
@@ -86,6 +106,30 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
             <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
               {{ property.ownerName }} · {{ property.addressLine1 }}, {{ property.city }}
             </div>
+          }
+
+          @if (form.workOrderType === 'PICKUP_DELIVERY') {
+            <section class="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p class="text-sm font-black text-amber-950">Pickup / delivery job</p>
+                  <p class="text-xs font-semibold text-amber-800">Use this for supplier runs, key pickup, parts delivery, returns to base, or a pickup linked to another work order.</p>
+                </div>
+                <button pButton type="button" size="small" severity="secondary" icon="pi pi-map-marker" label="Add pickup stop" (click)="addPickupStop()"></button>
+              </div>
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-amber-950">Pickup for existing work order</span>
+                <select class="w-full border border-amber-300 px-3 py-2" name="pickupForWorkOrderId" [(ngModel)]="pickupForWorkOrderId" (ngModelChange)="syncPickupLink()">
+                  <option value="">Not linked yet</option>
+                  @for (candidate of linkableWorkOrders(); track candidate.id) {
+                    <option [value]="candidate.id">{{ linkLabel(candidate) }}</option>
+                  }
+                </select>
+              </label>
+              @if (routeStopRows.length) {
+                <p class="text-xs font-bold text-amber-900">{{ routeStopRows.length }} stop{{ routeStopRows.length === 1 ? '' : 's' }} will drive the worker pickup route. The worker closes each stop, then completes the pickup job.</p>
+              }
+            </section>
           }
 
           <div class="grid gap-2 md:grid-cols-3">
@@ -142,7 +186,7 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
         </div>
       }
 
-      @if (step === 1) {
+          @if (step === 1) {
         <div class="grid gap-2">
           <div class="grid gap-2 md:grid-cols-3">
             <label class="block">
@@ -168,6 +212,121 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
               This is a draft generated from a recurring work template. Recurrence rules are managed from the Schedule board.
             </p>
           }
+          @if (form.workOrderType === 'PICKUP_DELIVERY') {
+            <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+              Pickup orders are one-off dispatch work. Add the real stops: pickup, delivery, return, supplier, warehouse, or keys.
+            </p>
+          }
+
+          @if (form.workOrderType !== 'PICKUP_DELIVERY') {
+          <section class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Recurrence</span>
+              <select class="w-full border border-slate-300 px-3 py-2" name="recurrenceRule" [(ngModel)]="form.recurrenceRule">
+                <option value="">None</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+                <option value="MONTHLY">Monthly</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Every</span>
+              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceInterval" type="number" min="1" [(ngModel)]="form.recurrenceInterval" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Until</span>
+              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceUntil" type="date" [(ngModel)]="form.recurrenceUntil" />
+            </label>
+          </section>
+          }
+
+          <section class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p class="text-sm font-bold text-slate-950">Route stops before site</p>
+                <p class="text-xs font-semibold text-slate-500">{{ form.workOrderType === 'PICKUP_DELIVERY' ? 'Worker visits these stops in order and marks each stop arrived, done, or skipped.' : 'Pickup keys, parts, chemicals, or supplier items before the service address.' }}</p>
+              </div>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-plus" label="Add stop" (click)="addRouteStop()"></button>
+            </div>
+            @for (stop of routeStopRows; track stop.id; let index = $index) {
+              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-[8rem_1fr_1fr_11rem_auto]">
+                <select class="w-full border border-slate-300 px-2 py-2 text-sm" name="routeStopType{{ stop.id }}" [(ngModel)]="stop.stopType">
+                  <option value="PICKUP">Pickup</option>
+                  <option value="DELIVERY">Delivery</option>
+                  <option value="RETURN">Return</option>
+                  <option value="KEYS">Keys</option>
+                  <option value="SUPPLIER">Supplier</option>
+                  <option value="WAREHOUSE">Warehouse</option>
+                  <option value="OWNER">Owner</option>
+                  <option value="OTHER">Other</option>
+                </select>
+                <input pInputText class="w-full" name="routeStopName{{ stop.id }}" placeholder="Stop name" [(ngModel)]="stop.name" />
+                <input pInputText class="w-full" name="routeStopAddress{{ stop.id }}" placeholder="Address or location" [(ngModel)]="stop.address" />
+                <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="routeStopArrival{{ stop.id }}" type="datetime-local" [(ngModel)]="stop.plannedArrival" />
+                <button pButton type="button" severity="secondary" icon="pi pi-trash" [text]="true" (click)="removeRouteStop(stop.id)"></button>
+                <textarea class="md:col-span-5 w-full border border-slate-300 px-3 py-2 text-sm" name="routeStopInstructions{{ stop.id }}" rows="2" placeholder="Stop instructions, confirmation notes, contact, shelf/bin, etc." [(ngModel)]="stop.instructions"></textarea>
+              </div>
+            } @empty {
+              <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500">No pre-site stops added.</p>
+            }
+          </section>
+
+          <section class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p class="text-sm font-bold text-slate-950">Linked work orders</p>
+                <p class="text-xs font-semibold text-slate-500">Show dispatch how this job depends on pickup, previous work, blocked work, or recurrence.</p>
+              </div>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-plus" label="Add link" (click)="addWorkOrderLink()"></button>
+            </div>
+            @for (link of linkRows; track link.id) {
+              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <div class="grid gap-2 md:grid-cols-[minmax(18rem,1fr)_auto] md:items-start">
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-black uppercase text-slate-500">Work order</span>
+                    <select class="w-full border border-slate-300 px-2 py-2 text-sm" name="linkedWorkOrder{{ link.id }}" [(ngModel)]="link.linkedWorkOrderId">
+                      <option value="">Select work order</option>
+                      @for (candidate of linkableWorkOrders(); track candidate.id) {
+                        <option [value]="candidate.id">{{ linkLabel(candidate) }}</option>
+                      }
+                    </select>
+                    @if (linkedCandidateMeta(link); as meta) {
+                      <p class="mt-1 truncate text-xs font-semibold text-slate-500">{{ meta }}</p>
+                    }
+                  </label>
+                  <button pButton type="button" severity="secondary" icon="pi pi-trash" [text]="true" (click)="removeWorkOrderLink(link.id)"></button>
+                </div>
+
+                <div class="grid gap-2 md:grid-cols-5">
+                  @for (option of linkTypeOptions; track option.value) {
+                    <button
+                      type="button"
+                      class="rounded-lg border px-3 py-2 text-left transition"
+                      [class.border-emerald-300]="link.linkType === option.value"
+                      [class.bg-emerald-50]="link.linkType === option.value"
+                      [class.text-emerald-900]="link.linkType === option.value"
+                      [class.border-slate-200]="link.linkType !== option.value"
+                      [class.bg-white]="link.linkType !== option.value"
+                      [class.text-slate-600]="link.linkType !== option.value"
+                      (click)="link.linkType = option.value"
+                    >
+                      <span class="block text-xs font-black uppercase">{{ option.label }}</span>
+                      <span class="mt-0.5 block text-xs font-semibold leading-4">{{ option.shortHelp }}</span>
+                    </button>
+                  }
+                </div>
+
+                <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                  <p class="text-sm font-bold text-slate-950">{{ linkTypeTitle(link.linkType) }}</p>
+                  <p class="mt-0.5 text-xs font-semibold leading-5 text-slate-500">{{ linkTypeRule(link.linkType) }}</p>
+                </div>
+
+                <input pInputText class="w-full" name="linkNotes{{ link.id }}" placeholder="Internal note, reason, supplier PO, return instruction..." [(ngModel)]="link.notes" />
+              </div>
+            } @empty {
+              <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500">No linked work orders.</p>
+            }
+          </section>
         </div>
       }
 
@@ -203,7 +362,7 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
             </label>
           }
 
-          <div class="grid max-h-72 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+          <div class="grid max-h-[34rem] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
           @for (worker of filteredWorkers(); track worker.id) {
             <label class="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <input type="checkbox" [checked]="selectedWorkerIds.has(worker.id)" (change)="toggleWorker(worker.id, $event)" />
@@ -397,10 +556,10 @@ type ResourceTab = 'INVENTORY' | 'TOOLS';
       </div>
 
       <div class="-mx-4 -mb-4 flex flex-none justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
-        <button pButton type="button" severity="secondary" icon="pi pi-arrow-left" label="Back" [disabled]="step === 0" (click)="step = step - 1"></button>
+        <button pButton type="button" severity="secondary" icon="pi pi-arrow-left" label="Back" [disabled]="step === 0" (click)="setStep(step - 1)"></button>
         <div class="flex gap-2">
-          @if (step < steps.length - 1) {
-            <button pButton type="button" severity="secondary" icon="pi pi-arrow-right" iconPos="right" label="Next" (click)="step = step + 1"></button>
+          @if (step < currentSteps().length - 1) {
+            <button pButton type="button" severity="secondary" icon="pi pi-arrow-right" iconPos="right" label="Next" (click)="setStep(step + 1)"></button>
           }
           <button pButton type="submit" icon="pi pi-save" [disabled]="isLockedWorkOrder()" [loading]="saving()" label="Save work order"></button>
         </div>
@@ -419,15 +578,18 @@ export class WorkOrderFormComponent {
   readonly workOrder = input<WorkOrderRecord | null>(null);
   readonly initialStep = input(0);
   readonly initialResourceTab = input<ResourceTab>('INVENTORY');
+  readonly initialWorkOrderType = input<WorkOrderType>('SERVICE');
   readonly saving = input(false);
   readonly saveError = input('');
   readonly createWorkOrder = output<CreateWorkOrderRequest>();
 
   protected readonly steps = ['Context', 'Schedule', 'Workers', 'Checklist', 'Resources'];
+  protected readonly pickupSteps = ['Pickup', 'Stops', 'Worker'];
+  protected readonly linkTypeOptions = LINK_TYPE_OPTIONS;
   protected step = 0;
   protected resourceTab: ResourceTab = 'INVENTORY';
   protected ownerId = '';
-  protected form: CreateWorkOrderRequest = this.blankForm();
+  protected form: CreateWorkOrderRequest = this.blankForm('SERVICE');
   protected scheduledStart = '';
   protected scheduledEnd = '';
   protected readonly selectedWorkerIds = new Set<string>();
@@ -435,6 +597,9 @@ export class WorkOrderFormComponent {
   protected leadWorkerId = '';
   protected materialRows: MaterialRow[] = [];
   protected taskRows: TaskRow[] = defaultCompletionTasks();
+  protected routeStopRows: RouteStopRow[] = [];
+  protected linkRows: LinkRow[] = [];
+  protected pickupForWorkOrderId = '';
   protected workerSearch = '';
   protected workerEngagementFilter = 'ALL';
   protected workerAvailabilityFilter = 'AVAILABLE';
@@ -468,10 +633,18 @@ export class WorkOrderFormComponent {
       const requestedStep = this.initialStep();
       const requestedResourceTab = this.initialResourceTab();
       if (workOrder) {
-        this.step = clampStep(requestedStep);
+        this.step = this.clampStep(requestedStep);
         this.resourceTab = requestedResourceTab;
       }
     });
+  }
+
+  protected currentSteps(): string[] {
+    return this.form.workOrderType === 'PICKUP_DELIVERY' ? this.pickupSteps : this.steps;
+  }
+
+  protected setStep(step: number): void {
+    this.step = this.clampStep(step);
   }
 
   protected ownerOptions(): OwnerOption[] {
@@ -576,6 +749,7 @@ export class WorkOrderFormComponent {
     if (this.saving() || this.isLockedWorkOrder()) {
       return;
     }
+    const isPickupDelivery = this.form.workOrderType === 'PICKUP_DELIVERY';
     if (!this.ownerId) {
       this.step = 0;
       this.formError = 'Owner is required.';
@@ -589,6 +763,11 @@ export class WorkOrderFormComponent {
     if (!this.form.title.trim()) {
       this.step = 0;
       this.formError = 'Work order title is required.';
+      return;
+    }
+    if (isPickupDelivery && this.routeStopRows.filter((stop) => stop.name.trim()).length === 0) {
+      this.step = 1;
+      this.formError = 'Add at least one pickup, delivery, supplier, warehouse, or return stop.';
       return;
     }
     const availabilityWarnings = this.selectedAvailabilityWarnings();
@@ -607,9 +786,16 @@ export class WorkOrderFormComponent {
       this.formError = 'Dispatch override reason is required.';
       return;
     }
+    const duplicateLinks = this.duplicateLinkLabels();
+    if (duplicateLinks.length) {
+      this.step = 1;
+      this.formError = `Remove duplicate linked work order relationship: ${duplicateLinks[0]}.`;
+      return;
+    }
     const workerIds = [...this.selectedWorkerIds];
     this.createWorkOrder.emit({
       ...this.form,
+      workOrderType: this.form.workOrderType || 'SERVICE',
       serviceTypeId: this.form.serviceTypeId || undefined,
       assignedWorkerId: workerIds[0] || undefined,
       assignedWorkerIds: workerIds,
@@ -619,9 +805,9 @@ export class WorkOrderFormComponent {
       requesterName: this.form.requesterName?.trim() || undefined,
       requesterEmail: this.form.requesterEmail?.trim() || undefined,
       requesterPhone: this.form.requesterPhone?.trim() || undefined,
-      recurrenceRule: this.form.recurrenceRule || undefined,
-      recurrenceInterval: this.form.recurrenceRule ? this.form.recurrenceInterval || 1 : undefined,
-      recurrenceUntil: this.form.recurrenceRule ? this.form.recurrenceUntil || undefined : undefined,
+      recurrenceRule: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceRule : undefined,
+      recurrenceInterval: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceInterval || 1 : undefined,
+      recurrenceUntil: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceUntil || undefined : undefined,
       allowAvailabilityOverride: this.allowAvailabilityOverride || undefined,
       allowAvailabilityOverrideReason: this.allowAvailabilityOverride ? this.availabilityOverrideReason.trim() : undefined,
       scheduledStart: this.scheduledStart ? new Date(this.scheduledStart).toISOString() : undefined,
@@ -638,6 +824,7 @@ export class WorkOrderFormComponent {
       assetIds: [...this.selectedAssetIds],
       tasks: [],
       taskItems: this.taskRows
+        .filter(() => !isPickupDelivery)
         .filter((task) => task.label.trim())
         .map((task) => ({
           id: task.existingId || undefined,
@@ -646,17 +833,34 @@ export class WorkOrderFormComponent {
           phase: task.phase,
           required: task.required,
           notes: task.notes?.trim() || undefined
+        })),
+      routeStops: this.routeStopRows
+        .filter((stop) => stop.name.trim())
+        .map((stop) => ({
+          id: stop.existingId || undefined,
+          stopType: stop.stopType,
+          name: stop.name.trim(),
+          address: stop.address.trim() || undefined,
+          instructions: stop.instructions.trim() || undefined,
+          plannedArrival: stop.plannedArrival ? new Date(stop.plannedArrival).toISOString() : undefined
+        })),
+      linkedWorkOrders: this.linkRows
+        .filter((link) => link.linkedWorkOrderId)
+        .map((link) => ({
+          linkedWorkOrderId: link.linkedWorkOrderId,
+          linkType: link.linkType,
+          notes: link.notes.trim() || undefined
         }))
     });
   }
 
-  reset(): void {
+  reset(workOrderType: WorkOrderType = this.initialWorkOrderType()): void {
     this.loadedWorkOrderId = null;
     this.formError = '';
     this.titleTouched = false;
     this.step = 0;
     this.ownerId = '';
-    this.form = this.blankForm();
+    this.form = this.blankForm(workOrderType);
     this.scheduledStart = '';
     this.scheduledEnd = '';
     this.selectedWorkerIds.clear();
@@ -664,6 +868,9 @@ export class WorkOrderFormComponent {
     this.leadWorkerId = '';
     this.materialRows = [];
     this.taskRows = defaultCompletionTasks();
+    this.routeStopRows = [];
+    this.linkRows = [];
+    this.pickupForWorkOrderId = '';
     this.resourceTab = 'INVENTORY';
     this.workerSearch = '';
     this.workerEngagementFilter = 'ALL';
@@ -675,6 +882,7 @@ export class WorkOrderFormComponent {
     this.assetSearch = '';
     this.assetTypeFilter = 'ALL';
     this.assetAvailabilityFilter = 'AVAILABLE';
+    this.syncTypeDefaults();
   }
 
   protected onOwnerChange(): void {
@@ -697,6 +905,12 @@ export class WorkOrderFormComponent {
     this.pruneWorkers();
   }
 
+  protected onWorkOrderTypeChange(): void {
+    this.syncTypeDefaults();
+    this.syncSuggestedTitle();
+    this.setStep(this.step);
+  }
+
   protected onTitleChange(value: string): void {
     this.titleTouched = true;
     this.form.title = value;
@@ -712,6 +926,19 @@ export class WorkOrderFormComponent {
       return;
     }
     const service = this.serviceTypes().find((candidate) => candidate.id === this.form.serviceTypeId);
+    if (this.form.workOrderType === 'PICKUP_DELIVERY') {
+      const linked = this.workOrders().find((workOrder) => workOrder.id === this.pickupForWorkOrderId);
+      this.form.title = linked ? `Pickup for ${linked.workOrderNumber}` : `Pickup / delivery - ${property.name}`;
+      return;
+    }
+    if (this.form.workOrderType === 'INSPECTION') {
+      this.form.title = `Inspection - ${property.name}`;
+      return;
+    }
+    if (this.form.workOrderType === 'FOLLOW_UP') {
+      this.form.title = `Follow-up - ${property.name}`;
+      return;
+    }
     this.form.title = `${service?.name || 'General service'} - ${property.name}`;
   }
 
@@ -792,6 +1019,110 @@ export class WorkOrderFormComponent {
     this.taskRows = this.taskRows.filter((task) => task.id !== taskId);
   }
 
+  protected addRouteStop(): void {
+    this.routeStopRows = [...this.routeStopRows, this.blankRouteStop()];
+  }
+
+  protected addPickupStop(): void {
+    this.routeStopRows = [...this.routeStopRows, {
+      ...this.blankRouteStop(),
+      stopType: 'PICKUP',
+      name: 'Pickup location'
+    }];
+  }
+
+  protected removeRouteStop(routeStopId: string): void {
+    this.routeStopRows = this.routeStopRows.filter((stop) => stop.id !== routeStopId);
+  }
+
+  protected addWorkOrderLink(): void {
+    this.linkRows = [...this.linkRows, this.blankLink()];
+  }
+
+  protected removeWorkOrderLink(linkId: string): void {
+    this.linkRows = this.linkRows.filter((link) => link.id !== linkId);
+    if (!this.linkRows.some((link) => link.linkedWorkOrderId === this.pickupForWorkOrderId && link.linkType === 'PICKUP_FOR')) {
+      this.pickupForWorkOrderId = '';
+    }
+  }
+
+  protected syncPickupLink(): void {
+    this.linkRows = this.linkRows.filter((link) => link.linkType !== 'PICKUP_FOR');
+    if (!this.pickupForWorkOrderId) {
+      this.syncSuggestedTitle();
+      return;
+    }
+    this.form.workOrderType = 'PICKUP_DELIVERY';
+    this.linkRows = [...this.linkRows, {
+      id: crypto.randomUUID(),
+      linkedWorkOrderId: this.pickupForWorkOrderId,
+      linkType: 'PICKUP_FOR',
+      notes: 'Pickup or delivery work required before linked service work order.'
+    }];
+    const linked = this.workOrders().find((workOrder) => workOrder.id === this.pickupForWorkOrderId);
+    if (linked && (!this.ownerId || !this.form.propertyId)) {
+      this.ownerId = linked.ownerId;
+      this.form.propertyId = linked.propertyId;
+      this.form.serviceTypeId = linked.serviceTypeId || '';
+    }
+    this.syncTypeDefaults();
+    this.syncSuggestedTitle();
+  }
+
+  protected linkableWorkOrders(): WorkOrderRecord[] {
+    const currentId = this.workOrder()?.id;
+    return this.workOrders()
+      .filter((workOrder) => workOrder.id !== currentId)
+      .sort((left, right) => (right.scheduledStart || '').localeCompare(left.scheduledStart || ''));
+  }
+
+  protected linkLabel(workOrder: WorkOrderRecord): string {
+    return `${workOrder.workOrderNumber} · ${workOrder.title} · ${workOrder.propertyName}`;
+  }
+
+  protected linkedCandidateMeta(link: LinkRow): string {
+    const workOrder = this.workOrders().find((candidate) => candidate.id === link.linkedWorkOrderId);
+    if (!workOrder) {
+      return '';
+    }
+    const schedule = workOrder.scheduledStart ? toShortDateTime(workOrder.scheduledStart) : 'unscheduled';
+    return `${workOrder.status.toLowerCase().replaceAll('_', ' ')} · ${schedule} · ${workOrder.ownerName}`;
+  }
+
+  protected linkTypeTitle(linkType: WorkOrderLinkType): string {
+    return linkTypeOption(linkType).title;
+  }
+
+  protected linkTypeRule(linkType: WorkOrderLinkType): string {
+    return linkTypeOption(linkType).rule;
+  }
+
+  protected workOrderTypeLabel(type: WorkOrderType | undefined): string {
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return 'Pickup / delivery work order';
+      case 'INSPECTION':
+        return 'Inspection work order';
+      case 'FOLLOW_UP':
+        return 'Follow-up work order';
+      default:
+        return 'Service work order';
+    }
+  }
+
+  protected workOrderTypeHelp(type: WorkOrderType | undefined): string {
+    switch (type) {
+      case 'PICKUP_DELIVERY':
+        return 'Create a worker job to pick up or deliver tools, keys, parts, chemicals, or purchased materials.';
+      case 'INSPECTION':
+        return 'Use for site checks, estimates, condition review, and non-repair visits.';
+      case 'FOLLOW_UP':
+        return 'Use for return visits connected to previous service work.';
+      default:
+        return 'Use for normal property maintenance work performed at the service address.';
+    }
+  }
+
   protected syncMaterialDescription(material: MaterialRow): void {
     if (material.description.trim()) {
       return;
@@ -844,12 +1175,13 @@ export class WorkOrderFormComponent {
     this.loadedWorkOrderId = workOrder.id;
     this.formError = '';
     this.titleTouched = true;
-    this.step = clampStep(this.initialStep());
+    this.step = this.clampStep(this.initialStep());
     this.resourceTab = this.initialResourceTab();
     this.ownerId = workOrder.ownerId;
     this.form = {
       propertyId: workOrder.propertyId,
       serviceTypeId: workOrder.serviceTypeId || '',
+      workOrderType: workOrder.workOrderType || 'SERVICE',
       title: workOrder.title,
       description: workOrder.description || '',
       source: workOrder.source,
@@ -901,6 +1233,24 @@ export class WorkOrderFormComponent {
           notes: task.notes || ''
         }))
       : [];
+    this.routeStopRows = (workOrder.routeStops ?? []).map((stop) => ({
+      id: stop.id,
+      existingId: stop.id,
+      stopType: stop.stopType,
+      name: stop.name,
+      address: stop.address || '',
+      instructions: stop.instructions || '',
+      plannedArrival: toDateTimeInput(stop.plannedArrival)
+    }));
+    this.linkRows = (workOrder.linkedWorkOrders ?? []).map((link) => ({
+      id: `${link.linkedWorkOrderId}-${link.linkType}`,
+      linkedWorkOrderId: link.linkedWorkOrderId,
+      linkType: link.linkType,
+      notes: link.notes || ''
+    }));
+    this.pickupForWorkOrderId = this.linkRows.find((link) => link.linkType === 'PICKUP_FOR')?.linkedWorkOrderId || '';
+    this.syncTypeDefaults();
+    this.setStep(this.step);
   }
 
   private hasScheduleConflict(workerId: string): boolean {
@@ -924,10 +1274,32 @@ export class WorkOrderFormComponent {
     });
   }
 
-  private blankForm(): CreateWorkOrderRequest {
+  private syncTypeDefaults(): void {
+    if (this.form.workOrderType !== 'PICKUP_DELIVERY') {
+      return;
+    }
+    this.form.source = 'ADHOC_CALL';
+    this.form.recurrenceRule = '';
+    this.form.recurrenceInterval = 1;
+    this.form.recurrenceUntil = '';
+    this.form.serviceTypeId = '';
+    if (this.routeStopRows.length === 0) {
+      this.addPickupStop();
+    }
+    if (isCurrentDefaultTaskSet(this.taskRows)) {
+      this.taskRows = [];
+    }
+  }
+
+  private clampStep(step: number): number {
+    return Math.max(0, Math.min(this.currentSteps().length - 1, Number.isFinite(step) ? step : 0));
+  }
+
+  private blankForm(workOrderType: WorkOrderType = this.initialWorkOrderType()): CreateWorkOrderRequest {
     return {
       propertyId: '',
       serviceTypeId: '',
+      workOrderType,
       title: '',
       description: '',
       source: 'TENANT_PORTAL' as WorkOrderSource,
@@ -947,7 +1319,68 @@ export class WorkOrderFormComponent {
   private blankTask(phase: ChecklistPhase): TaskRow {
     return { id: crypto.randomUUID(), label: '', assignedWorkerId: '', phase, required: true, notes: '' };
   }
+
+  private blankRouteStop(): RouteStopRow {
+    return { id: crypto.randomUUID(), stopType: 'PICKUP', name: '', address: '', instructions: '', plannedArrival: '' };
+  }
+
+  private blankLink(): LinkRow {
+    return { id: crypto.randomUUID(), linkedWorkOrderId: '', linkType: 'RELATED', notes: '' };
+  }
+
+  private duplicateLinkLabels(): string[] {
+    const seen = new Map<string, string>();
+    const duplicates: string[] = [];
+    for (const link of this.linkRows.filter((candidate) => candidate.linkedWorkOrderId)) {
+      const key = `${link.linkedWorkOrderId}:${link.linkType}`;
+      const label = `${this.linkTypeTitle(link.linkType)} - ${this.workOrders().find((workOrder) => workOrder.id === link.linkedWorkOrderId)?.workOrderNumber || 'selected work order'}`;
+      if (seen.has(key)) {
+        duplicates.push(label);
+        continue;
+      }
+      seen.set(key, label);
+    }
+    return duplicates;
+  }
 }
+
+const LINK_TYPE_OPTIONS: LinkTypeOption[] = [
+  {
+    value: 'PICKUP_FOR',
+    label: 'Pickup before',
+    shortHelp: 'pickup must finish first',
+    title: 'Pickup or delivery before linked work',
+    rule: 'Use when this job collects keys, tools, parts, chemicals, or purchases needed before the selected service job can finish.'
+  },
+  {
+    value: 'FOLLOWS',
+    label: 'Follow after',
+    shortHelp: 'this waits for selected job',
+    title: 'This work happens after the selected work',
+    rule: 'Use for follow-up visits, second-stage work, or return work that should not be completed until the selected work is complete.'
+  },
+  {
+    value: 'BLOCKS',
+    label: 'Blocks',
+    shortHelp: 'selected job waits',
+    title: 'This work blocks the selected work',
+    rule: 'Use when the selected work order cannot move forward until this work order is complete enough for operations review.'
+  },
+  {
+    value: 'SAME_RECURRENCE',
+    label: 'Same series',
+    shortHelp: 'same recurring pattern',
+    title: 'Same recurring work series',
+    rule: 'Use to group generated recurring drafts or repeated visits for the same property and service pattern.'
+  },
+  {
+    value: 'RELATED',
+    label: 'Related',
+    shortHelp: 'reference only',
+    title: 'Reference-only relationship',
+    rule: 'Use when operations should see the connection, but neither work order should block or wait for the other.'
+  }
+];
 
 const DEFAULT_PRE_START_CHECKS = [
   'Confirm correct property and service scope',
@@ -971,6 +1404,16 @@ function defaultCompletionTasks(): TaskRow[] {
   ];
 }
 
+function isCurrentDefaultTaskSet(tasks: TaskRow[]): boolean {
+  const labels = tasks.map((task) => task.label);
+  const serviceDefaults = [...DEFAULT_PRE_START_CHECKS, ...DEFAULT_COMPLETION_CHECKS];
+  return sameLabels(labels, serviceDefaults);
+}
+
+function sameLabels(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((label, index) => label === right[index]);
+}
+
 function defaultTasksForPhase(phase: ChecklistPhase, labels: string[]): TaskRow[] {
   return labels.map((label) => ({
     id: crypto.randomUUID(),
@@ -982,10 +1425,6 @@ function defaultTasksForPhase(phase: ChecklistPhase, labels: string[]): TaskRow[
   }));
 }
 
-function clampStep(step: number): number {
-  return Math.max(0, Math.min(4, Number.isFinite(step) ? step : 0));
-}
-
 function toDateTimeInput(value?: string): string {
   if (!value) {
     return '';
@@ -995,8 +1434,21 @@ function toDateTimeInput(value?: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function toShortDateTime(value: string): string {
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(new Date(value));
+}
+
 function normalized(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function linkTypeOption(linkType: WorkOrderLinkType): LinkTypeOption {
+  return LINK_TYPE_OPTIONS.find((option) => option.value === linkType) || LINK_TYPE_OPTIONS[LINK_TYPE_OPTIONS.length - 1];
 }
 
 function coversShift(worker: WorkerRecord, scheduledStart: string, scheduledEnd: string): boolean {
@@ -1043,6 +1495,31 @@ interface TaskRow {
   phase: ChecklistPhase;
   required: boolean;
   notes?: string;
+}
+
+interface RouteStopRow {
+  id: string;
+  existingId?: string;
+  stopType: RouteStopType;
+  name: string;
+  address: string;
+  instructions: string;
+  plannedArrival: string;
+}
+
+interface LinkRow {
+  id: string;
+  linkedWorkOrderId: string;
+  linkType: WorkOrderLinkType;
+  notes: string;
+}
+
+interface LinkTypeOption {
+  value: WorkOrderLinkType;
+  label: string;
+  shortHelp: string;
+  title: string;
+  rule: string;
 }
 
 function isActiveAssignment(assignment: { assignmentStatus?: string }): boolean {

@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { EmailTemplateRecord } from '@lorne/contracts';
+import type { EmailTemplateRecord } from '@lorne/contracts';
 import { EmailTemplateService } from './services/email-template.service';
 
 type TemplateSlug = 'invoice-owner' | 'work-order-completed-owner';

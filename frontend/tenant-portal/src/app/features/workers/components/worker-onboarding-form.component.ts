@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
-import { CreateWorkerRequest, ServiceType, WorkerEngagementType, WorkerRecord } from '@lorne/contracts';
+import type { CreateWorkerRequest, ServiceType, WorkerEngagementType, WorkerRecord } from '@lorne/contracts';
 
 @Component({
   selector: 'lorne-worker-onboarding-form',

@@ -11,6 +11,7 @@ import java.util.UUID;
 public record CreateWorkOrderRequest(
         @NotNull UUID propertyId,
         UUID serviceTypeId,
+        String workOrderType,
         UUID assignedWorkerId,
         List<UUID> assignedWorkerIds,
         UUID leadWorkerId,
@@ -31,6 +32,8 @@ public record CreateWorkOrderRequest(
         List<UUID> assetIds,
         List<String> tasks,
         List<TaskRequest> taskItems,
+        List<RouteStopRequest> routeStops,
+        List<WorkOrderLinkRequest> linkedWorkOrders,
         Boolean allowAvailabilityOverride,
         String allowAvailabilityOverrideReason
 ) {
@@ -50,6 +53,23 @@ public record CreateWorkOrderRequest(
             UUID assignedWorkerId,
             String phase,
             Boolean required,
+            String notes
+    ) {
+    }
+
+    public record RouteStopRequest(
+            UUID id,
+            String stopType,
+            @NotBlank String name,
+            String address,
+            String instructions,
+            Instant plannedArrival
+    ) {
+    }
+
+    public record WorkOrderLinkRequest(
+            UUID linkedWorkOrderId,
+            String linkType,
             String notes
     ) {
     }

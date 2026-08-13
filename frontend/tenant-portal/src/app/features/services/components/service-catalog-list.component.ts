@@ -1,6 +1,6 @@
 import { CurrencyPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { ServiceCatalog } from '@lorne/contracts';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import type { ServiceCatalog, ServiceType } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
@@ -60,7 +60,15 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                   <td class="px-3 py-3">
                     <div class="flex items-center gap-3">
                       <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><i class="pi pi-wrench"></i></span>
-                      <p class="font-bold text-slate-950">{{ service.name }}</p>
+                      <div>
+                        <p class="font-bold text-slate-950">{{ service.name }}</p>
+                        @if (service.maintenanceRecordTemplate?.enabled) {
+                          <p class="mt-0.5 text-xs font-black uppercase tracking-wide text-teal-700">Maintenance record</p>
+                        }
+                        @if (!service.active) {
+                          <p class="text-xs font-black uppercase tracking-wide text-slate-400">Inactive</p>
+                        }
+                      </div>
                     </div>
                   </td>
                   <td class="px-3 py-3">
@@ -99,10 +107,14 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 })
 export class ServiceCatalogListComponent {
   catalog = input.required<ServiceCatalog>();
+  readonly updateService = output<ServiceType>();
+  readonly viewAssignedProperties = output<ServiceType>();
+  readonly updateServiceStatus = output<{ service: ServiceType; active: boolean }>();
+  readonly deleteService = output<ServiceType>();
   protected readonly serviceTypes = computed(() => this.catalog().serviceTypes);
-  protected readonly selectedService = signal<ServiceCatalog['serviceTypes'][number] | null>(null);
+  protected readonly selectedService = signal<ServiceType | null>(null);
   protected readonly serviceMenuItems = signal<MenuItem[]>([]);
-  protected readonly collection = new DenseCollectionState<ServiceCatalog['serviceTypes'][number]>(
+  protected readonly collection = new DenseCollectionState<ServiceType>(
     this.serviceTypes,
     (service) => service.id,
     (service) => [
@@ -120,14 +132,16 @@ export class ServiceCatalogListComponent {
     ]
   );
 
-  protected openServiceMenu(service: ServiceCatalog['serviceTypes'][number], event: Event, menu: { toggle: (event: Event) => void }): void {
+  protected openServiceMenu(service: ServiceType, event: Event, menu: { toggle: (event: Event) => void }): void {
     this.selectedService.set(service);
     this.serviceMenuItems.set([
-      { label: 'Update service', icon: 'pi pi-pencil', disabled: true },
-      { label: 'Assigned properties', icon: 'pi pi-building', disabled: true },
-      { label: 'Checklist template', icon: 'pi pi-list-check', disabled: true },
+      { label: 'Update service', icon: 'pi pi-pencil', command: () => this.updateService.emit(service) },
+      { label: 'Assigned properties', icon: 'pi pi-building', command: () => this.viewAssignedProperties.emit(service) },
       { separator: true },
-      { label: 'Deactivate service', icon: 'pi pi-ban', disabled: true }
+      service.active
+        ? { label: 'Deactivate service', icon: 'pi pi-ban', command: () => this.updateServiceStatus.emit({ service, active: false }) }
+        : { label: 'Activate service', icon: 'pi pi-check-circle', command: () => this.updateServiceStatus.emit({ service, active: true }) },
+      { label: 'Delete service', icon: 'pi pi-trash', command: () => this.deleteService.emit(service) }
     ]);
     menu.toggle(event);
   }

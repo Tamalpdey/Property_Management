@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { WorkerAssignedJob } from '@lorne/contracts';
+import type { WorkerAssignedJob } from '@lorne/contracts';
 import { workerFacingStatus } from '../worker-job-ui';
 
 type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';

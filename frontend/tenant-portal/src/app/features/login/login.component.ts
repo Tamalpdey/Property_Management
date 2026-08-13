@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
 import { InputTextModule } from 'primeng/inputtext';
@@ -80,10 +80,13 @@ import { AuthService } from '../../core/services/auth.service';
 export class LoginComponent {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
-  protected email = 'tenantadmin@lorne.local';
-  protected password = 'Password123!';
+  private readonly route = inject(ActivatedRoute);
+  protected email = '';
+  protected password = '';
   protected readonly loading = signal(false);
-  protected readonly error = signal('');
+  protected readonly error = signal(this.route.snapshot.queryParamMap.get('session') === 'expired'
+    ? 'Your session expired. Sign in again to continue.'
+    : '');
 
   async login(): Promise<void> {
     if (this.loading()) {
@@ -92,7 +95,13 @@ export class LoginComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      await this.auth.login({ email: this.email, password: this.password });
+      const user = await this.auth.login({ email: this.email, password: this.password });
+      const canUseTenantPortal = user.roles.some((role) => ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'].includes(role));
+      if (!canUseTenantPortal) {
+        this.auth.clearSession();
+        this.error.set('This login is not enabled for the tenant portal. Workers should use the worker app.');
+        return;
+      }
       await this.router.navigateByUrl('/dashboard');
     } catch {
       this.error.set('Unable to sign in. Check credentials and backend status.');

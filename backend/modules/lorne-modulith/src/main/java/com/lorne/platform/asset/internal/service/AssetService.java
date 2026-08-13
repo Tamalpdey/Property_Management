@@ -4,6 +4,7 @@ import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.asset.internal.dto.AssetCatalogResponse;
 import com.lorne.platform.asset.internal.dto.CreateAssetRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
+import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
@@ -53,6 +54,70 @@ public class AssetService {
         return asset(tenantId, id);
     }
 
+    @Transactional
+    public AssetCatalogResponse.AssetDto update(UUID tenantId, UUID actorUserId, UUID assetId, CreateAssetRequest request) {
+        requireAsset(tenantId, assetId);
+        requireTenantWorker(tenantId, request.assignedWorkerId());
+        var updated = jdbcTemplate.update("""
+                UPDATE assets
+                SET asset_type = ?, name = ?, identifier = ?, quantity_on_hand = ?, storage_location = ?,
+                    assigned_worker_id = ?, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """,
+                request.assetType(),
+                request.name(),
+                blankToNull(request.identifier()),
+                request.quantityOnHand() == null ? BigDecimal.ONE : request.quantityOnHand(),
+                blankToNull(request.storageLocation()),
+                request.assignedWorkerId(),
+                actorUserId,
+                tenantId,
+                assetId
+        );
+        if (updated != 1) {
+            throw new ResourceNotFoundException("Equipment not found.");
+        }
+        var asset = asset(tenantId, assetId);
+        auditWriter.record(tenantId, actorUserId, "ASSET_UPDATED", "ASSET", assetId, Map.of(
+                "name", asset.name(),
+                "assetType", asset.assetType(),
+                "identifier", asset.identifier() == null ? "" : asset.identifier(),
+                "quantityOnHand", asset.quantityOnHand(),
+                "storageLocation", asset.storageLocation() == null ? "" : asset.storageLocation(),
+                "assignedWorkerName", asset.assignedWorkerName() == null ? "" : asset.assignedWorkerName()
+        ));
+        return asset;
+    }
+
+    @Transactional
+    public AssetCatalogResponse.AssetDto updateStatus(UUID tenantId, UUID actorUserId, UUID assetId, boolean active) {
+        requireAsset(tenantId, assetId);
+        var updated = jdbcTemplate.update("""
+                UPDATE assets
+                SET active = ?, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """, active, actorUserId, tenantId, assetId);
+        if (updated != 1) {
+            throw new ResourceNotFoundException("Equipment not found.");
+        }
+        auditWriter.record(tenantId, actorUserId, active ? "ASSET_ACTIVATED" : "ASSET_DEACTIVATED", "ASSET", assetId, Map.of(
+                "active", active
+        ));
+        return asset(tenantId, assetId);
+    }
+
+    @Transactional
+    public void delete(UUID tenantId, UUID actorUserId, UUID assetId) {
+        var asset = requireAsset(tenantId, assetId);
+        if (asset.assignedWorkerId() != null || hasWorkOrderHistory(tenantId, assetId)) {
+            throw new BadRequestException("Equipment is assigned or has work order history. Deactivate or unassign it instead.");
+        }
+        jdbcTemplate.update("DELETE FROM assets WHERE tenant_id = ? AND id = ?", tenantId, assetId);
+        auditWriter.record(tenantId, actorUserId, "ASSET_DELETED", "ASSET", assetId, Map.of(
+                "name", asset.name()
+        ));
+    }
+
     private void requireTenantWorker(UUID tenantId, UUID workerId) {
         if (workerId == null) {
             return;
@@ -69,17 +134,13 @@ public class AssetService {
     }
 
     private AssetCatalogResponse.AssetDto asset(UUID tenantId, UUID assetId) {
-        return jdbcTemplate.query("""
+        var result = jdbcTemplate.query("""
                 SELECT a.id, a.asset_type, a.name, a.identifier, a.quantity_on_hand, a.storage_location, a.assigned_worker_id,
                        w.display_name AS assigned_worker_name, a.active
                 FROM assets a
                 LEFT JOIN workers w ON w.id = a.assigned_worker_id AND w.tenant_id = a.tenant_id
                 WHERE a.tenant_id = ? AND a.id = ?
-                """, rs -> {
-            if (!rs.next()) {
-                throw new BadRequestException("Asset could not be created.");
-            }
-            return new AssetCatalogResponse.AssetDto(
+                """, (rs, rowNum) -> new AssetCatalogResponse.AssetDto(
                     rs.getObject("id", UUID.class),
                     rs.getString("asset_type"),
                     rs.getString("name"),
@@ -89,8 +150,15 @@ public class AssetService {
                     rs.getObject("assigned_worker_id", UUID.class),
                     rs.getString("assigned_worker_name"),
                     rs.getBoolean("active")
-            );
-        }, tenantId, assetId);
+            ), tenantId, assetId);
+        if (result.isEmpty()) {
+            throw new ResourceNotFoundException("Equipment not found.");
+        }
+        return result.getFirst();
+    }
+
+    private AssetCatalogResponse.AssetDto requireAsset(UUID tenantId, UUID assetId) {
+        return asset(tenantId, assetId);
     }
 
     private java.util.List<AssetCatalogResponse.AssetDto> assets(UUID tenantId) {
@@ -125,6 +193,16 @@ public class AssetService {
                 rs.getString("display_name"),
                 rs.getString("employee_number")
         ), tenantId);
+    }
+
+    private boolean hasWorkOrderHistory(UUID tenantId, UUID assetId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM work_order_assets
+                    WHERE tenant_id = ? AND asset_id = ?
+                )
+                """, Boolean.class, tenantId, assetId));
     }
 
     private String blankToNull(String value) {

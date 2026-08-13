@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import type { CurrentUser } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
 
@@ -30,7 +31,7 @@ import { AuthService } from '../core/services/auth.service';
                 <button pButton type="button" severity="secondary" text rounded icon="pi pi-bars" (click)="mobileMenuOpen.set(true)"></button>
               </div>
               <div class="min-w-0">
-                <p class="truncate text-[0.95rem] font-bold text-slate-950">Tenant admin</p>
+                <p class="truncate text-[0.95rem] font-bold text-slate-950">{{ workspaceRoleLabel() }}</p>
                 <p class="truncate text-xs font-semibold text-slate-500">Portfolio operations workspace</p>
               </div>
             </div>
@@ -63,7 +64,7 @@ import { AuthService } from '../core/services/auth.service';
         </div>
 
         <nav class="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-2 py-3">
-          @for (section of navSections; track section.label) {
+          @for (section of navSections(); track section.label) {
             <section>
               <p class="px-2.5 text-[0.66rem] font-bold uppercase tracking-wider text-slate-400">{{ section.label }}</p>
               <div class="mt-1.5 space-y-1">
@@ -71,7 +72,7 @@ import { AuthService } from '../core/services/auth.service';
                   <a
                     [routerLink]="item.path"
                     routerLinkActive="border-teal-200 bg-teal-50 text-teal-800"
-                    [routerLinkActiveOptions]="{ exact: item.path === '/dashboard' }"
+                    [routerLinkActiveOptions]="{ exact: true }"
                     class="flex items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-[0.92rem] font-semibold text-slate-600 no-underline transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950"
                     (click)="mobileMenuOpen.set(false)"
                   >
@@ -97,12 +98,41 @@ import { AuthService } from '../core/services/auth.service';
 export class TenantShellComponent {
   private readonly auth = inject(AuthService);
   protected readonly mobileMenuOpen = signal(false);
-  protected readonly navSections: TenantNavSection[] = [
+  protected readonly workspaceRoleLabel = computed(() => {
+    const user = this.auth.currentUser();
+    if (!user) {
+      return 'Tenant workspace';
+    }
+    if (user.roles.includes('TENANT_ADMIN')) {
+      return 'Tenant admin';
+    }
+    if (user.roles.includes('OPERATIONS')) {
+      return 'Tenant operations';
+    }
+    if (user.roles.includes('FINANCE')) {
+      return 'Tenant finance';
+    }
+    return 'Tenant workspace';
+  });
+  protected readonly navSections = computed(() => this.allNavSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => this.canAccess(item))
+    }))
+    .filter((section) => section.items.length > 0));
+  private readonly allNavSections: TenantNavSection[] = [
     {
       label: 'Command',
       items: [
-        { label: 'Dashboard', path: '/dashboard', icon: 'pi pi-chart-line' },
-        { label: 'Reports', path: '/reports', icon: 'pi pi-chart-bar' }
+        { label: 'Dashboard', path: '/dashboard', icon: 'pi pi-chart-line' }
+      ]
+    },
+    {
+      label: 'Reports',
+      items: [
+        { label: 'Snapshot', path: '/reports', icon: 'pi pi-chart-bar' },
+        { label: 'Report builder', path: '/reports/builder', icon: 'pi pi-file-export' },
+        { label: 'Day ticket', path: '/reports/day-ticket', icon: 'pi pi-print' }
       ]
     },
     {
@@ -126,26 +156,30 @@ export class TenantShellComponent {
       label: 'People',
       items: [
         { label: 'Workers', path: '/workers', icon: 'pi pi-id-card' },
-        { label: 'Payroll', path: '/payroll', icon: 'pi pi-wallet' }
+        { label: 'Payroll', path: '/payroll', icon: 'pi pi-wallet', roles: ['TENANT_ADMIN', 'FINANCE'] }
       ]
     },
     {
       label: 'Finance',
       items: [
-        { label: 'Finance overview', path: '/finance', icon: 'pi pi-dollar' },
+        { label: 'Finance overview', path: '/finance', icon: 'pi pi-dollar', roles: ['TENANT_ADMIN', 'FINANCE'] },
         { label: 'Invoices', path: '/invoices', icon: 'pi pi-file-edit' },
-        { label: 'Payments', path: '/payments', icon: 'pi pi-credit-card' }
+        { label: 'Payments', path: '/payments', icon: 'pi pi-credit-card', roles: ['TENANT_ADMIN', 'FINANCE'] }
       ]
     },
     {
       label: 'Administration',
       items: [
-        { label: 'Users', path: '/users', icon: 'pi pi-user-edit' },
-        { label: 'Email templates', path: '/email-templates', icon: 'pi pi-envelope' },
-        { label: 'Settings', path: '/settings', icon: 'pi pi-cog' }
+        { label: 'Users', path: '/users', icon: 'pi pi-user-edit', roles: ['TENANT_ADMIN'] },
+        { label: 'Email templates', path: '/email-templates', icon: 'pi pi-envelope', roles: ['TENANT_ADMIN', 'FINANCE'] },
+        { label: 'Settings', path: '/settings', icon: 'pi pi-cog', roles: ['TENANT_ADMIN'] }
       ]
     }
   ];
+
+  private canAccess(item: TenantNavItem): boolean {
+    return !item.roles || this.auth.hasAnyRole(item.roles);
+  }
 
   signOut(): void {
     this.auth.signOut();
@@ -162,4 +196,5 @@ interface TenantNavItem {
   label: string;
   path: string;
   icon: string;
+  roles?: CurrentUser['roles'];
 }

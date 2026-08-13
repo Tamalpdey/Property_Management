@@ -6,19 +6,23 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { TagModule } from 'primeng/tag';
-import {
-  CreateWorkOrderRequest,
-  InventoryItem,
+import type {
+  WorkOrderStatus,
   PropertyRecord,
   ServiceType,
+  InventoryItem,
   TenantAsset,
   WorkerRecord,
-  WorkOrderStatus,
-  WorkOrderAssignment,
-  WorkOrderAuditEntry,
   WorkOrderRecord,
+  WorkOrderType,
   WorkOrderReview,
-  WorkOrderReviewActionRequest
+  WorkOrderAuditEntry,
+  WorkOrderFieldOverrideRequest,
+  WorkOrderReviewActionRequest,
+  WorkOrderAssignment,
+  WorkOrderLink,
+  CreateWorkOrderRequest,
+  TenantSettingsRecord
 } from '@lorne/contracts';
 import { AssetService } from '../inventory/services/asset.service';
 import { InventoryService } from '../inventory/services/inventory.service';
@@ -33,17 +37,22 @@ import {
   WorkOrderFormResourceTab,
   WorkOrderListComponent,
   WorkOrderListFilterChange,
+  WorkOrderOverrideRequest,
   WorkOrderReviewRequest,
   WorkOrderReviewTarget,
   WorkOrderStatusFilter
 } from './components/work-order-list.component';
 import { WorkOrderReviewComponent } from './components/work-order-review.component';
+import { WorkOrderFieldOverrideComponent, WorkOrderOverrideEvidenceUploadRequest } from './components/work-order-field-override.component';
+import { maintenanceRecordPrintHtml } from './work-order-maintenance-record';
 import { WorkOrderService } from './services/work-order.service';
+import { TenantSettingsService } from '../settings/services/tenant-settings.service';
+import { TenantAccessService } from '../../core/services/tenant-access.service';
 
 @Component({
   selector: 'lorne-work-order-page',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, TagModule, WorkOrderFormComponent, WorkOrderListComponent, WorkOrderReviewComponent],
+  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, TagModule, WorkOrderFieldOverrideComponent, WorkOrderFormComponent, WorkOrderListComponent, WorkOrderReviewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-3">
@@ -54,7 +63,10 @@ import { WorkOrderService } from './services/work-order.service';
             <h1 class="text-xl font-bold text-slate-950 md:text-2xl">Work orders</h1>
             <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ workOrders().length }} records</span>
           </div>
-          <button pButton type="button" icon="pi pi-plus" label="Add work order" (click)="openCreate()"></button>
+          <div class="flex flex-wrap gap-2">
+            <button pButton type="button" severity="secondary" icon="pi pi-box" label="Pickup order" [disabled]="!canManageWorkOrders()" (click)="openCreate('PICKUP_DELIVERY')"></button>
+            <button pButton type="button" icon="pi pi-plus" label="Add work order" [disabled]="!canManageWorkOrders()" (click)="openCreate()"></button>
+          </div>
         </div>
       </div>
 
@@ -69,20 +81,23 @@ import { WorkOrderService } from './services/work-order.service';
         [dateFilter]="dateFilter()"
         [customFrom]="customFrom()"
         [customTo]="customTo()"
+        [canManageWorkOrders]="canManageWorkOrders()"
+        [canManageBilling]="canManageBilling()"
         (filtersChanged)="applyFilters($event)"
         (editWorkOrder)="openEdit($event)"
         (reviewWorkOrder)="openReview($event)"
         (generateInvoiceWorkOrder)="generateInvoiceFor($event)"
         (cancelWorkOrder)="openCancel($event)"
         (bulkAssignWorkOrders)="openBulkAssign($event)"
+        (overrideWorkOrder)="openOverride($event)"
       />
 
       <p-dialog
         [header]="editingWorkOrder() ? 'Update work order' : 'Add work order'"
         [modal]="true"
         [visible]="showCreate()"
-        [style]="{ width: 'min(72rem, 96vw)', height: 'min(42rem, 92vh)' }"
-        [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'auto' }"
+        [style]="{ width: 'min(72rem, 96vw)', height: 'min(54rem, 94vh)' }"
+        [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'hidden' }"
         (visibleChange)="onDialogVisible($event)"
       >
         <lorne-work-order-form
@@ -95,6 +110,7 @@ import { WorkOrderService } from './services/work-order.service';
           [workOrder]="editingWorkOrder()"
           [initialStep]="editingStep()"
           [initialResourceTab]="editingResourceTab()"
+          [initialWorkOrderType]="creatingWorkOrderType()"
           [saving]="saving()"
           [saveError]="error()"
           (createWorkOrder)="save($event)"
@@ -235,11 +251,32 @@ import { WorkOrderService } from './services/work-order.service';
           [busy]="reviewSaving()"
           [error]="reviewError()"
           [initialTab]="reviewTarget()"
+          [canManageWorkOrders]="canManageWorkOrders()"
+          [canManageBilling]="canManageBilling()"
           (reviewAction)="submitReviewAction($event)"
           (generateInvoice)="generateInvoice()"
           (notifyOwner)="notifyOwner()"
           (sendInvoiceEmail)="sendInvoiceEmail($event)"
           (printWorkOrder)="printReview()"
+          (printMaintenanceRecord)="printMaintenanceRecord()"
+          (openLinkedWorkOrder)="openLinkedReview($event)"
+        />
+      </p-dialog>
+
+      <p-dialog
+        header="Operations override"
+        [modal]="true"
+        [visible]="showFieldOverride()"
+        [style]="{ width: 'min(78rem, 96vw)', height: 'min(58rem, 96vh)' }"
+        [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'auto', padding: '0' }"
+        (visibleChange)="onFieldOverrideVisible($event)"
+      >
+        <lorne-work-order-field-override
+          [review]="review()"
+          [busy]="reviewSaving()"
+          [initialTab]="overrideTarget()"
+          (save)="applyFieldOverride($event)"
+          (evidenceUpload)="uploadReviewEvidence($event)"
         />
       </p-dialog>
 
@@ -281,8 +318,12 @@ export class WorkOrderPageComponent {
   private readonly inventoryService = inject(InventoryService);
   private readonly assetService = inject(AssetService);
   private readonly invoiceService = inject(InvoiceService);
+  private readonly tenantSettingsService = inject(TenantSettingsService);
+  private readonly access = inject(TenantAccessService);
   @ViewChild(WorkOrderFormComponent) private workOrderForm?: WorkOrderFormComponent;
 
+  protected readonly canManageWorkOrders = this.access.canManageWorkOrders;
+  protected readonly canManageBilling = this.access.canManageBilling;
   protected readonly workOrders = signal<WorkOrderRecord[]>([]);
   protected readonly workOrdersLoading = signal(false);
   protected readonly statusFilter = signal<WorkOrderStatusFilter>('OPEN');
@@ -294,19 +335,23 @@ export class WorkOrderPageComponent {
   protected readonly workers = signal<WorkerRecord[]>([]);
   protected readonly inventoryItems = signal<InventoryItem[]>([]);
   protected readonly assets = signal<TenantAsset[]>([]);
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly saving = signal(false);
   protected readonly error = signal('');
   protected readonly showCreate = signal(false);
   protected readonly editingWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly editingStep = signal(0);
   protected readonly editingResourceTab = signal<WorkOrderFormResourceTab>('INVENTORY');
+  protected readonly creatingWorkOrderType = signal<WorkOrderType>('SERVICE');
   protected readonly showReview = signal(false);
   protected readonly reviewingWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly review = signal<WorkOrderReview | null>(null);
   protected readonly reviewTarget = signal<WorkOrderReviewTarget>('SUMMARY');
+  protected readonly overrideTarget = signal<'WORKERS' | 'ACTIVITY' | 'ROUTES' | 'CHECKLIST' | 'MATERIALS' | 'EVIDENCE' | 'NOTES'>('WORKERS');
   protected readonly reviewLoading = signal(false);
   protected readonly reviewSaving = signal(false);
   protected readonly reviewError = signal('');
+  protected readonly showFieldOverride = signal(false);
   protected readonly showCancel = signal(false);
   protected readonly cancellingWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly cancelSaving = signal(false);
@@ -332,13 +377,14 @@ export class WorkOrderPageComponent {
   }
 
   async load(): Promise<void> {
-    const [workOrders, properties, catalog, workers, inventory, assetCatalog] = await Promise.all([
+    const [workOrders, properties, catalog, workers, inventory, assetCatalog, tenantSettings] = await Promise.all([
       firstValueFrom(this.workOrderService.list(this.currentWorkOrderFilters())),
       firstValueFrom(this.propertyService.list()),
       firstValueFrom(this.serviceCatalogService.catalog()),
       firstValueFrom(this.workerManagementService.list()),
       firstValueFrom(this.inventoryService.catalog()),
-      firstValueFrom(this.assetService.catalog())
+      firstValueFrom(this.assetService.catalog()),
+      firstValueFrom(this.tenantSettingsService.get())
     ]);
     this.workOrders.set(workOrders);
     this.properties.set(properties);
@@ -346,9 +392,13 @@ export class WorkOrderPageComponent {
     this.workers.set(workers.filter((worker) => worker.status === 'ACTIVE'));
     this.inventoryItems.set(inventory.items);
     this.assets.set(assetCatalog.assets.filter((asset) => asset.active));
+    this.tenantSettings.set(tenantSettings);
   }
 
   async save(request: CreateWorkOrderRequest): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     if (this.saving()) {
       return;
     }
@@ -373,17 +423,25 @@ export class WorkOrderPageComponent {
   }
 
   protected openEdit(request: WorkOrderEditRequest): void {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     this.editingStep.set(request.step);
     this.editingResourceTab.set(request.resourceTab ?? 'INVENTORY');
+    this.creatingWorkOrderType.set(request.workOrder.workOrderType || 'SERVICE');
     this.editingWorkOrder.set(request.workOrder);
     this.showCreate.set(true);
   }
 
-  protected openCreate(): void {
+  protected openCreate(workOrderType: WorkOrderType = 'SERVICE'): void {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     this.editingWorkOrder.set(null);
     this.editingStep.set(0);
     this.editingResourceTab.set('INVENTORY');
-    this.workOrderForm?.reset();
+    this.creatingWorkOrderType.set(workOrderType);
+    this.workOrderForm?.reset(workOrderType);
     this.showCreate.set(true);
   }
 
@@ -394,7 +452,30 @@ export class WorkOrderPageComponent {
     await this.loadReview(request.workOrder.id);
   }
 
+  protected async openOverride(request: WorkOrderOverrideRequest): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
+    this.reviewingWorkOrder.set(request.workOrder);
+    this.overrideTarget.set(request.target ?? 'WORKERS');
+    this.showReview.set(false);
+    this.showFieldOverride.set(true);
+    await this.loadReview(request.workOrder.id);
+  }
+
+  protected async openLinkedReview(workOrderId: string): Promise<void> {
+    this.reviewTarget.set('SUMMARY');
+    await this.loadReview(workOrderId);
+    const loaded = this.review()?.workOrder;
+    if (loaded) {
+      this.reviewingWorkOrder.set(loaded);
+    }
+  }
+
   protected async submitReviewAction(request: WorkOrderReviewActionRequest): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     const workOrder = this.reviewingWorkOrder();
     if (!workOrder || this.reviewSaving()) {
       return;
@@ -413,7 +494,33 @@ export class WorkOrderPageComponent {
     }
   }
 
+  protected async applyFieldOverride(request: WorkOrderFieldOverrideRequest): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
+    const workOrder = this.reviewingWorkOrder();
+    if (!workOrder || this.reviewSaving()) {
+      return;
+    }
+    this.reviewSaving.set(true);
+    this.reviewError.set('');
+    try {
+      const review = await firstValueFrom(this.workOrderService.fieldOverride(workOrder.id, request));
+      this.review.set(review);
+      this.reviewingWorkOrder.set(review.workOrder);
+      this.showFieldOverride.set(false);
+      await this.loadWorkOrders();
+    } catch (exception) {
+      this.reviewError.set(apiErrorMessage(exception, 'Unable to save field override.'));
+    } finally {
+      this.reviewSaving.set(false);
+    }
+  }
+
   protected async generateInvoice(): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
     const workOrder = this.reviewingWorkOrder();
     if (!workOrder || this.reviewSaving()) {
       return;
@@ -422,6 +529,9 @@ export class WorkOrderPageComponent {
   }
 
   protected async generateInvoiceFor(workOrder: WorkOrderRecord): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
     if (this.reviewSaving()) {
       return;
     }
@@ -468,6 +578,9 @@ export class WorkOrderPageComponent {
   }
 
   protected async sendInvoiceEmail(invoiceId: string): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
     const workOrder = this.reviewingWorkOrder();
     if (!workOrder || this.reviewSaving()) {
       return;
@@ -489,7 +602,48 @@ export class WorkOrderPageComponent {
     }
   }
 
+  protected async uploadReviewEvidence(request: WorkOrderOverrideEvidenceUploadRequest): Promise<void> {
+    const workOrder = this.reviewingWorkOrder();
+    if (!workOrder || this.reviewSaving()) {
+      return;
+    }
+    this.reviewSaving.set(true);
+    this.reviewError.set('');
+    this.error.set('');
+    try {
+      const upload = await firstValueFrom(this.workOrderService.evidenceUploadUrl(workOrder.id, {
+        fileName: request.file.name,
+        contentType: request.file.type || (request.documentType === 'PURCHASE_RECEIPT' ? 'application/pdf' : 'image/jpeg'),
+        byteSize: request.file.size,
+        documentType: request.documentType,
+        photoType: request.photoType
+      }));
+      await firstValueFrom(this.workOrderService.uploadEvidence(upload, request.file));
+      const review = await firstValueFrom(this.workOrderService.evidenceAction(workOrder.id, {
+        action: request.documentType === 'PURCHASE_RECEIPT' ? 'ADD_PURCHASE_RECEIPT' : 'ADD_PHOTO',
+        documentId: upload.documentId,
+        photoType: request.photoType,
+        caption: request.caption,
+        receiptAmount: request.receiptAmount,
+        vendorName: request.vendorName
+      }));
+      this.review.set(review);
+      this.reviewingWorkOrder.set(review.workOrder);
+      this.overrideTarget.set('EVIDENCE');
+      await this.loadWorkOrders();
+    } catch (exception) {
+      const message = apiErrorMessage(exception, 'Unable to upload evidence. Check file type, size, and object storage settings.');
+      this.reviewError.set(message);
+      this.error.set(message);
+    } finally {
+      this.reviewSaving.set(false);
+    }
+  }
+
   protected openCancel(workOrder: WorkOrderRecord): void {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     this.cancellingWorkOrder.set(workOrder);
     this.cancelReason = '';
     this.cancelError.set('');
@@ -497,6 +651,9 @@ export class WorkOrderPageComponent {
   }
 
   protected openBulkAssign(workOrders: WorkOrderRecord[]): void {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     if (workOrders.length === 0) {
       this.error.set('Select at least one editable work order. Pending review, completed, invoiced, paid, and cancelled orders are locked.');
       return;
@@ -570,6 +727,9 @@ export class WorkOrderPageComponent {
   }
 
   protected async applyBulkAssign(): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     const selected = this.bulkWorkOrders();
     if (this.bulkSaving()) {
       return;
@@ -623,6 +783,9 @@ export class WorkOrderPageComponent {
   }
 
   protected async cancelWorkOrder(): Promise<void> {
+    if (!this.ensureCanManageWorkOrders()) {
+      return;
+    }
     const workOrder = this.cancellingWorkOrder();
     const reason = this.cancelReason.trim();
     if (!workOrder || this.cancelSaving()) {
@@ -659,7 +822,26 @@ export class WorkOrderPageComponent {
       return;
     }
     printWindow.document.open();
-    printWindow.document.write(workOrderPrintHtml(review));
+    printWindow.document.write(workOrderPrintHtml(review, this.tenantSettings()));
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  }
+
+  protected printMaintenanceRecord(): void {
+    const review = this.review();
+    if (!review) {
+      return;
+    }
+    const printWindow = window.open('', '_blank', 'width=900,height=1100');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(maintenanceRecordPrintHtml(review, this.tenantSettings()));
     printWindow.document.close();
     printWindow.focus();
     window.setTimeout(() => {
@@ -684,7 +866,33 @@ export class WorkOrderPageComponent {
       this.review.set(null);
       this.reviewError.set('');
       this.reviewTarget.set('SUMMARY');
+      this.showFieldOverride.set(false);
     }
+  }
+
+  protected onFieldOverrideVisible(visible: boolean): void {
+    this.showFieldOverride.set(visible);
+    if (!visible) {
+      this.overrideTarget.set('WORKERS');
+    }
+  }
+
+  private ensureCanManageWorkOrders(): boolean {
+    if (this.canManageWorkOrders()) {
+      return true;
+    }
+    this.error.set('Work-order changes are available to tenant admins and operations users.');
+    this.reviewError.set('Work-order changes are available to tenant admins and operations users.');
+    return false;
+  }
+
+  private ensureCanManageBilling(): boolean {
+    if (this.canManageBilling()) {
+      return true;
+    }
+    this.error.set('Billing actions are available to tenant admins and finance users.');
+    this.reviewError.set('Billing actions are available to tenant admins and finance users.');
+    return false;
   }
 
   protected async applyFilters(filters: WorkOrderListFilterChange): Promise<void> {
@@ -743,6 +951,7 @@ export class WorkOrderPageComponent {
     return {
       propertyId: workOrder.propertyId,
       serviceTypeId: workOrder.serviceTypeId,
+      workOrderType: workOrder.workOrderType,
       title: workOrder.title,
       description: workOrder.description,
       source: workOrder.source,
@@ -822,11 +1031,12 @@ function apiErrorMessage(exception: unknown, fallback: string): string {
   return fallback;
 }
 
-function workOrderPrintHtml(review: WorkOrderReview): string {
+function workOrderPrintHtml(review: WorkOrderReview, settings?: TenantSettingsRecord | null): string {
   const workOrder = review.workOrder;
   const invoice = review.invoices[0];
   const workerEvents = review.auditLogs.filter((audit) => audit.action.startsWith('WORKER_'));
   const adminEvents = review.auditLogs.filter((audit) => !audit.action.startsWith('WORKER_'));
+  const brand = printTenantBrand(settings);
   return `<!doctype html>
 <html>
 <head>
@@ -867,6 +1077,14 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
+    .brand-heading { display: flex; gap: 10pt; align-items: flex-start; }
+    .brand-logo {
+      width: 44pt;
+      height: 34pt;
+      border: 1px solid #d1d5db;
+      object-fit: contain;
+      padding: 2pt;
+    }
     .status { min-width: 150pt; text-align: right; }
     .status strong { display: block; font-size: 12pt; text-transform: uppercase; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7pt; }
@@ -896,6 +1114,15 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
       font-weight: 800;
       text-transform: uppercase;
     }
+    .override-note {
+      background: #fffbeb;
+      border: 1px solid #f59e0b;
+      color: #92400e;
+      font-size: 9pt;
+      font-weight: 700;
+      margin: 6pt 0;
+      padding: 5pt 6pt;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -915,10 +1142,16 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
 </head>
 <body>
   <header>
-    <div>
-      <p class="eyebrow">Work Order</p>
-      <h1>${escapeHtml(workOrder.workOrderNumber)}</h1>
-      <p>${escapeHtml(workOrder.title)}</p>
+    <div class="brand-heading">
+      ${brand.logoUrl ? `<img class="brand-logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
+      <div>
+        <p class="eyebrow">${escapeHtml(brand.name)}</p>
+        <h1>${escapeHtml(workOrder.workOrderNumber)}</h1>
+        <p>${escapeHtml(workOrder.title)}</p>
+        ${brand.legalName ? `<p class="muted">${escapeHtml(brand.legalName)}</p>` : ''}
+        ${brand.address ? `<p class="muted">${escapeHtml(brand.address)}</p>` : ''}
+        ${brand.contact ? `<p class="muted">${escapeHtml(brand.contact)}</p>` : ''}
+      </div>
     </div>
     <div class="status">
       <strong>${escapeHtml(statusText(workOrder.status))}</strong>
@@ -949,13 +1182,35 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
   </section>
 
   <section>
+    <h2>Route Stops</h2>
+    ${table(['Order', 'Type', 'Stop', 'Address', 'Planned', 'Status'], workOrder.routeStops.map((stop) => [
+      String(stop.stopOrder),
+      statusText(stop.stopType),
+      stop.name,
+      stop.address || '-',
+      formatDate(stop.plannedArrival) || '-',
+      routeStopPrintStatus(stop)
+    ]))}
+  </section>
+
+  <section>
+    <h2>Linked Work Orders</h2>
+    ${table(['Direction', 'Relationship', 'Work Order', 'Property', 'Status', 'Notes'], [
+      ...workOrder.linkedWorkOrders.map((link) => linkedWorkOrderPrintRow(link, 'Linked to')),
+      ...workOrder.linkedFromWorkOrders.map((link) => linkedWorkOrderPrintRow(link, 'Linked from'))
+    ])}
+  </section>
+
+  <section>
     <h2>Assigned Workers</h2>
-    ${table(['Name', 'Email', 'Role', 'Status'], workOrder.assignments.map((assignment) => [
+    ${table(['Name', 'Email', 'Role', 'Status', 'Actual timing'], workOrder.assignments.map((assignment) => [
       assignment.workerName,
       assignment.workerEmail || '-',
       assignment.leadWorker ? 'Lead' : 'Assigned',
-      statusText(assignment.assignmentStatus)
+      statusText(assignment.assignmentStatus),
+      assignmentTimingPrintText(assignment)
     ]))}
+    ${workOrder.assignments.some((assignment) => assignment.timingOverride) ? `<div class="override-note"><strong>Operations override applied.</strong> Corrected worker timing is highlighted in reports and audit.${workOrder.assignments.map((assignment) => assignment.timingOverride && assignment.overrideReason ? ` ${escapeHtml(assignment.workerName)}: ${escapeHtml(assignment.overrideReason)}.` : '').join('')}</div>` : ''}
   </section>
 
   <section>
@@ -1029,6 +1284,18 @@ function workOrderPrintHtml(review: WorkOrderReview): string {
 </html>`;
 }
 
+function printTenantBrand(settings?: TenantSettingsRecord | null): { name: string; legalName: string; address: string; contact: string; logoUrl: string } {
+  const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
+  const legalName = firstNonBlank(settings?.legalName);
+  return {
+    name,
+    legalName: legalName && !sameText(name, legalName) ? legalName : '',
+    address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
+    contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
+    logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
+  };
+}
+
 function workerDetailSections(review: WorkOrderReview): string {
   if (review.workOrder.assignments.length === 0) {
     return '';
@@ -1071,8 +1338,10 @@ function workerDetailSection(review: WorkOrderReview, assignment: WorkOrderAssig
         <span class="pill">${escapeHtml(assignment.leadWorker ? 'Lead' : 'Assigned')}</span>
         <span class="pill">${escapeHtml(statusText(assignment.assignmentStatus))}</span>
         <span class="pill">${escapeHtml(minutesText(totalWorkMinutes))}</span>
+        ${assignment.timingOverride ? '<span class="pill">Override</span>' : ''}
       </div>
     </div>
+    ${assignment.timingOverride ? `<div class="override-note">Operations corrected this worker's field timing${assignment.overrideReason ? `: ${escapeHtml(assignment.overrideReason)}` : '.'}</div>` : ''}
     <div class="grid">
       <section class="keep">
         <h2>Worker Time</h2>
@@ -1140,6 +1409,45 @@ function statusText(value: string): string {
   return value.toLowerCase().replaceAll('_', ' ');
 }
 
+function routeStopPrintStatus(stop: { arrivedAt?: string; completedAt?: string; skippedAt?: string }): string {
+  if (stop.completedAt) {
+    return `Done ${formatDate(stop.completedAt)}`;
+  }
+  if (stop.skippedAt) {
+    return `Skipped ${formatDate(stop.skippedAt)}`;
+  }
+  if (stop.arrivedAt) {
+    return `Arrived ${formatDate(stop.arrivedAt)}`;
+  }
+  return 'Open';
+}
+
+function linkedWorkOrderPrintRow(link: WorkOrderLink, direction: 'Linked to' | 'Linked from'): string[] {
+  return [
+    direction,
+    linkedWorkOrderPrintRelationship(link, direction),
+    `${link.workOrderNumber} ${link.title}`,
+    link.propertyName,
+    statusText(link.status),
+    link.notes || '-'
+  ];
+}
+
+function linkedWorkOrderPrintRelationship(link: WorkOrderLink, direction: 'Linked to' | 'Linked from'): string {
+  switch (link.linkType) {
+    case 'PICKUP_FOR':
+      return direction === 'Linked to' ? 'pickup for' : 'pickup job';
+    case 'BLOCKS':
+      return direction === 'Linked to' ? 'blocks' : 'blocked by';
+    case 'FOLLOWS':
+      return direction === 'Linked to' ? 'follows' : 'follow-up';
+    case 'SAME_RECURRENCE':
+      return 'same recurrence';
+    default:
+      return 'related';
+  }
+}
+
 function minutesText(minutes: number): string {
   if (minutes < 60) {
     return `${minutes} min`;
@@ -1157,6 +1465,45 @@ function printableString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function firstNonBlank(...values: Array<string | undefined>): string {
+  return values.find((value) => value && value.trim())?.trim() || '';
+}
+
+function joinText(delimiter: string, ...values: Array<string | undefined>): string {
+  return values
+    .map((value) => value?.trim() || '')
+    .filter(Boolean)
+    .join(delimiter);
+}
+
+function absoluteAssetUrl(value: string): string {
+  if (!value) {
+    return '';
+  }
+  try {
+    return new URL(value, window.location.origin).toString();
+  } catch {
+    return value;
+  }
+}
+
+function sameText(left: string, right: string): boolean {
+  const normalizedLeft = normalizeCompanyName(left);
+  const normalizedRight = normalizeCompanyName(right);
+  return !!normalizedLeft && !!normalizedRight && (
+    normalizedLeft === normalizedRight
+    || normalizedLeft.startsWith(normalizedRight)
+    || normalizedRight.startsWith(normalizedLeft)
+  );
+}
+
+function normalizeCompanyName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|company|co)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 function printableWorkerMatches(assignment: WorkOrderAssignment, candidate: { workerId?: string; email?: string; name?: string }): boolean {
   if (candidate.workerId && candidate.workerId === assignment.workerId) {
     return true;
@@ -1168,10 +1515,23 @@ function printableWorkerMatches(assignment: WorkOrderAssignment, candidate: { wo
 }
 
 function printActionLabel(action: string): string {
+  if (action === 'WORK_ORDER_FIELD_OVERRIDE_APPLIED') {
+    return 'Field data override';
+  }
   return statusText(action)
     .replace(/^worker /, '')
     .replace(/^work order /, '')
     .replace(/^customer /, 'owner ');
+}
+
+function assignmentTimingPrintText(assignment: WorkOrderAssignment): string {
+  const parts = [
+    assignment.actualArrivedAt ? `Arrived ${formatDate(assignment.actualArrivedAt)}` : '',
+    assignment.actualWorkStartedAt ? `Work ${formatDate(assignment.actualWorkStartedAt)}` : '',
+    assignment.actualFinishedAt ? `Finished ${formatDate(assignment.actualFinishedAt)}` : '',
+    assignment.actualWorkMinutes === undefined || assignment.actualWorkMinutes === null ? '' : minutesText(assignment.actualWorkMinutes)
+  ].filter(Boolean);
+  return `${parts.join(' | ') || '-'}${assignment.timingOverride ? ' | Operations override' : ''}`;
 }
 
 function printAuditSummary(audit: WorkOrderAuditEntry): string {
@@ -1227,4 +1587,8 @@ function escapeHtml(value: string | number | boolean): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function escapeAttribute(value: string | number | boolean): string {
+  return escapeHtml(value);
 }

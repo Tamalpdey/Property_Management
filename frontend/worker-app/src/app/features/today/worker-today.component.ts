@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import { WorkerAssignedJob } from '@lorne/contracts';
+import type { WorkerAssignedJob } from '@lorne/contracts';
 import { WorkerCalendarStripComponent } from './components/worker-calendar-strip.component';
 import { WorkerJobQueueComponent } from './components/worker-job-queue.component';
 import { WorkerJobService } from './services/worker-job.service';

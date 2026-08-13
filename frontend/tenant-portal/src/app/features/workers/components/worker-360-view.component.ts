@@ -1,6 +1,6 @@
-import { CurrencyPipe, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
-import { TenantAsset, WorkerRecord, WorkOrderRecord } from '@lorne/contracts';
+import type { TenantAsset, WorkerRecord, WorkOrderRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 
@@ -9,10 +9,10 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
 @Component({
   selector: 'lorne-worker-360-view',
   standalone: true,
-  imports: [ButtonModule, CurrencyPipe, DatePipe, TagModule],
+  imports: [ButtonModule, DatePipe, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="grid h-full gap-3 overflow-auto pr-1">
+    <section class="flex h-full flex-col gap-3 overflow-auto pr-1">
       <div class="rounded-lg border border-slate-200 bg-slate-950 px-4 py-3 text-white">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div class="min-w-0">
@@ -29,7 +29,7 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
               </p>
             }
           </div>
-          <div class="grid grid-cols-3 gap-2 text-right sm:min-w-[22rem]">
+          <div class="grid grid-cols-3 gap-2 text-right sm:min-w-[34rem] lg:grid-cols-6">
             <div class="rounded-lg bg-white/10 px-3 py-2">
               <p class="text-xs font-black uppercase tracking-wide text-slate-300">Open</p>
               <p class="text-xl font-black">{{ openJobs().length }}</p>
@@ -39,6 +39,18 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
               <p class="text-xl font-black">{{ completedJobs().length }}</p>
             </div>
             <div class="rounded-lg bg-white/10 px-3 py-2">
+              <p class="text-xs font-black uppercase tracking-wide text-slate-300">Actual</p>
+              <p class="text-xl font-black">{{ totalActualHours() }}h</p>
+            </div>
+            <div class="rounded-lg bg-white/10 px-3 py-2">
+              <p class="text-xs font-black uppercase tracking-wide text-slate-300">Arrived</p>
+              <p class="text-xl font-black">{{ arrivedJobs().length }}</p>
+            </div>
+            <div class="rounded-lg bg-white/10 px-3 py-2">
+              <p class="text-xs font-black uppercase tracking-wide text-slate-300">Finished</p>
+              <p class="text-xl font-black">{{ finishedJobs().length }}</p>
+            </div>
+            <div class="rounded-lg bg-white/10 px-3 py-2">
               <p class="text-xs font-black uppercase tracking-wide text-slate-300">Tools</p>
               <p class="text-xl font-black">{{ assignedAssets().length }}</p>
             </div>
@@ -46,18 +58,23 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 md:grid-cols-5">
+      <div class="grid grid-cols-5 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
         @for (tab of tabs; track tab.value) {
           <button
-            pButton
             type="button"
-            size="small"
-            [icon]="tab.icon"
-            [label]="tab.label"
-            [severity]="activeTab() === tab.value ? 'primary' : 'secondary'"
-            [text]="activeTab() !== tab.value"
+            class="flex h-11 items-center justify-center gap-2 rounded-md px-2 text-xs font-black text-slate-500 transition hover:bg-white hover:text-teal-700 sm:text-sm"
+            [class.border]="activeTab() === tab.value"
+            [class.border-teal-300]="activeTab() === tab.value"
+            [class.bg-teal-50]="activeTab() === tab.value"
+            [class.text-teal-700]="activeTab() === tab.value"
+            [class.shadow-sm]="activeTab() === tab.value"
+            [attr.aria-pressed]="activeTab() === tab.value"
             (click)="activeTab.set(tab.value)"
-          ></button>
+          >
+            <i [class]="tab.icon"></i>
+            <span class="hidden sm:inline">{{ tab.label }}</span>
+            <span class="sm:hidden">{{ tab.shortLabel }}</span>
+          </button>
         }
       </div>
 
@@ -70,12 +87,46 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
               <p class="mt-1 text-sm font-semibold text-slate-600">{{ worker().phone || 'No phone' }}</p>
               <p class="mt-2 text-xs font-bold text-slate-500">Worker app: {{ worker().appLoginEnabled ? 'enabled' : 'not created' }}</p>
             </div>
-            <div class="rounded-lg border border-slate-200 bg-white p-3">
-              <p class="text-xs font-black uppercase tracking-wide text-teal-700">Employment</p>
-              <p class="mt-2 text-sm font-black text-slate-950">{{ engagementLabel(worker().engagementType) }}</p>
-              <p class="mt-1 text-sm font-semibold text-slate-600">{{ worker().maxWeeklyHours ? worker().maxWeeklyHours + ' hours/week' : 'No weekly cap' }}</p>
-              <p class="mt-1 text-sm font-semibold text-slate-600">{{ worker().hourlyRate ? (worker().hourlyRate | currency:'CAD') : 'No hourly rate' }}</p>
-              <p class="mt-1 text-xs font-bold text-slate-500">Hire date: {{ worker().hireDate ? (worker().hireDate | date:'MMM d, y') : 'Not set' }}</p>
+            <div class="rounded-lg border border-slate-200 bg-white p-3 md:col-span-2">
+              <p class="text-xs font-black uppercase tracking-wide text-teal-700">Actual field timing</p>
+              <div class="mt-2 grid gap-2 sm:grid-cols-3">
+                <div class="rounded-lg bg-slate-50 px-3 py-2">
+                  <p class="text-xs font-black text-slate-500">Actual hours</p>
+                  <p class="text-lg font-black text-slate-950">{{ totalActualHours() }}</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 px-3 py-2">
+                  <p class="text-xs font-black text-slate-500">Arrived on site</p>
+                  <p class="text-lg font-black text-slate-950">{{ arrivedJobs().length }}</p>
+                </div>
+                <div class="rounded-lg bg-slate-50 px-3 py-2">
+                  <p class="text-xs font-black text-slate-500">Finished work</p>
+                  <p class="text-lg font-black text-slate-950">{{ finishedJobs().length }}</p>
+                </div>
+              </div>
+              <div class="mt-3 grid gap-2">
+                @for (job of timedJobs().slice(0, 3); track job.id) {
+                  @if (assignmentFor(job); as assignment) {
+                    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p class="text-sm font-black text-teal-700">{{ job.workOrderNumber }}</p>
+                          <p class="text-sm font-bold text-slate-950">{{ job.title }}</p>
+                          <p class="text-xs font-semibold text-slate-500">{{ job.propertyName }}</p>
+                        </div>
+                        <p class="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">{{ minutesLabel(assignment.actualWorkMinutes || 0) }}</p>
+                      </div>
+                      <div class="mt-2 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-3">
+                        <p><span class="block font-black uppercase text-slate-500">Arrived</span>{{ dateTimeOrDash(assignment.actualArrivedAt) }}</p>
+                        <p><span class="block font-black uppercase text-slate-500">Work started</span>{{ dateTimeOrDash(assignment.actualWorkStartedAt) }}</p>
+                        <p><span class="block font-black uppercase text-slate-500">Finished</span>{{ dateTimeOrDash(assignment.actualFinishedAt) }}</p>
+                      </div>
+                    </div>
+                  }
+                } @empty {
+                  <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">No actual arrival or finish times recorded yet.</p>
+                }
+              </div>
+              <p class="mt-2 text-xs font-bold text-slate-500">Based on worker on-site, work-start, and complete actions.</p>
             </div>
             <div class="rounded-lg border border-slate-200 bg-white p-3">
               <p class="text-xs font-black uppercase tracking-wide text-teal-700">Service capability</p>
@@ -106,7 +157,10 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
                 <button pButton type="button" size="small" icon="pi pi-pencil" label="Update profile" (click)="editWorker.emit(worker())"></button>
                 <button pButton type="button" size="small" severity="secondary" icon="pi pi-calendar-clock" label="Edit shifts" (click)="editWorkerSection.emit({ worker: worker(), tabIndex: 2 })"></button>
                 <button pButton type="button" size="small" severity="secondary" icon="pi pi-wrench" label="Edit skills" (click)="editWorkerSection.emit({ worker: worker(), tabIndex: 1 })"></button>
-                <button pButton type="button" size="small" severity="secondary" icon="pi pi-key" [label]="worker().appLoginEnabled ? 'Reset app login' : 'Create app login'" (click)="createAppLogin.emit(worker())"></button>
+                @if (canManageAppLogins()) {
+                  <button pButton type="button" size="small" severity="secondary" icon="pi pi-key" [label]="worker().appLoginEnabled ? 'Reset app login' : 'Create app login'" (click)="createAppLogin.emit(worker())"></button>
+                }
+                <button pButton type="button" size="small" severity="secondary" icon="pi pi-calendar-plus" label="Assign work order" (click)="assignWorkOrder.emit(worker())"></button>
                 <button pButton type="button" size="small" severity="secondary" icon="pi pi-briefcase" label="Assign equipment" (click)="assignEquipment.emit(worker())"></button>
               </div>
             </div>
@@ -139,13 +193,14 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
               <p-tag [value]="completedJobs().length + ' completed'" severity="success" />
             </div>
           </div>
-          <div class="mt-3 overflow-hidden rounded-lg border border-slate-200">
-            <table class="w-full min-w-[56rem] border-collapse text-sm">
+          <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table class="w-full min-w-[68rem] border-collapse text-sm">
               <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th class="px-3 py-2">Work order</th>
                   <th class="px-3 py-2">Property</th>
                   <th class="px-3 py-2">Schedule</th>
+                  <th class="px-3 py-2">Actual timing</th>
                   <th class="px-3 py-2">Assignment</th>
                   <th class="px-3 py-2">Status</th>
                 </tr>
@@ -163,12 +218,24 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
                     </td>
                     <td class="px-3 py-2 font-semibold text-slate-600">{{ scheduleLabel(job) }}</td>
                     <td class="px-3 py-2">
+                      @if (assignmentFor(job); as assignment) {
+                        <div class="grid gap-1 text-xs">
+                          <p><span class="font-black text-slate-950">Arrived:</span> <span class="font-semibold text-slate-600">{{ dateTimeOrDash(assignment.actualArrivedAt) }}</span></p>
+                          <p><span class="font-black text-slate-950">Work started:</span> <span class="font-semibold text-slate-600">{{ dateTimeOrDash(assignment.actualWorkStartedAt) }}</span></p>
+                          <p><span class="font-black text-slate-950">Finished:</span> <span class="font-semibold text-slate-600">{{ dateTimeOrDash(assignment.actualFinishedAt) }}</span></p>
+                          <p><span class="font-black text-slate-950">Duration:</span> <span class="font-semibold text-slate-600">{{ minutesLabel(assignment.actualWorkMinutes || 0) }}</span></p>
+                        </div>
+                      } @else {
+                        <p class="text-xs font-semibold text-slate-500">Not assigned</p>
+                      }
+                    </td>
+                    <td class="px-3 py-2">
                       <p-tag [value]="assignmentFor(job)?.leadWorker ? 'lead' : 'assigned'" [severity]="assignmentFor(job)?.leadWorker ? 'info' : 'secondary'" />
                     </td>
                     <td class="px-3 py-2"><p-tag [value]="statusLabel(job.status)" [severity]="statusSeverity(job.status)" /></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="5" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No work orders assigned to this worker.</td></tr>
+                  <tr><td colspan="6" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No work orders assigned to this worker.</td></tr>
                 }
               </tbody>
             </table>
@@ -270,18 +337,20 @@ export class Worker360ViewComponent {
   readonly worker = input.required<WorkerRecord>();
   readonly workOrders = input.required<WorkOrderRecord[]>();
   readonly assets = input.required<TenantAsset[]>();
+  readonly canManageAppLogins = input(false);
   readonly createAppLogin = output<WorkerRecord>();
   readonly editWorker = output<WorkerRecord>();
   readonly editWorkerSection = output<{ worker: WorkerRecord; tabIndex: number }>();
+  readonly assignWorkOrder = output<WorkerRecord>();
   readonly assignEquipment = output<WorkerRecord>();
 
   protected readonly activeTab = signal<Worker360Tab>('OVERVIEW');
-  protected readonly tabs: Array<{ value: Worker360Tab; label: string; icon: string }> = [
-    { value: 'OVERVIEW', label: 'Overview', icon: 'pi pi-id-card' },
-    { value: 'WORK', label: 'Work', icon: 'pi pi-briefcase' },
-    { value: 'SCHEDULE', label: 'Schedule', icon: 'pi pi-calendar-clock' },
-    { value: 'TOOLS', label: 'Tools', icon: 'pi pi-box' },
-    { value: 'SAFETY', label: 'Safety', icon: 'pi pi-verified' }
+  protected readonly tabs: Array<{ value: Worker360Tab; label: string; shortLabel: string; icon: string }> = [
+    { value: 'OVERVIEW', label: 'Overview', shortLabel: 'Info', icon: 'pi pi-id-card' },
+    { value: 'WORK', label: 'Work', shortLabel: 'Work', icon: 'pi pi-briefcase' },
+    { value: 'SCHEDULE', label: 'Schedule', shortLabel: 'Plan', icon: 'pi pi-calendar-clock' },
+    { value: 'TOOLS', label: 'Tools', shortLabel: 'Tools', icon: 'pi pi-box' },
+    { value: 'SAFETY', label: 'Safety', shortLabel: 'Safe', icon: 'pi pi-verified' }
   ];
 
   protected readonly workerJobs = computed(() => this.workOrders()
@@ -293,6 +362,12 @@ export class Worker360ViewComponent {
   protected readonly assignedAssets = computed(() => this.assets().filter((asset) => asset.assignedWorkerId === this.worker().id));
   protected readonly todayJobs = computed(() => this.workerJobs().filter((job) => isToday(job.scheduledStart)));
   protected readonly upcomingJobs = computed(() => this.workerJobs().filter((job) => isFuture(job.scheduledStart)));
+  protected readonly arrivedJobs = computed(() => this.workerJobs().filter((job) => Boolean(this.assignmentFor(job)?.actualArrivedAt)));
+  protected readonly finishedJobs = computed(() => this.workerJobs().filter((job) => Boolean(this.assignmentFor(job)?.actualFinishedAt)));
+  protected readonly timedJobs = computed(() => this.workerJobs().filter((job) => {
+    const assignment = this.assignmentFor(job);
+    return Boolean(assignment?.actualArrivedAt || assignment?.actualWorkStartedAt || assignment?.actualFinishedAt || assignment?.actualWorkMinutes);
+  }));
   protected readonly sortedShifts = computed(() => [...this.worker().shifts].sort((left, right) => left.dayOfWeek - right.dayOfWeek || left.startTime.localeCompare(right.startTime)));
 
   protected assignmentFor(workOrder: WorkOrderRecord) {
@@ -324,6 +399,20 @@ export class Worker360ViewComponent {
       .filter((job) => isFuture(job.scheduledStart))
       .sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart))[0];
     return nextJob ? `${nextJob.workOrderNumber} · ${new Date(nextJob.scheduledStart || '').toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'No upcoming job';
+  }
+
+  protected totalActualHours(): number {
+    const minutes = this.workerJobs()
+      .reduce((total, workOrder) => total + (this.assignmentFor(workOrder)?.actualWorkMinutes ?? 0), 0);
+    return Math.round((minutes / 60) * 10) / 10;
+  }
+
+  protected dateTimeOrDash(value?: string): string {
+    return value ? fullDateTime(value) : '-';
+  }
+
+  protected minutesLabel(minutes: number): string {
+    return minutesLabel(minutes);
   }
 
   protected leaveLabel(): string {
@@ -386,4 +475,17 @@ function isToday(value?: string): boolean {
 
 function isFuture(value?: string): boolean {
   return Boolean(value && new Date(value).getTime() >= Date.now());
+}
+
+function fullDateTime(value: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+}
+
+function minutesLabel(minutes: number): string {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
 }
