@@ -7,7 +7,9 @@ export interface DayTicketOptions {
   useActualTiming: boolean;
   includeStatus: boolean;
   includeService: boolean;
-  includeNotes: boolean;
+  includeTravel: boolean;
+  includeActivities: boolean;
+  includeWorkerNotes: boolean;
   includeTotals: boolean;
 }
 
@@ -28,6 +30,7 @@ export interface DayTicketShiftSummary {
   clockIn?: string;
   clockOut?: string;
   minutes: number;
+  entries: WorkerClockEntryRecord[];
 }
 
 interface ActualTiming {
@@ -228,6 +231,9 @@ export function dayTicketRows(data: TenantAnalytics, workerId: string, dateFrom:
       timeOutFromSchedule: timing.timeOutFromSchedule,
       minutes: timing.minutes
     });
+    if (!options.includeTravel) {
+      continue;
+    }
     for (const stop of workOrder.routeStops ?? []) {
       const stopTiming = dayTicketRouteStopTiming(stop, options.useActualTiming);
       if (!dateInRange(stopTiming.timeIn || workOrder.scheduledStart, dateFrom, dateTo)) {
@@ -319,10 +325,13 @@ export function dayTicketHtml(input: {
   shiftSummary?: DayTicketShiftSummary;
   settings?: TenantSettingsRecord | null;
 }): string {
-  const totalMinutes = input.rows.reduce((total, row) => total + row.minutes, 0);
+  const rowTotalMinutes = input.rows.reduce((total, row) => total + row.minutes, 0);
+  const totalMinutes = input.shiftSummary?.entries.length ? input.shiftSummary.minutes : rowTotalMinutes;
   const firstStart = input.shiftSummary?.clockIn;
   const lastFinish = input.shiftSummary?.clockOut;
+  const clockSessions = input.shiftSummary?.entries ?? [];
   const rowSlots = Array.from({ length: Math.max(10, input.rows.length) }, (_, index) => input.rows[index]);
+  const travelEstimates = dayTicketTravelEstimates(input.rows);
   const brand = tenantBrand(input.settings);
   const rangeLabel = ticketDateLabel(input.dateFrom, input.dateTo);
   return `<!doctype html>
@@ -338,7 +347,9 @@ export function dayTicketHtml(input: {
     .brand-wrap { align-items: center; display: flex; gap: 10px; min-width: 0; }
     .logo { background: #fff; border: 1px solid #cbd5e1; height: 38px; object-fit: contain; padding: 2px; width: 52px; }
     .brand { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-    .subbrand { color: #475569; font-size: 11px; font-weight: 700; margin-top: 2px; }
+    .brand-meta { margin-top: 4px; padding-left: 62px; }
+    .brand-meta.no-logo { padding-left: 0; }
+    .subbrand { color: #475569; font-size: 11px; font-weight: 700; line-height: 1.25; margin-top: 2px; }
     h1 { font-size: 26px; letter-spacing: .06em; margin: 12px 0 0; text-align: center; }
     .ticket-number { font-size: 14px; font-weight: 800; text-align: right; }
     .fields { align-items: end; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin: 12px 0; }
@@ -361,6 +372,9 @@ export function dayTicketHtml(input: {
     .footer { align-items: end; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; }
     .footer .line { min-height: 24px; }
     .vehicle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .clock-sessions { border-top: 1px solid #cbd5e1; display: grid; gap: 4px; margin-top: 12px; padding-top: 8px; }
+    .clock-session-row { align-items: center; display: grid; grid-template-columns: 70px 1fr 1fr 70px; gap: 8px; }
+    .clock-session-row span { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
     .hint { color: #475569; font-size: 10px; font-weight: 700; margin-top: 16px; text-align: center; }
     .schedule-fallback { color: #92400e; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
     .override-badge { color: #b45309; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
@@ -379,9 +393,11 @@ export function dayTicketHtml(input: {
           ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
           <div>
             <div class="brand">${escapeHtml(brand.name)}</div>
-            ${brand.subtitle ? `<div class="subbrand">${escapeHtml(brand.subtitle)}</div>` : ''}
-            ${brand.address ? `<div class="subbrand">${escapeHtml(brand.address)}</div>` : ''}
           </div>
+        </div>
+        <div class="brand-meta ${brand.logoUrl ? '' : 'no-logo'}">
+          ${brand.subtitle ? `<div class="subbrand">${escapeHtml(brand.subtitle)}</div>` : ''}
+          ${brand.address ? `<div class="subbrand">${escapeHtml(brand.address)}</div>` : ''}
         </div>
       </div>
       <h1>DAY TICKET</h1>
@@ -418,6 +434,7 @@ export function dayTicketHtml(input: {
               ${row.rowType === 'WORK_ORDER' && input.options.includeService && row.workOrder?.serviceName ? `<div class="muted">${escapeHtml(row.workOrder.serviceName)}</div>` : ''}
               ${row.rowType === 'WORK_ORDER' && input.options.includeStatus && row.workOrder ? `<div class="muted">${escapeHtml(statusLabel(row.workOrder.status))}</div>` : ''}
               ${row.rowType === 'ROUTE_STOP' && input.options.includeStatus ? `<div class="muted">${escapeHtml(routeStopStatusLabel(row.routeStop))}</div>` : ''}
+              ${row.rowType === 'ROUTE_STOP' && travelEstimates.has(dayTicketEntryKey(row)) ? `<div class="muted">Est. travel from previous: ${escapeHtml(minutesLabel(travelEstimates.get(dayTicketEntryKey(row)) || 0))}</div>` : ''}
               ${row.rowType === 'WORKER_ACTIVITY' && input.options.includeStatus ? `<div class="muted">${escapeHtml(row.activity?.open ? 'active' : 'completed')}</div>` : ''}
             </td>
             <td class="total">${escapeHtml(minutesLabel(row.minutes))}</td>
@@ -430,10 +447,11 @@ export function dayTicketHtml(input: {
       </tbody>
     </table>
 
-    ${input.options.includeNotes ? `
+    ${input.options.includeWorkerNotes ? `
       <section class="notes">
-        <strong>SPECIAL NOTES</strong>
+        <strong>WORKER NOTES</strong>
         ${input.rows.map((row) => row.assignment?.notes && row.workOrder ? `<p>${escapeHtml(row.workOrder.workOrderNumber)}: ${escapeHtml(row.assignment.notes)}</p>` : '').join('')}
+        ${input.rows.map((row) => row.activity?.notes ? `<p>${escapeHtml(activityTypeLabel(row.activity.activityType))}: ${escapeHtml(row.activity.notes)}</p>` : '').join('')}
         ${input.rows.map((row) => row.assignment?.timingOverride && row.workOrder ? `<p><strong>Override:</strong> ${escapeHtml(row.workOrder.workOrderNumber)}${row.assignment.overrideReason ? ` - ${escapeHtml(row.assignment.overrideReason)}` : ''}</p>` : '').join('')}
       </section>
     ` : ''}
@@ -447,6 +465,19 @@ export function dayTicketHtml(input: {
         <div><span>Down Time:</span><div class="line"></div></div>
         <div><span>Total Time:</span><div class="line">${escapeHtml(minutesLabel(totalMinutes))}</div></div>
       </section>
+      ${clockSessions.length > 1 ? `
+        <section class="clock-sessions">
+          <strong>Clock sessions</strong>
+          ${clockSessions.map((entry, index) => `
+            <div class="clock-session-row">
+              <span>Session ${index + 1}</span>
+              <div>Clock-in: ${escapeHtml(shortDateTime(entry.startedAt))}</div>
+              <div>Clock-out: ${escapeHtml(entry.endedAt ? shortDateTime(entry.endedAt) : 'Active')}</div>
+              <strong>${escapeHtml(minutesLabel(entry.durationMinutes ?? minutesBetween(entry.startedAt, entry.endedAt)))}</strong>
+            </div>
+          `).join('')}
+        </section>
+      ` : ''}
       <section class="vehicle">
         <div><span>Vehicle:</span><div class="line"></div></div>
         <div><span>Mileage Start:</span><div class="line"></div></div>
@@ -468,10 +499,11 @@ export function dateInputValue(value: Date): string {
 }
 
 export function dayTicketShiftSummary(entries: WorkerClockEntryRecord[]): DayTicketShiftSummary {
-  const clockIn = earliest(entries.map((entry) => entry.startedAt));
-  const clockOut = latest(entries.map((entry) => entry.endedAt));
-  const minutes = entries.reduce((total, entry) => total + (entry.durationMinutes ?? minutesBetween(entry.startedAt, entry.endedAt)), 0);
-  return { clockIn, clockOut, minutes };
+  const sortedEntries = [...entries].sort((left, right) => dateValue(left.startedAt) - dateValue(right.startedAt));
+  const clockIn = earliest(sortedEntries.map((entry) => entry.startedAt));
+  const clockOut = latest(sortedEntries.map((entry) => entry.endedAt));
+  const minutes = sortedEntries.reduce((total, entry) => total + (entry.durationMinutes ?? minutesBetween(entry.startedAt, entry.endedAt)), 0);
+  return { clockIn, clockOut, minutes, entries: sortedEntries };
 }
 
 export function timeOnly(value?: string, fallback = '-'): string {
@@ -645,6 +677,29 @@ function dayTicketWorkOrderNumber(row: DayTicketEntry): string {
     return 'Worker activity';
   }
   return row.workOrder?.workOrderNumber || '';
+}
+
+function dayTicketTravelEstimates(rows: DayTicketEntry[]): Map<string, number> {
+  const estimates = new Map<string, number>();
+  const orderedRows = [...rows].sort((left, right) => dateValue(rowSortTime(left)) - dateValue(rowSortTime(right)));
+  for (const [index, row] of orderedRows.entries()) {
+    if (row.rowType !== 'ROUTE_STOP' || !row.timeIn) {
+      continue;
+    }
+    const previous = orderedRows
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => candidate.timeOut);
+    const minutes = minutesBetween(previous?.timeOut, row.timeIn);
+    if (minutes > 0 && minutes <= 480) {
+      estimates.set(dayTicketEntryKey(row), minutes);
+    }
+  }
+  return estimates;
+}
+
+function dayTicketEntryKey(row: DayTicketEntry): string {
+  return `${row.rowType}:${row.workOrder?.id || row.activity?.id || 'row'}:${row.routeStop?.id || 'job'}`;
 }
 
 function rowSortTime(row: DayTicketEntry): string | undefined {

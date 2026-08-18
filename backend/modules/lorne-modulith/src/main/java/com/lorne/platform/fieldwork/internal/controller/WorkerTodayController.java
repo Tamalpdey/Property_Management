@@ -18,6 +18,8 @@ import com.lorne.platform.fieldwork.internal.service.WorkerShiftClockService;
 import com.lorne.platform.fieldwork.internal.service.WorkerTodayService;
 import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
+import com.lorne.platform.tenant.TenantPublicSettingsDto;
+import com.lorne.platform.tenant.TenantSettingsOperations;
 import com.lorne.platform.workorder.internal.dto.UpsertWorkOrderMaintenanceRecordRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderMaintenanceRecordDto;
 import jakarta.validation.Valid;
@@ -44,25 +46,34 @@ class WorkerTodayController {
     private final WorkerDailyLoadoutService workerDailyLoadoutService;
     private final WorkerShiftClockService workerShiftClockService;
     private final DocumentStorageService documentStorageService;
+    private final TenantSettingsOperations tenantSettingsOperations;
 
     WorkerTodayController(
             WorkerTodayService workerTodayService,
             WorkerJobService workerJobService,
             WorkerDailyLoadoutService workerDailyLoadoutService,
             WorkerShiftClockService workerShiftClockService,
-            DocumentStorageService documentStorageService
+            DocumentStorageService documentStorageService,
+            TenantSettingsOperations tenantSettingsOperations
     ) {
         this.workerTodayService = workerTodayService;
         this.workerJobService = workerJobService;
         this.workerDailyLoadoutService = workerDailyLoadoutService;
         this.workerShiftClockService = workerShiftClockService;
         this.documentStorageService = documentStorageService;
+        this.tenantSettingsOperations = tenantSettingsOperations;
     }
 
     @GetMapping("/today")
     @PreAuthorize("hasRole('FIELD_WORKER')")
     ApiResponse<WorkerTodayResponse> today() {
         return ApiResponse.ok(workerTodayService.today());
+    }
+
+    @GetMapping("/settings")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<TenantPublicSettingsDto> settings(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(TenantPublicSettingsDto.from(tenantSettingsOperations.settings(principal.tenantId())));
     }
 
     @GetMapping("/jobs")

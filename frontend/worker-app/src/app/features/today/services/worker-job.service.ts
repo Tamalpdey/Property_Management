@@ -10,6 +10,7 @@ import type {
   WorkerJobActionRequest,
   WorkerJobActionResponse,
   WorkerLoadoutToolActionRequest,
+  TenantSettingsRecord,
   UpsertWorkOrderMaintenanceRecordRequest,
   WorkOrderMaintenanceRecord
 } from '@lorne/contracts';
@@ -29,6 +30,12 @@ export class WorkerJobService {
   loadout(date: string) {
     return this.http
       .get<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout`, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  settings() {
+    return this.http
+      .get<ApiResponse<TenantSettingsRecord>>(`${environment.apiBaseUrl}/field-worker/settings`)
       .pipe(map((response) => response.data));
   }
 

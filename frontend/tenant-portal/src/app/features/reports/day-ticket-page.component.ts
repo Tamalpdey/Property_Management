@@ -86,7 +86,7 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
           </div>
 
           <div class="mt-3 grid gap-2 lg:grid-cols-[1fr_auto] lg:items-start">
-            <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
               <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
                 <input type="checkbox" name="dayTicketUseActualTiming" [(ngModel)]="dayTicketOptions.useActualTiming" />
                 Actual time in/out
@@ -100,8 +100,16 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
                 Service details
               </label>
               <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
-                <input type="checkbox" name="dayTicketIncludeNotes" [(ngModel)]="dayTicketOptions.includeNotes" />
-                Notes section
+                <input type="checkbox" name="dayTicketIncludeTravel" [(ngModel)]="dayTicketOptions.includeTravel" />
+                Travel
+              </label>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                <input type="checkbox" name="dayTicketIncludeActivities" [(ngModel)]="dayTicketOptions.includeActivities" />
+                Activity
+              </label>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                <input type="checkbox" name="dayTicketIncludeWorkerNotes" [(ngModel)]="dayTicketOptions.includeWorkerNotes" />
+                Worker notes
               </label>
               <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
                 <input type="checkbox" name="dayTicketIncludeTotals" [(ngModel)]="dayTicketOptions.includeTotals" />
@@ -189,7 +197,9 @@ export class DayTicketPageComponent {
     useActualTiming: true,
     includeStatus: true,
     includeService: true,
-    includeNotes: true,
+    includeTravel: true,
+    includeActivities: true,
+    includeWorkerNotes: true,
     includeTotals: true
   };
 
@@ -222,7 +232,7 @@ export class DayTicketPageComponent {
   protected rows(data: TenantAnalytics) {
     return [
       ...dayTicketRows(data, this.dayTicketWorkerId, this.dayTicketDateFrom, this.dayTicketDateTo, this.dayTicketOptions),
-      ...dayTicketActivityRows(this.workerActivities(), this.dayTicketDateFrom, this.dayTicketDateTo)
+      ...(this.dayTicketOptions.includeActivities ? dayTicketActivityRows(this.workerActivities(), this.dayTicketDateFrom, this.dayTicketDateTo) : [])
     ].sort((left, right) => new Date(left.timeIn || '').getTime() - new Date(right.timeIn || '').getTime());
   }
 
