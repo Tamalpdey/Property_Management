@@ -5,7 +5,10 @@ import java.util.UUID;
 public record SendInvoiceEmailRequest(
         UUID templateId,
         String recipientEmail,
+        String ccEmails,
+        String bccEmails,
         String subject,
-        String body
+        String body,
+        String deliveryMode
 ) {
 }

@@ -1,6 +1,16 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ApiResponse, PhotoUploadRequest, PresignedPhotoUpload, TenantSettingsRecord, UpdateTenantSettingsRequest } from '@lorne/contracts';
+import type {
+  ApiResponse,
+  EmailDeliveryLogRecord,
+  PhotoUploadRequest,
+  PresignedPhotoUpload,
+  ResendEmailDeliveryRequest,
+  TenantSettingsRecord,
+  TestTenantEmailRequest,
+  TestTenantEmailResponse,
+  UpdateTenantSettingsRequest
+} from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -17,6 +27,24 @@ export class TenantSettingsService {
   update(request: UpdateTenantSettingsRequest) {
     return this.http
       .put<ApiResponse<TenantSettingsRecord>>(`${environment.apiBaseUrl}/tenant/settings`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  sendTestEmail(request: TestTenantEmailRequest) {
+    return this.http
+      .post<ApiResponse<TestTenantEmailResponse>>(`${environment.apiBaseUrl}/tenant/settings/test-email`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  emailDeliveries(limit = 50) {
+    return this.http
+      .get<ApiResponse<EmailDeliveryLogRecord[]>>(`${environment.apiBaseUrl}/tenant/email-deliveries`, { params: { limit } })
+      .pipe(map((response) => response.data));
+  }
+
+  resendEmailDelivery(deliveryId: string, request: ResendEmailDeliveryRequest) {
+    return this.http
+      .post<ApiResponse<EmailDeliveryLogRecord>>(`${environment.apiBaseUrl}/tenant/email-deliveries/${deliveryId}/resend`, request)
       .pipe(map((response) => response.data));
   }
 

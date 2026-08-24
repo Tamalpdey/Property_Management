@@ -7,6 +7,11 @@ public record WorkerShiftClockDto(
         boolean clockedIn,
         UUID entryId,
         Instant startedAt,
-        Instant endedAt
+        Instant endedAt,
+        boolean paused,
+        UUID pauseId,
+        Instant pausedAt,
+        Long pauseMinutes,
+        Long activeMinutes
 ) {
 }

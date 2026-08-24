@@ -6,11 +6,14 @@ import com.lorne.platform.shared.exception.DuplicateResourceException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
 import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
+import com.lorne.platform.worker.internal.dto.WorkerActivityOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityDto;
 import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,9 +87,18 @@ public class WorkerManagementService {
                 SELECT wsce.id, wsce.worker_id, wsce.started_at, wsce.ended_at,
                        CASE WHEN wsce.ended_at IS NULL THEN NULL
                             ELSE floor(extract(epoch from (wsce.ended_at - wsce.started_at)) / 60)::bigint
-                       END AS duration_minutes
+                       END AS duration_minutes,
+                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes
                 FROM worker_shift_clock_entries wsce
                 JOIN tenants t ON t.id = wsce.tenant_id
+                LEFT JOIN LATERAL (
+                    SELECT floor(sum(extract(epoch from (ended_at - started_at))) / 60)::bigint AS pause_minutes
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NOT NULL
+                ) pauses ON true
                 WHERE wsce.tenant_id = ?
                   AND wsce.worker_id = ?
                   AND (wsce.started_at AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date <= ?
@@ -97,7 +109,8 @@ public class WorkerManagementService {
                 rs.getObject("worker_id", UUID.class),
                 instant("started_at", rs),
                 instant("ended_at", rs),
-                (Long) rs.getObject("duration_minutes")
+                (Long) rs.getObject("duration_minutes"),
+                (Long) rs.getObject("pause_minutes")
         ), tenantId, workerId, toDate, fromDate);
     }
 
@@ -110,16 +123,31 @@ public class WorkerManagementService {
             throw new BadRequestException("Activity end date must be on or after start date.");
         }
         return jdbcTemplate.query("""
-                SELECT id, worker_id, activity_type, title, location_name, address, notes, started_at, ended_at,
-                       CASE WHEN ended_at IS NULL THEN NULL
-                            ELSE floor(extract(epoch from (ended_at - started_at)) / 60)::bigint
-                       END AS duration_minutes
+                SELECT worker_daily_activities.id, worker_daily_activities.worker_id, worker_daily_activities.activity_type,
+                       worker_daily_activities.title, worker_daily_activities.location_name, worker_daily_activities.address,
+                       worker_daily_activities.notes, worker_daily_activities.started_at, worker_daily_activities.ended_at,
+                       CASE WHEN worker_daily_activities.ended_at IS NULL THEN NULL
+                            ELSE floor(extract(epoch from (worker_daily_activities.ended_at - worker_daily_activities.started_at)) / 60)::bigint
+                       END AS duration_minutes,
+                       override_audit.reason AS override_reason,
+                       override_audit.created_at AS override_updated_at
                 FROM worker_daily_activities
-                WHERE tenant_id = ?
-                  AND worker_id = ?
-                  AND activity_date >= ?
-                  AND activity_date <= ?
-                ORDER BY started_at
+                LEFT JOIN LATERAL (
+                    SELECT audit_logs.metadata ->> 'reason' AS reason, audit_logs.created_at
+                    FROM audit_logs
+                    WHERE audit_logs.tenant_id = worker_daily_activities.tenant_id
+                      AND audit_logs.resource_type = 'WORKER'
+                      AND audit_logs.resource_id = worker_daily_activities.worker_id
+                      AND audit_logs.action = 'WORKER_ACTIVITY_OVERRIDDEN'
+                      AND audit_logs.metadata ->> 'activityId' = worker_daily_activities.id::text
+                    ORDER BY audit_logs.created_at DESC
+                    LIMIT 1
+                ) override_audit ON true
+                WHERE worker_daily_activities.tenant_id = ?
+                  AND worker_daily_activities.worker_id = ?
+                  AND worker_daily_activities.activity_date >= ?
+                  AND worker_daily_activities.activity_date <= ?
+                ORDER BY worker_daily_activities.started_at
                 """, (rs, rowNum) -> new WorkerActivityDto(
                 rs.getObject("id", UUID.class),
                 rs.getObject("worker_id", UUID.class),
@@ -131,8 +159,120 @@ public class WorkerManagementService {
                 instant("started_at", rs),
                 instant("ended_at", rs),
                 (Long) rs.getObject("duration_minutes"),
-                rs.getTimestamp("ended_at") == null
+                rs.getTimestamp("ended_at") == null,
+                rs.getTimestamp("override_updated_at") != null,
+                rs.getString("override_reason"),
+                instant("override_updated_at", rs)
         ), tenantId, workerId, fromDate, toDate);
+    }
+
+    @Transactional
+    public List<WorkerActivityDto> overrideActivity(UUID tenantId, UUID actorUserId, UUID workerId, WorkerActivityOverrideRequest request) {
+        requireWorker(tenantId, workerId);
+        if (request == null) {
+            throw new BadRequestException("Worker activity override details are required.");
+        }
+        var reason = blankToNull(request.reason());
+        if (reason == null) {
+            throw new BadRequestException("Override reason is required.");
+        }
+        var previous = request.activityId() == null ? null : activitySnapshot(tenantId, workerId, request.activityId());
+        var affectedDate = previous == null ? null : previous.activityDate();
+        if (Boolean.TRUE.equals(request.delete())) {
+            if (request.activityId() == null) {
+                throw new BadRequestException("Activity id is required to delete a worker activity.");
+            }
+            var deleted = jdbcTemplate.update("""
+                    DELETE FROM worker_daily_activities
+                    WHERE tenant_id = ? AND worker_id = ? AND id = ?
+                    """, tenantId, workerId, request.activityId());
+            if (deleted != 1) {
+                throw new ResourceNotFoundException("Worker activity was not found.");
+            }
+            auditWriter.record(tenantId, actorUserId, "WORKER_ACTIVITY_OVERRIDE_DELETED", "WORKER", workerId, activityOverrideMetadata(
+                    request.activityId(), "DELETE", previous, request, reason
+            ));
+            var date = affectedDate == null ? LocalDate.now(tenantZoneId(tenantId)) : affectedDate;
+            return activities(tenantId, workerId, date, date);
+        }
+
+        var startedAt = request.startedAt();
+        var endedAt = request.endedAt();
+        if (startedAt == null || endedAt == null) {
+            throw new BadRequestException("Activity start and end time are required for operations override.");
+        }
+        if (!endedAt.isAfter(startedAt)) {
+            throw new BadRequestException("Activity end time must be after start time.");
+        }
+        var title = blankToNull(request.title());
+        if (title == null) {
+            throw new BadRequestException("Activity title is required.");
+        }
+        var activityType = activityType(request.activityType());
+        var activityDate = startedAt.atZone(tenantZoneId(tenantId)).toLocalDate();
+        UUID activityId;
+        String action;
+        if (request.activityId() == null) {
+            activityId = jdbcTemplate.queryForObject("""
+                    INSERT INTO worker_daily_activities (
+                        tenant_id, worker_id, activity_date, activity_type, title, location_name,
+                        address, notes, started_at, ended_at, created_by, updated_by
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                    """, UUID.class,
+                    tenantId,
+                    workerId,
+                    activityDate,
+                    activityType,
+                    title,
+                    blankToNull(request.locationName()),
+                    blankToNull(request.address()),
+                    blankToNull(request.notes()),
+                    timestamp(startedAt),
+                    timestamp(endedAt),
+                    actorUserId,
+                    actorUserId
+            );
+            action = "CREATE";
+        } else {
+            activityId = request.activityId();
+            var updated = jdbcTemplate.update("""
+                    UPDATE worker_daily_activities
+                    SET activity_date = ?,
+                        activity_type = ?,
+                        title = ?,
+                        location_name = ?,
+                        address = ?,
+                        notes = ?,
+                        started_at = ?,
+                        ended_at = ?,
+                        updated_by = ?,
+                        updated_at = now()
+                    WHERE tenant_id = ? AND worker_id = ? AND id = ?
+                    """,
+                    activityDate,
+                    activityType,
+                    title,
+                    blankToNull(request.locationName()),
+                    blankToNull(request.address()),
+                    blankToNull(request.notes()),
+                    timestamp(startedAt),
+                    timestamp(endedAt),
+                    actorUserId,
+                    tenantId,
+                    workerId,
+                    activityId
+            );
+            if (updated != 1) {
+                throw new ResourceNotFoundException("Worker activity was not found.");
+            }
+            action = "UPDATE";
+        }
+        auditWriter.record(tenantId, actorUserId, "WORKER_ACTIVITY_OVERRIDDEN", "WORKER", workerId, activityOverrideMetadata(
+                activityId, action, previous, request, reason
+        ));
+        return activities(tenantId, workerId, activityDate, activityDate);
     }
 
     @Transactional
@@ -480,9 +620,30 @@ public class WorkerManagementService {
         return value == null || value.isBlank() ? null : value;
     }
 
+    private String activityType(String value) {
+        var activityType = value == null || value.isBlank() ? "OTHER" : value.trim().toUpperCase();
+        if (!List.of("OFFICE", "SUPPLIER", "SHOP", "WAREHOUSE", "TRAVEL", "BREAK", "OTHER").contains(activityType)) {
+            throw new BadRequestException("Worker activity type is not supported.");
+        }
+        return activityType;
+    }
+
     private Instant instant(String column, java.sql.ResultSet rs) throws java.sql.SQLException {
         var timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private Timestamp timestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
+    }
+
+    private ZoneId tenantZoneId(UUID tenantId) {
+        var timezones = jdbcTemplate.query("""
+                SELECT COALESCE(timezone, 'America/Toronto') AS timezone
+                FROM tenants
+                WHERE id = ?
+                """, (rs, rowNum) -> rs.getString("timezone"), tenantId);
+        return ZoneId.of(timezones.isEmpty() ? "America/Toronto" : timezones.getFirst());
     }
 
     private String normalizeStatus(String value) {
@@ -502,6 +663,52 @@ public class WorkerManagementService {
         if (count == null || count == 0) {
             throw new ResourceNotFoundException("Worker not found.");
         }
+    }
+
+    private ActivitySnapshot activitySnapshot(UUID tenantId, UUID workerId, UUID activityId) {
+        var activities = jdbcTemplate.query("""
+                SELECT id, activity_date, activity_type, title, location_name, address, notes, started_at, ended_at
+                FROM worker_daily_activities
+                WHERE tenant_id = ? AND worker_id = ? AND id = ?
+                """, (rs, rowNum) -> new ActivitySnapshot(
+                rs.getObject("id", UUID.class),
+                rs.getObject("activity_date", LocalDate.class),
+                rs.getString("activity_type"),
+                rs.getString("title"),
+                rs.getString("location_name"),
+                rs.getString("address"),
+                rs.getString("notes"),
+                instant("started_at", rs),
+                instant("ended_at", rs)
+        ), tenantId, workerId, activityId);
+        return activities.isEmpty() ? null : activities.getFirst();
+    }
+
+    private Map<String, Object> activityOverrideMetadata(
+            UUID activityId,
+            String action,
+            ActivitySnapshot before,
+            WorkerActivityOverrideRequest request,
+            String reason
+    ) {
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("activityId", activityId == null ? "" : activityId.toString());
+        metadata.put("action", action);
+        metadata.put("reason", reason);
+        metadata.put("activityType", request.activityType() == null ? "" : request.activityType());
+        metadata.put("title", request.title() == null ? "" : request.title());
+        metadata.put("locationName", request.locationName() == null ? "" : request.locationName());
+        metadata.put("address", request.address() == null ? "" : request.address());
+        metadata.put("notes", request.notes() == null ? "" : request.notes());
+        metadata.put("startedAt", request.startedAt() == null ? "" : request.startedAt().toString());
+        metadata.put("endedAt", request.endedAt() == null ? "" : request.endedAt().toString());
+        if (before != null) {
+            metadata.put("beforeActivityType", before.activityType());
+            metadata.put("beforeTitle", before.title());
+            metadata.put("beforeStartedAt", before.startedAt() == null ? "" : before.startedAt().toString());
+            metadata.put("beforeEndedAt", before.endedAt() == null ? "" : before.endedAt().toString());
+        }
+        return metadata;
     }
 
     private WorkerDto find(UUID tenantId, UUID workerId) {
@@ -531,5 +738,18 @@ public class WorkerManagementService {
                 FROM workers w
                 WHERE w.tenant_id = ? AND w.id = ? AND w.user_id = u.id
                 """, displayName, phone, email, actorUserId, tenantId, workerId);
+    }
+
+    private record ActivitySnapshot(
+            UUID id,
+            LocalDate activityDate,
+            String activityType,
+            String title,
+            String locationName,
+            String address,
+            String notes,
+            Instant startedAt,
+            Instant endedAt
+    ) {
     }
 }

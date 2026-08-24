@@ -29,7 +29,14 @@ public record TenantSettingsView(
         String smtpUsername,
         String smtpPassword,
         boolean smtpPasswordConfigured,
-        boolean smtpUseTls
+        boolean smtpUseTls,
+        String graphTenantId,
+        String graphClientId,
+        String graphClientSecret,
+        boolean graphClientSecretConfigured,
+        String graphSenderUser,
+        boolean autoSendWorkCompletedEmail,
+        boolean autoSendInvoiceEmail
 ) {
     public String invoiceBrandName() {
         return firstNonBlank(organizationName, tenantName, legalName, "Lorne PropertyOps");
@@ -53,6 +60,10 @@ public record TenantSettingsView(
 
     public String effectiveReplyToAddress() {
         return firstNonBlank(emailReplyToAddress, supportEmail, billingEmail, emailFromAddress);
+    }
+
+    public String effectiveGraphSenderUser() {
+        return firstNonBlank(graphSenderUser, emailFromAddress);
     }
 
     private String firstNonBlank(String... values) {

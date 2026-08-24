@@ -1,6 +1,14 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ApiResponse, CreateWorkerRequest, UpdateWorkerStatusRequest, WorkerActivityRecord, WorkerClockEntryRecord, WorkerRecord } from '@lorne/contracts';
+import type {
+  ApiResponse,
+  CreateWorkerRequest,
+  UpdateWorkerStatusRequest,
+  WorkerActivityOverrideRequest,
+  WorkerActivityRecord,
+  WorkerClockEntryRecord,
+  WorkerRecord
+} from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -27,6 +35,12 @@ export class WorkerManagementService {
       .get<ApiResponse<WorkerActivityRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/activities`, {
         params: { from, to }
       })
+      .pipe(map((response) => response.data));
+  }
+
+  overrideActivity(workerId: string, request: WorkerActivityOverrideRequest) {
+    return this.http
+      .post<ApiResponse<WorkerActivityRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/activities/override`, request)
       .pipe(map((response) => response.data));
   }
 

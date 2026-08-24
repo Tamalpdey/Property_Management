@@ -11,13 +11,16 @@ import {
   dateInputValue,
   dayTicketActivityRows,
   dayTicketDescription,
+  dayTicketEstimatedTravelLabel,
   dayTicketHtml,
   DayTicketOptions,
+  dayTicketRowTypeLabel,
   dayTicketRows,
+  dayTicketTotalMinutes,
   minutesLabel,
   printHtmlDocument,
   timeOnly
-} from '../../../../../tenant-portal/src/app/features/reports/report-generation';
+} from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 
 const CURRENT_WORKER_ID = 'current-worker';
 
@@ -75,7 +78,7 @@ const CURRENT_WORKER_ID = 'current-worker';
             Ticket date
             <input type="date" class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="selectedDate" (change)="load()" />
           </label>
-          <div class="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <div class="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
               <input type="checkbox" name="useActualTiming" [(ngModel)]="options.useActualTiming" />
               Actual time
@@ -85,12 +88,16 @@ const CURRENT_WORKER_ID = 'current-worker';
               Travel
             </label>
             <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" name="includeRouteStops" [(ngModel)]="options.includeRouteStops" />
+              Routes
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
               <input type="checkbox" name="includeActivities" [(ngModel)]="options.includeActivities" />
               Activity
             </label>
             <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
               <input type="checkbox" name="includeWorkerNotes" [(ngModel)]="options.includeWorkerNotes" />
-              Notes
+              Special notes
             </label>
             <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
               <input type="checkbox" name="includeTotals" [(ngModel)]="options.includeTotals" />
@@ -110,7 +117,7 @@ const CURRENT_WORKER_ID = 'current-worker';
           <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ selectedDate }}</span>
         </div>
         <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200">
-          <table class="w-full min-w-[54rem] border-collapse text-sm">
+          <table class="w-full min-w-[60rem] border-collapse text-sm">
             <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th class="px-3 py-2">#</th>
@@ -119,6 +126,7 @@ const CURRENT_WORKER_ID = 'current-worker';
                 <th class="px-3 py-2">Client</th>
                 <th class="px-3 py-2">W.O #</th>
                 <th class="px-3 py-2">Job description</th>
+                <th class="px-3 py-2">Map est.</th>
                 <th class="px-3 py-2">Total</th>
               </tr>
             </thead>
@@ -130,14 +138,18 @@ const CURRENT_WORKER_ID = 'current-worker';
                   <td class="px-3 py-2 font-semibold text-slate-700">{{ timeOnly(entry.timeOut) }}</td>
                   <td class="px-3 py-2">
                     <p class="font-black text-slate-950">{{ entry.rowType === 'WORKER_ACTIVITY' ? entry.activity?.locationName || entry.activity?.title : entry.rowType === 'ROUTE_STOP' ? entry.routeStop?.name : entry.workOrder?.propertyName }}</p>
-                    <p class="text-xs font-semibold text-slate-500">{{ entry.rowType === 'WORKER_ACTIVITY' ? activityLabel(entry.activity?.activityType || 'OTHER') : entry.rowType === 'ROUTE_STOP' ? 'Route stop' : entry.workOrder?.ownerName }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ entry.rowType === 'WORKER_ACTIVITY' ? activityLabel(entry.activity?.activityType || 'OTHER') : entry.rowType === 'ROUTE_STOP' ? 'Route stop' : entry.rowType === 'TRAVEL' ? 'Travel' : entry.workOrder?.ownerName }}</p>
                   </td>
                   <td class="px-3 py-2 font-black text-teal-700">{{ entry.workOrder?.workOrderNumber || 'Worker activity' }}</td>
-                  <td class="px-3 py-2 font-semibold text-slate-800">{{ dayTicketDescription(entry, options) }}</td>
+                  <td class="px-3 py-2">
+                    <p class="mb-1 inline-flex rounded-full border border-slate-200 px-2 py-0.5 text-[0.65rem] font-black uppercase tracking-wide text-teal-700">{{ dayTicketRowTypeLabel(entry) }}</p>
+                    <p class="font-semibold text-slate-800">{{ dayTicketDescription(entry, options) }}</p>
+                  </td>
+                  <td class="px-3 py-2 font-bold text-slate-600">{{ dayTicketEstimatedTravelLabel(entry) }}</td>
                   <td class="px-3 py-2 font-black text-slate-950">{{ minutesLabel(entry.minutes) }}</td>
                 </tr>
               } @empty {
-                <tr><td colspan="7" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No ticket rows for this date.</td></tr>
+                <tr><td colspan="8" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No ticket rows for this date.</td></tr>
               }
             </tbody>
           </table>
@@ -163,6 +175,7 @@ export class WorkerDayTicketComponent {
     includeStatus: true,
     includeService: true,
     includeTravel: true,
+    includeRouteStops: true,
     includeActivities: true,
     includeWorkerNotes: true,
     includeTotals: true
@@ -171,6 +184,8 @@ export class WorkerDayTicketComponent {
   protected readonly timeOnly = timeOnly;
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
+  protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;
+  protected readonly dayTicketEstimatedTravelLabel = dayTicketEstimatedTravelLabel;
 
   constructor() {
     void this.load();
@@ -190,7 +205,7 @@ export class WorkerDayTicketComponent {
   }
 
   protected totalMinutes(): number {
-    return this.rows().reduce((total, row) => total + row.minutes, 0);
+    return dayTicketTotalMinutes(this.rows(), this.currentShiftSummary());
   }
 
   protected async load(): Promise<void> {
@@ -243,6 +258,7 @@ export class WorkerDayTicketComponent {
 
   private toWorkOrderRecord(job: WorkerAssignedJob): WorkOrderRecord {
     const notes = job.fieldNotes?.map((note) => `${note.workerName}: ${note.note}`).join('\n');
+    const travelStartedAt = eventTime(job, ['WORKER_START_TRAVEL']);
     const arrivedAt = eventTime(job, ['WORKER_ARRIVE_ON_SITE']);
     const workStartedAt = eventTime(job, ['WORKER_START_WORK', 'WORKER_RESUME_WORK']);
     const finishedAt = eventTime(job, ['WORKER_COMPLETE_WORK']);
@@ -270,17 +286,29 @@ export class WorkerDayTicketComponent {
         leadWorker: job.leadWorker,
         assignmentStatus: job.assignmentStatus,
         notes,
+        actualTravelStartedAt: travelStartedAt,
         actualArrivedAt: arrivedAt,
         actualWorkStartedAt: workStartedAt,
         actualFinishedAt: finishedAt,
-        actualWorkMinutes: minutesBetween(workStartedAt || arrivedAt, finishedAt)
+        actualWorkMinutes: minutesBetween(workStartedAt || arrivedAt, finishedAt),
+        estimatedTravelMinutes: job.estimatedTravelMinutes,
+        estimatedTravelDistanceMeters: job.estimatedTravelDistanceMeters,
+        travelEstimateProvider: job.travelEstimateProvider,
+        travelEstimatedAt: job.travelEstimatedAt
       }],
       materials: [],
       assets: [],
       tasks: [],
       routeStops: job.routeStops ?? [],
       linkedWorkOrders: job.linkedWorkOrders ?? [],
-      linkedFromWorkOrders: job.linkedFromWorkOrders ?? []
+      linkedFromWorkOrders: job.linkedFromWorkOrders ?? [],
+      fieldNotes: (job.fieldNotes ?? []).map((note) => ({
+        id: note.id,
+        workerName: note.workerName,
+        note: note.note,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt
+      }))
     };
   }
 
@@ -297,14 +325,25 @@ export class WorkerDayTicketComponent {
       workerId: this.loadoutWorkerId(),
       startedAt: state.startedAt,
       endedAt: state.endedAt,
-      durationMinutes: minutesBetween(state.startedAt, state.endedAt || new Date().toISOString())
+      durationMinutes: minutesBetween(state.startedAt, state.endedAt || new Date().toISOString()),
+      pauseMinutes: this.livePauseMinutes()
     };
     return {
       clockIn: state.startedAt,
       clockOut: state.endedAt,
       minutes: entry.durationMinutes ?? 0,
+      pauseMinutes: entry.pauseMinutes ?? 0,
       entries: [entry]
     };
+  }
+
+  private livePauseMinutes(): number {
+    const state = this.clock.state();
+    const completed = state.pauseMinutes ?? 0;
+    const current = state.paused && state.pausedAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(state.pausedAt).getTime()) / 60000))
+      : 0;
+    return completed + current;
   }
 }
 

@@ -21,6 +21,10 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/today/worker-today.component').then((m) => m.WorkerTodayComponent)
       },
       {
+        path: 'activity',
+        loadComponent: () => import('./features/activity/worker-activity.component').then((m) => m.WorkerActivityComponent)
+      },
+      {
         path: 'loadout',
         loadComponent: () => import('./features/loadout/worker-loadout.component').then((m) => m.WorkerLoadoutComponent)
       },

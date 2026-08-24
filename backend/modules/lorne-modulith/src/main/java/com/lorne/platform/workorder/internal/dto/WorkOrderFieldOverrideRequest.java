@@ -58,6 +58,7 @@ public record WorkOrderFieldOverrideRequest(
             String address,
             String instructions,
             Instant plannedArrival,
+            Boolean visibleToWorker,
             Instant arrivedAt,
             Instant completedAt,
             Instant skippedAt,

@@ -50,6 +50,7 @@ type RouteStopOverrideRow = {
   address: string;
   instructions: string;
   plannedArrival: string;
+  visibleToWorker: boolean;
   label: string;
   arrivedAt: string;
   completedAt: string;
@@ -252,7 +253,7 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                     <input pInputText class="mt-1 w-full" [(ngModel)]="row.address" [disabled]="row.deleted" placeholder="Optional address" />
                   </label>
                 </div>
-                <div class="mt-3 grid gap-3 md:grid-cols-4">
+                <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_minmax(11rem,1fr)_9rem]">
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Planned
                     <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.plannedArrival" [disabled]="row.deleted" />
@@ -268,6 +269,10 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Skipped
                     <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.skippedAt" [disabled]="row.deleted" />
+                  </label>
+                  <label class="flex h-10 items-center gap-2 self-end rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm">
+                    <p-checkbox [(ngModel)]="row.visibleToWorker" [binary]="true" [disabled]="row.deleted" />
+                    Show
                   </label>
                 </div>
                 <input pInputText class="mt-3 w-full" [(ngModel)]="row.instructions" [disabled]="row.deleted" placeholder="Route instructions" />
@@ -615,7 +620,7 @@ export class WorkOrderFieldOverrideComponent {
     'OWNER',
     'OTHER'
   ];
-  protected readonly activityTypeOptions = ['OFFICE', 'SUPPLIER', 'SHOP', 'WAREHOUSE', 'BREAK', 'OTHER'];
+  protected readonly activityTypeOptions = ['OFFICE', 'SUPPLIER', 'SHOP', 'WAREHOUSE', 'TRAVEL', 'BREAK', 'OTHER'];
   protected readonly workerOptions = computed(() =>
     this.assignmentRows().map((worker) => ({
       label: `${worker.workerName}${worker.workerEmail ? ` · ${worker.workerEmail}` : ''}`,
@@ -651,6 +656,7 @@ export class WorkOrderFieldOverrideComponent {
         address: '',
         instructions: '',
         plannedArrival: '',
+        visibleToWorker: true,
         label: `${rows.length + 1}. New route stop`,
         arrivedAt: '',
         completedAt: '',
@@ -762,6 +768,7 @@ export class WorkOrderFieldOverrideComponent {
         address: row.address.trim() || undefined,
         instructions: row.instructions.trim() || undefined,
         plannedArrival: this.fromLocalDateTime(row.plannedArrival),
+        visibleToWorker: row.visibleToWorker,
         arrivedAt: this.fromLocalDateTime(row.arrivedAt),
         completedAt: this.fromLocalDateTime(row.completedAt),
         skippedAt: this.fromLocalDateTime(row.skippedAt),
@@ -877,6 +884,7 @@ export class WorkOrderFieldOverrideComponent {
       address: routeStop.address || '',
       instructions: routeStop.instructions || '',
       plannedArrival: this.toLocalDateTime(routeStop.plannedArrival),
+      visibleToWorker: routeStop.visibleToWorker ?? true,
       label: `${routeStop.stopOrder}. ${routeStop.name}`,
       arrivedAt: this.toLocalDateTime(routeStop.arrivedAt),
       completedAt: this.toLocalDateTime(routeStop.completedAt),

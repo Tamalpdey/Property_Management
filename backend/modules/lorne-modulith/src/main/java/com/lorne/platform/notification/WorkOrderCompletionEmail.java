@@ -15,6 +15,10 @@ public record WorkOrderCompletionEmail(
         String propertyAddress,
         String serviceName,
         Instant completedAt,
-        String reviewNote
+        String reviewNote,
+        String recipientEmailOverride,
+        String ccEmails,
+        String bccEmails,
+        String deliveryMode
 ) {
 }

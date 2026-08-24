@@ -28,6 +28,12 @@ public record TenantSettingsDto(
         Integer smtpPort,
         String smtpUsername,
         boolean smtpPasswordConfigured,
-        boolean smtpUseTls
+        boolean smtpUseTls,
+        String graphTenantId,
+        String graphClientId,
+        boolean graphClientSecretConfigured,
+        String graphSenderUser,
+        boolean autoSendWorkCompletedEmail,
+        boolean autoSendInvoiceEmail
 ) {
 }

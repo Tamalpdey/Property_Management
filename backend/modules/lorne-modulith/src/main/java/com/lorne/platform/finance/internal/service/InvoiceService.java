@@ -283,6 +283,72 @@ public class InvoiceService {
     }
 
     @Transactional
+    public InvoiceDto updateLine(UUID tenantId, UUID actorUserId, UUID invoiceId, UUID lineId, InvoiceLineRequest request) {
+        var invoice = get(tenantId, invoiceId);
+        requireDraftInvoice(tenantId, invoiceId);
+        var before = lineSnapshot(tenantId, invoiceId, lineId);
+        var lineType = lineType(request);
+        var description = description(request);
+        var quantity = positiveMoney(request.quantity(), "Quantity must be greater than zero.");
+        var unitPrice = money(request.unitPrice());
+        if (!"DISCOUNT".equals(lineType) && unitPrice.signum() < 0) {
+            throw new BadRequestException("Only discount lines can have a negative unit price.");
+        }
+        var taxable = Boolean.TRUE.equals(request.taxable());
+        var taxRate = rate(request.taxRate());
+        var lineTotal = quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP);
+        var changed = jdbcTemplate.update("""
+                UPDATE invoice_lines
+                SET line_type = ?,
+                    description = ?,
+                    quantity = ?,
+                    unit_price = ?,
+                    line_total = ?,
+                    taxable = ?,
+                    tax_rate = ?,
+                    updated_by = ?,
+                    updated_at = now()
+                WHERE tenant_id = ? AND invoice_id = ? AND id = ?
+                """,
+                lineType,
+                description,
+                quantity,
+                unitPrice,
+                lineTotal,
+                taxable,
+                taxRate,
+                actorUserId,
+                tenantId,
+                invoiceId,
+                lineId
+        );
+        if (changed == 0) {
+            throw new ResourceNotFoundException("Invoice line not found.");
+        }
+        recalculateTotals(tenantId, invoiceId, actorUserId);
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("invoiceNumber", invoice.invoiceNumber());
+        metadata.put("lineId", lineId.toString());
+        metadata.put("changedFields", changedLineFields(before, lineType, description, quantity, unitPrice, taxable, taxRate));
+        metadata.put("beforeLineType", before.lineType());
+        metadata.put("afterLineType", lineType);
+        metadata.put("beforeDescription", before.description());
+        metadata.put("afterDescription", description);
+        metadata.put("beforeQuantity", before.quantity());
+        metadata.put("afterQuantity", quantity);
+        metadata.put("beforeUnitPrice", before.unitPrice());
+        metadata.put("afterUnitPrice", unitPrice);
+        metadata.put("beforeTaxable", before.taxable());
+        metadata.put("afterTaxable", taxable);
+        metadata.put("beforeTaxRate", before.taxRate());
+        metadata.put("afterTaxRate", taxRate);
+        metadata.put("beforeLineTotal", before.lineTotal());
+        metadata.put("afterLineTotal", lineTotal);
+        auditWriter.record(tenantId, actorUserId, "INVOICE_LINE_UPDATED", "INVOICE", invoiceId, metadata);
+        return get(tenantId, invoiceId);
+    }
+
+    @Transactional
     public InvoiceDto updateStatus(UUID tenantId, UUID actorUserId, UUID invoiceId, UpdateInvoiceStatusRequest request) {
         var invoice = get(tenantId, invoiceId);
         var status = normalizeStatus(request == null ? null : request.status());
@@ -313,7 +379,17 @@ public class InvoiceService {
                 "reason", request == null || request.reason() == null ? "" : request.reason().trim()
         ));
         syncWorkOrdersFromInvoice(tenantId, actorUserId, invoice.id(), status);
-        return get(tenantId, invoiceId);
+        var updated = get(tenantId, invoiceId);
+        if ("SENT".equals(status) && tenantSettingsOperations.settings(tenantId).autoSendInvoiceEmail()) {
+            invoiceEmailService.sendInvoice(
+                    tenantId,
+                    actorUserId,
+                    updated,
+                    new SendInvoiceEmailRequest(null, null, null, null, null, null, "AUTO")
+            );
+            return get(tenantId, invoiceId);
+        }
+        return updated;
     }
 
     @Transactional
@@ -577,6 +653,63 @@ public class InvoiceService {
                 lines,
                 payments
         );
+    }
+
+    private InvoiceLineSnapshot lineSnapshot(UUID tenantId, UUID invoiceId, UUID lineId) {
+        var line = jdbcTemplate.query("""
+                SELECT id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate
+                FROM invoice_lines
+                WHERE tenant_id = ? AND invoice_id = ? AND id = ?
+                """, rs -> {
+            if (!rs.next()) {
+                return null;
+            }
+            return new InvoiceLineSnapshot(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("line_type"),
+                    rs.getString("description"),
+                    money(rs.getBigDecimal("quantity")),
+                    money(rs.getBigDecimal("unit_price")),
+                    money(rs.getBigDecimal("line_total")),
+                    rs.getBoolean("taxable"),
+                    rate(rs.getBigDecimal("tax_rate"))
+            );
+        }, tenantId, invoiceId, lineId);
+        if (line == null) {
+            throw new ResourceNotFoundException("Invoice line not found.");
+        }
+        return line;
+    }
+
+    private List<String> changedLineFields(
+            InvoiceLineSnapshot before,
+            String lineType,
+            String description,
+            BigDecimal quantity,
+            BigDecimal unitPrice,
+            boolean taxable,
+            BigDecimal taxRate
+    ) {
+        var fields = new ArrayList<String>();
+        if (!before.lineType().equals(lineType)) {
+            fields.add("lineType");
+        }
+        if (!before.description().equals(description)) {
+            fields.add("description");
+        }
+        if (before.quantity().compareTo(quantity) != 0) {
+            fields.add("quantity");
+        }
+        if (before.unitPrice().compareTo(unitPrice) != 0) {
+            fields.add("unitPrice");
+        }
+        if (before.taxable() != taxable) {
+            fields.add("taxable");
+        }
+        if (before.taxRate().compareTo(taxRate) != 0) {
+            fields.add("taxRate");
+        }
+        return fields;
     }
 
     private void requireDraftInvoice(UUID tenantId, UUID invoiceId) {
@@ -850,6 +983,18 @@ public class InvoiceService {
     }
 
     private record MoneyTotals(BigDecimal subtotal, BigDecimal taxTotal) {
+    }
+
+    private record InvoiceLineSnapshot(
+            UUID id,
+            String lineType,
+            String description,
+            BigDecimal quantity,
+            BigDecimal unitPrice,
+            BigDecimal lineTotal,
+            boolean taxable,
+            BigDecimal taxRate
+    ) {
     }
 
     private record InvoiceWorkOrderDraft(

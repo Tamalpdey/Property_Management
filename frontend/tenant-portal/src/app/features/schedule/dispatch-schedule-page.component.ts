@@ -21,6 +21,7 @@ import type {
   GeneratedRecurringDraft,
   WorkerAvailabilityOption,
   CreateWorkOrderRequest,
+  SendWorkOrderOwnerEmailRequest,
   TenantSettingsRecord
 } from '@lorne/contracts';
 import { PropertyService } from '../properties/services/property.service';
@@ -428,7 +429,7 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
           [initialTab]="reviewTarget()"
           (reviewAction)="submitReviewAction($event)"
           (generateInvoice)="generateInvoice()"
-          (notifyOwner)="notifyOwner()"
+          (notifyOwner)="notifyOwner($event)"
           (sendInvoiceEmail)="sendInvoiceEmail($event)"
           (printWorkOrder)="printReview()"
           (printMaintenanceRecord)="printMaintenanceRecord()"
@@ -879,7 +880,7 @@ export class DispatchSchedulePageComponent {
     }
   }
 
-  protected async notifyOwner(): Promise<void> {
+  protected async notifyOwner(request: SendWorkOrderOwnerEmailRequest): Promise<void> {
     const workOrder = this.reviewingWorkOrder();
     if (!workOrder || this.reviewSaving()) {
       return;
@@ -887,7 +888,7 @@ export class DispatchSchedulePageComponent {
     this.reviewSaving.set(true);
     this.reviewError.set('');
     try {
-      const review = await firstValueFrom(this.workOrderService.notifyOwner(workOrder.id));
+      const review = await firstValueFrom(this.workOrderService.notifyOwner(workOrder.id, request));
       this.reviewTarget.set('COMMUNICATION');
       this.applyReviewUpdate(review);
     } catch (exception) {

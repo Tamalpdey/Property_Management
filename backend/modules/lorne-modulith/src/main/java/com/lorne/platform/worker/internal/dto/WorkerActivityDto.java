@@ -14,6 +14,9 @@ public record WorkerActivityDto(
         Instant startedAt,
         Instant endedAt,
         Long durationMinutes,
-        boolean open
+        boolean open,
+        boolean override,
+        String overrideReason,
+        Instant overrideUpdatedAt
 ) {
 }

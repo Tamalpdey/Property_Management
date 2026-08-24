@@ -17,7 +17,8 @@ import type {
   WorkOrderType,
   WorkOrderLink,
   WorkOrderRouteStop,
-  WorkOrderMaintenanceRecord
+  WorkOrderMaintenanceRecord,
+  SendWorkOrderOwnerEmailRequest
 } from '@lorne/contracts';
 
 export type WorkOrderReviewTab = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOURCES' | 'INVOICE' | 'COMMUNICATION' | 'TIME' | 'AUDIT';
@@ -115,7 +116,12 @@ interface WorkOrderWorkerSummary {
                         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                           <div class="flex flex-wrap items-center justify-between gap-2">
                             <span class="text-sm font-black text-slate-950">{{ stop.stopOrder }}. {{ routeStopTypeLabel(stop.stopType) }} · {{ stop.name }}</span>
-                            <span [class]="routeStopStatusClass(stop)">{{ routeStopStatusLabel(stop) }}</span>
+                            <span class="flex flex-wrap items-center gap-1.5">
+                              <span class="rounded-full px-2 py-0.5 text-[0.65rem] font-black uppercase" [class]="stop.visibleToWorker === false ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800'">
+                                {{ stop.visibleToWorker === false ? 'Hidden from worker' : 'Worker visible' }}
+                              </span>
+                              <span [class]="routeStopStatusClass(stop)">{{ routeStopStatusLabel(stop) }}</span>
+                            </span>
                           </div>
                           <div class="mt-2 flex flex-wrap gap-1.5 text-[11px] font-black uppercase tracking-wide text-slate-500">
                             @if (stop.plannedArrival) {
@@ -330,7 +336,7 @@ interface WorkOrderWorkerSummary {
                             <i [class]="timelineIcon(audit.action)"></i>
                           </span>
                           <span class="min-w-0">
-                            <span class="block text-sm font-black text-slate-950">{{ actionLabel(audit.action) }}</span>
+                            <span class="block text-sm font-black text-slate-950">{{ auditActionLabel(audit) }}</span>
                             <span class="block text-xs font-bold text-slate-500">{{ audit.createdAt | date:'MMM d, h:mm a' }}</span>
                             <span class="mt-1 block text-sm font-semibold leading-5 text-slate-700">{{ auditSummary(audit) }}</span>
                           </span>
@@ -604,10 +610,10 @@ interface WorkOrderWorkerSummary {
                     type="button"
                     size="small"
                     icon="pi pi-send"
-                    label="Notify owner"
+                    [label]="completionCommunications(data).length ? 'Resend completion' : 'Send completion'"
                     [disabled]="!canNotifyOwner(data)"
                     [loading]="busy()"
-                    (click)="notifyOwner.emit()"
+                    (click)="openOwnerEmail()"
                   ></button>
                   @if (data.invoices[0]; as invoice) {
                     <button
@@ -616,7 +622,7 @@ interface WorkOrderWorkerSummary {
                       size="small"
                       severity="success"
                       icon="pi pi-envelope"
-                      label="Send invoice"
+                      [label]="invoiceCommunications(data).length ? 'Resend invoice' : 'Send invoice'"
                       [loading]="busy()"
                       (click)="sendInvoiceEmail.emit(invoice.id)"
                     ></button>
@@ -637,7 +643,12 @@ interface WorkOrderWorkerSummary {
                         </div>
                         <p class="mt-1 text-xs font-bold text-slate-500">{{ communication.recipientEmail }} · {{ communication.createdAt | date:'MMM d, h:mm a' }}</p>
                       </div>
-                      <p-tag [value]="communication.status.toLowerCase()" [severity]="communicationSeverity(communication.status)" />
+                      <div class="flex shrink-0 items-center gap-2">
+                        @if (communication.deliveryMode) {
+                          <span class="rounded-full bg-white px-2 py-1 text-xs font-black uppercase text-slate-500">{{ communication.deliveryMode }}</span>
+                        }
+                        <p-tag [value]="communication.status.toLowerCase()" [severity]="communicationSeverity(communication.status)" />
+                      </div>
                     </div>
                     <div class="mt-3 rounded-lg bg-white px-3 py-2">
                       <p class="text-xs font-black uppercase tracking-wide text-slate-500">Subject</p>
@@ -692,7 +703,7 @@ interface WorkOrderWorkerSummary {
                       <i [class]="timelineIcon(audit.action)"></i>
                     </span>
                     <span>
-                      <span class="block text-sm font-black text-slate-950">{{ actionLabel(audit.action) }}</span>
+                      <span class="block text-sm font-black text-slate-950">{{ auditActionLabel(audit) }}</span>
                       <span class="block text-xs font-bold text-slate-500">{{ audit.createdAt | date:'MMM d, h:mm a' }} · {{ audit.actorName || 'System' }}</span>
                       <span class="mt-1 block text-sm font-semibold leading-5 text-slate-700">{{ auditSummary(audit) }}</span>
                     </span>
@@ -755,7 +766,7 @@ interface WorkOrderWorkerSummary {
                   <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                     <div class="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
                       <div>
-                        <p class="text-sm font-black text-slate-950">{{ actionLabel(audit.action) }}</p>
+                        <p class="text-sm font-black text-slate-950">{{ auditActionLabel(audit) }}</p>
                         <p class="text-xs font-bold text-slate-500">{{ audit.actorName || 'Worker' }} · {{ audit.createdAt | date:'MMM d, h:mm a' }}</p>
                       </div>
                       <p-tag [value]="audit.actorEmail || 'worker'" severity="secondary" />
@@ -784,7 +795,7 @@ interface WorkOrderWorkerSummary {
                   <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                     <div class="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
                       <div>
-                        <p class="text-sm font-black text-slate-950">{{ actionLabel(audit.action) }}</p>
+                        <p class="text-sm font-black text-slate-950">{{ auditActionLabel(audit) }}</p>
                         <p class="text-xs font-bold text-slate-500">{{ audit.actorName || 'System' }} · {{ audit.createdAt | date:'MMM d, h:mm a' }}</p>
                       </div>
                       <p-tag [value]="audit.actorEmail || 'system'" severity="secondary" />
@@ -951,15 +962,15 @@ interface WorkOrderWorkerSummary {
         header="Evidence preview"
         [modal]="true"
         [visible]="evidencePreviewOpen()"
-        [style]="{ width: 'min(46rem, 94vw)' }"
-        [contentStyle]="{ overflow: 'hidden' }"
+        [style]="{ width: 'min(58rem, 96vw)' }"
+        [contentStyle]="{ 'max-height': '86vh', overflow: 'auto' }"
         (visibleChange)="!$event && closeEvidencePreview()"
       >
         @if (selectedEvidence(); as item) {
           <section class="space-y-3">
-            <div class="grid h-[min(24rem,58vh)] place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+            <div class="grid max-h-[76vh] min-h-72 place-items-center overflow-auto rounded-lg border border-slate-200 bg-slate-100 p-2">
               @if (isImageEvidence(item) && item.viewUrl) {
-                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="max-h-full max-w-full object-contain" />
+                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="max-h-[74vh] max-w-full object-contain" />
               } @else if (item.viewUrl) {
                 <div class="grid h-full w-full place-items-center p-6 text-center text-slate-700">
                   <span>
@@ -990,6 +1001,40 @@ interface WorkOrderWorkerSummary {
       </section>
     }
 
+    <p-dialog
+      header="Send owner completion email"
+      [modal]="true"
+      [visible]="notifyDialogOpen()"
+      [style]="{ width: 'min(36rem, 94vw)' }"
+      (visibleChange)="!$event && closeOwnerEmail()"
+    >
+      <form class="space-y-3" (ngSubmit)="sendOwnerEmail()">
+        <label class="block">
+          <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">To</span>
+          <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" name="ownerEmailRecipient" type="email" placeholder="Leave blank to use owner billing email" [(ngModel)]="notifyForm.recipientEmail" />
+        </label>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">CC</span>
+            <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" name="ownerEmailCc" placeholder="comma separated" [(ngModel)]="notifyForm.ccEmails" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">BCC</span>
+            <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" name="ownerEmailBcc" placeholder="comma separated" [(ngModel)]="notifyForm.bccEmails" />
+          </label>
+        </div>
+        <label class="block">
+          <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Review note</span>
+          <textarea class="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" name="ownerEmailNote" placeholder="Optional note included in the owner completion email" [(ngModel)]="notifyForm.note"></textarea>
+        </label>
+        <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">This send is audited. If this work order already has a completion notice, it will be recorded as a resend.</p>
+        <div class="flex justify-end gap-2 border-t border-slate-200 pt-3">
+          <button pButton type="button" severity="secondary" label="Cancel" (click)="closeOwnerEmail()"></button>
+          <button pButton type="submit" icon="pi pi-send" label="Send email" [loading]="busy()"></button>
+        </div>
+      </form>
+    </p-dialog>
+
     <ng-template #linkedWorkOrderContent let-link let-direction="direction">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="text-sm font-black text-teal-800">{{ link.workOrderNumber }}</span>
@@ -1013,7 +1058,7 @@ export class WorkOrderReviewComponent {
   readonly canManageBilling = input(true);
   readonly reviewAction = output<WorkOrderReviewActionRequest>();
   readonly generateInvoice = output<void>();
-  readonly notifyOwner = output<void>();
+  readonly notifyOwner = output<SendWorkOrderOwnerEmailRequest>();
   readonly sendInvoiceEmail = output<string>();
   readonly printWorkOrder = output<void>();
   readonly printMaintenanceRecord = output<void>();
@@ -1033,6 +1078,13 @@ export class WorkOrderReviewComponent {
   protected readonly auditGroupTab = signal<AuditGroupTab>('WORKER');
   protected readonly evidencePreviewOpen = signal(false);
   protected readonly evidencePreviewIndex = signal(0);
+  protected readonly notifyDialogOpen = signal(false);
+  protected readonly notifyForm: SendWorkOrderOwnerEmailRequest = {
+    recipientEmail: '',
+    ccEmails: '',
+    bccEmails: '',
+    note: ''
+  };
   protected readonly selectedEvidence = signal<WorkOrderEvidence | null>(null);
   protected reviewNote = '';
 
@@ -1083,6 +1135,28 @@ export class WorkOrderReviewComponent {
 
   protected failedCommunications(data: WorkOrderReview): WorkOrderCommunication[] {
     return data.communications.filter((item) => item.status === 'FAILED');
+  }
+
+  protected openOwnerEmail(): void {
+    this.notifyForm.recipientEmail = '';
+    this.notifyForm.ccEmails = '';
+    this.notifyForm.bccEmails = '';
+    this.notifyForm.note = '';
+    this.notifyDialogOpen.set(true);
+  }
+
+  protected closeOwnerEmail(): void {
+    this.notifyDialogOpen.set(false);
+  }
+
+  protected sendOwnerEmail(): void {
+    this.notifyOwner.emit({
+      recipientEmail: this.notifyForm.recipientEmail?.trim() || undefined,
+      ccEmails: this.notifyForm.ccEmails?.trim() || undefined,
+      bccEmails: this.notifyForm.bccEmails?.trim() || undefined,
+      note: this.notifyForm.note?.trim() || undefined
+    });
+    this.closeOwnerEmail();
   }
 
   protected communicationLabel(item: WorkOrderCommunication): string {
@@ -1231,6 +1305,16 @@ export class WorkOrderReviewComponent {
     return ACTION_LABELS[action] ?? action.toLowerCase().replaceAll('_', ' ');
   }
 
+  protected auditActionLabel(audit: WorkOrderAuditEntry): string {
+    if (audit.action === 'WORKER_PHOTO_CAPTURED' || audit.action === 'ADMIN_WORK_PHOTO_UPLOADED') {
+      return `${auditPhotoTypeLabel(audit.metadata)} uploaded`;
+    }
+    if (audit.action === 'WORKER_PURCHASE_RECEIPT_UPLOADED' || audit.action === 'ADMIN_PURCHASE_RECEIPT_UPLOADED') {
+      return 'Purchase receipt uploaded';
+    }
+    return this.actionLabel(audit.action);
+  }
+
   protected timelineEntries(data: WorkOrderReview): WorkOrderAuditEntry[] {
     return [...data.auditLogs].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
   }
@@ -1310,6 +1394,16 @@ export class WorkOrderReviewComponent {
     }
     if (audit.action === 'WORKER_MATERIAL_USED') {
       return `${worker || audit.actorName || 'Worker'} marked material used${material ? ': ' + material : ''}.`;
+    }
+    if (audit.action === 'WORKER_PHOTO_CAPTURED' || audit.action === 'ADMIN_WORK_PHOTO_UPLOADED') {
+      const actor = worker || audit.actorName || (audit.action.startsWith('ADMIN_') ? 'Operations' : 'Worker');
+      const caption = stringValue(metadata['caption']);
+      return `${actor} uploaded ${auditPhotoTypeLabel(metadata).toLowerCase()}${caption ? ': ' + caption : ''}.`;
+    }
+    if (audit.action === 'WORKER_PURCHASE_RECEIPT_UPLOADED' || audit.action === 'ADMIN_PURCHASE_RECEIPT_UPLOADED') {
+      const actor = worker || audit.actorName || (audit.action.startsWith('ADMIN_') ? 'Operations' : 'Worker');
+      const caption = stringValue(metadata['caption']) || stringValue(metadata['vendorName']);
+      return `${actor} uploaded a purchase receipt${caption ? ': ' + caption : ''}.`;
     }
     if (audit.action === 'WORKER_COMPLETE_WORK') {
       return `${worker || audit.actorName || 'Worker'} submitted the work for operations review.`;
@@ -1616,6 +1710,22 @@ function sentenceLabel(value: string): string {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function auditPhotoTypeLabel(metadata: Record<string, unknown>): string {
+  const photoType = stringValue(metadata['photoType']).toUpperCase();
+  switch (photoType) {
+    case 'BEFORE':
+      return 'Before photo';
+    case 'AFTER':
+      return 'After photo';
+    case 'ISSUE':
+      return 'Issue photo';
+    case 'COMPLETION':
+      return 'Completion photo';
+    default:
+      return 'Photo';
+  }
 }
 
 function displayValue(value: unknown): string {

@@ -27,6 +27,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class WorkerJobService {
     private static final int EVIDENCE_LIMIT_PER_GROUP = 15;
+    private static final Set<String> WORK_ORDER_ACTIONS_BLOCKED_BY_OPEN_ACTIVITY = Set.of(
+            "START_TRAVEL",
+            "ARRIVE_ON_SITE",
+            "START_WORK",
+            "RESUME_WORK",
+            "ARRIVE_ROUTE_STOP",
+            "COMPLETE_ROUTE_STOP",
+            "SKIP_ROUTE_STOP",
+            "COMPLETE_WORK"
+    );
     private static final TypeReference<Map<String, Object>> TEMPLATE_TYPE = new TypeReference<>() {
     };
     private static final Map<String, Object> EMPTY_MAINTENANCE_RECORD_TEMPLATE = Map.of(
@@ -73,6 +83,8 @@ public class WorkerJobService {
                        st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.description AS notes,
+                       woa.estimated_travel_minutes, woa.estimated_travel_distance_meters,
+                       woa.travel_estimate_provider, woa.travel_estimated_at,
                        woa.lead_worker, woa.assignment_status::text AS assignment_status
                 FROM work_order_assignments woa
                 JOIN work_orders wo ON wo.id = woa.work_order_id AND wo.tenant_id = woa.tenant_id
@@ -98,6 +110,10 @@ public class WorkerJobService {
                 rs.getString("priority"),
                 instant("scheduled_start", rs),
                 instant("scheduled_end", rs),
+                (Integer) rs.getObject("estimated_travel_minutes"),
+                (Integer) rs.getObject("estimated_travel_distance_meters"),
+                rs.getString("travel_estimate_provider"),
+                instant("travel_estimated_at", rs),
                 rs.getString("notes"),
                 rs.getBoolean("lead_worker"),
                 rs.getString("assignment_status"),
@@ -130,6 +146,7 @@ public class WorkerJobService {
         requireAssigned(tenantId, worker.id(), workOrderId);
         var now = Instant.now();
         requireActionAllowed(tenantId, worker.id(), workOrderId, action, now);
+        requireNoOpenWorkerActivityForWorkOrderAction(tenantId, worker.id(), action);
         actionRequestContext.set(request);
         try {
             switch (action) {
@@ -324,9 +341,28 @@ public class WorkerJobService {
             throw new BadRequestException("This job is closed for worker actions.");
         }
         if (Set.of("PENDING_COMPLETION", "COMPLETED").contains(gate.status())
-                && !isEvidenceAction(action)
-                && terminalAssignmentStatus(gate.assignmentStatus())) {
+                && !isEvidenceAction(action)) {
             throw new BadRequestException("This job is submitted for review. Only photos and purchase receipts can still be added.");
+        }
+    }
+
+    private void requireNoOpenWorkerActivityForWorkOrderAction(UUID tenantId, UUID workerId, String action) {
+        if (!WORK_ORDER_ACTIONS_BLOCKED_BY_OPEN_ACTIVITY.contains(action)) {
+            return;
+        }
+        var today = LocalDate.now(tenantZoneId(tenantId));
+        var hasOpenActivity = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM worker_daily_activities
+                    WHERE tenant_id = ?
+                      AND worker_id = ?
+                      AND activity_date = ?
+                      AND ended_at IS NULL
+                )
+                """, Boolean.class, tenantId, workerId, today));
+        if (hasOpenActivity) {
+            throw new BadRequestException("End the current worker activity before starting work order actions.");
         }
     }
 
@@ -887,6 +923,8 @@ public class WorkerJobService {
                        st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.description AS notes,
+                       woa.estimated_travel_minutes, woa.estimated_travel_distance_meters,
+                       woa.travel_estimate_provider, woa.travel_estimated_at,
                        woa.lead_worker, woa.assignment_status::text AS assignment_status
                 FROM work_order_assignments woa
                 JOIN work_orders wo ON wo.id = woa.work_order_id AND wo.tenant_id = woa.tenant_id
@@ -908,6 +946,10 @@ public class WorkerJobService {
                 rs.getString("priority"),
                 instant("scheduled_start", rs),
                 instant("scheduled_end", rs),
+                (Integer) rs.getObject("estimated_travel_minutes"),
+                (Integer) rs.getObject("estimated_travel_distance_meters"),
+                rs.getString("travel_estimate_provider"),
+                instant("travel_estimated_at", rs),
                 rs.getString("notes"),
                 rs.getBoolean("lead_worker"),
                 rs.getString("assignment_status"),
@@ -941,6 +983,10 @@ public class WorkerJobService {
                 job.priority(),
                 job.scheduledStart(),
                 job.scheduledEnd(),
+                job.estimatedTravelMinutes(),
+                job.estimatedTravelDistanceMeters(),
+                job.travelEstimateProvider(),
+                job.travelEstimatedAt(),
                 job.notes(),
                 job.leadWorker(),
                 job.assignmentStatus(),
@@ -952,7 +998,7 @@ public class WorkerJobService {
                 linkedFromWorkOrders(tenantId, job.id()),
                 fieldNotes(tenantId, actorUserId, job.id()),
                 evidence(tenantId, actorUserId, job.id()),
-                executionEvents(tenantId, job.id())
+                executionEvents(tenantId, workerId, actorUserId, job.id())
         );
     }
 
@@ -1010,9 +1056,11 @@ public class WorkerJobService {
 
     private List<WorkerAssignedJobDto.RouteStopDto> routeStops(UUID tenantId, UUID workOrderId) {
         return jdbcTemplate.query("""
-                SELECT id, stop_order, stop_type, name, address, instructions, planned_arrival, arrived_at, completed_at, skipped_at, skipped_reason
+                SELECT id, stop_order, stop_type, name, address, instructions, planned_arrival, visible_to_worker,
+                       estimated_travel_minutes, estimated_travel_distance_meters, travel_estimate_provider, travel_estimated_at,
+                       arrived_at, completed_at, skipped_at, skipped_reason
                 FROM work_order_route_stops
-                WHERE tenant_id = ? AND work_order_id = ?
+                WHERE tenant_id = ? AND work_order_id = ? AND visible_to_worker = true
                 ORDER BY stop_order, created_at
                 """, (rs, rowNum) -> new WorkerAssignedJobDto.RouteStopDto(
                 rs.getObject("id", UUID.class),
@@ -1022,6 +1070,11 @@ public class WorkerJobService {
                 rs.getString("address"),
                 rs.getString("instructions"),
                 instant("planned_arrival", rs),
+                rs.getBoolean("visible_to_worker"),
+                (Integer) rs.getObject("estimated_travel_minutes"),
+                (Integer) rs.getObject("estimated_travel_distance_meters"),
+                rs.getString("travel_estimate_provider"),
+                instant("travel_estimated_at", rs),
                 instant("arrived_at", rs),
                 instant("completed_at", rs),
                 instant("skipped_at", rs),
@@ -1076,7 +1129,7 @@ public class WorkerJobService {
         return jdbcTemplate.query("""
                 SELECT stop_type, name, arrived_at, completed_at, skipped_at
                 FROM work_order_route_stops
-                WHERE tenant_id = ? AND work_order_id = ? AND id = ?
+                WHERE tenant_id = ? AND work_order_id = ? AND id = ? AND visible_to_worker = true
                 """, rs -> {
             if (!rs.next()) {
                 throw new ResourceNotFoundException("Route stop not found for this job.");
@@ -1096,6 +1149,7 @@ public class WorkerJobService {
                 SELECT count(*)
                 FROM work_order_route_stops
                 WHERE tenant_id = ? AND work_order_id = ?
+                  AND visible_to_worker = true
                   AND completed_at IS NULL
                   AND skipped_at IS NULL
                 """, Integer.class, tenantId, workOrderId);
@@ -1176,18 +1230,18 @@ public class WorkerJobService {
         ), actorUserId, tenantId, workOrderId, actorUserId, tenantId, workOrderId);
     }
 
-    private List<WorkerAssignedJobDto.ExecutionEventDto> executionEvents(UUID tenantId, UUID workOrderId) {
+    private List<WorkerAssignedJobDto.ExecutionEventDto> executionEvents(UUID tenantId, UUID workerId, UUID actorUserId, UUID workOrderId) {
         return jdbcTemplate.query("""
                 WITH ready_event AS (
                     SELECT 'WORKER_READY' AS action,
-                           NULL::text AS worker_name,
+                           coalesce(w.display_name, au.display_name, 'Field worker') AS worker_name,
                            'Ready for field execution.' AS note,
-                           COALESCE(MIN(woa.created_at), wo.created_at) AS created_at
-                    FROM work_orders wo
-                    LEFT JOIN work_order_assignments woa
-                      ON woa.tenant_id = wo.tenant_id AND woa.work_order_id = wo.id
-                    WHERE wo.tenant_id = ? AND wo.id = ?
-                    GROUP BY wo.created_at
+                           woa.created_at AS created_at,
+                           NULL::text AS photo_type
+                    FROM work_order_assignments woa
+                    JOIN workers w ON w.id = woa.worker_id AND w.tenant_id = woa.tenant_id
+                    LEFT JOIN app_users au ON au.id = w.user_id
+                    WHERE woa.tenant_id = ? AND woa.work_order_id = ? AND woa.worker_id = ?
                 ),
                 worker_events AS (
                     SELECT action,
@@ -1203,11 +1257,16 @@ public class WorkerJobService {
                                NULLIF(metadata ->> 'stopName', ''),
                                NULLIF(metadata ->> 'label', '')
                            ) AS note,
-                           created_at
+                           created_at,
+                           metadata ->> 'photoType' AS photo_type
                     FROM audit_logs
                     WHERE tenant_id = ?
                       AND resource_type = 'WORK_ORDER'
                       AND resource_id = ?
+                      AND (
+                        metadata ->> 'workerId' = ?
+                        OR (NOT jsonb_exists(metadata, 'workerId') AND actor_user_id = ?)
+                      )
                       AND action IN (
                         'WORKER_VIEWED_DISPATCH',
                         'WORKER_VIEWED_PRE_START_CHECKLIST',
@@ -1234,25 +1293,25 @@ public class WorkerJobService {
                         'WORKER_LEFT_EMERGENCY'
                       )
                 )
-                SELECT action, worker_name, note, created_at
+                SELECT action, worker_name, note, created_at, photo_type
                 FROM ready_event
                 UNION ALL
-                SELECT action, worker_name, note, created_at
+                SELECT action, worker_name, note, created_at, photo_type
                 FROM worker_events
                 ORDER BY created_at
                 """, (rs, rowNum) -> {
             var action = rs.getString("action");
             return new WorkerAssignedJobDto.ExecutionEventDto(
                     action,
-                    executionLabel(action),
+                    executionLabel(action, rs.getString("photo_type")),
                     rs.getString("worker_name"),
                     instant("created_at", rs),
                     rs.getString("note")
             );
-        }, tenantId, workOrderId, tenantId, workOrderId);
+        }, tenantId, workOrderId, workerId, tenantId, workOrderId, workerId.toString(), actorUserId);
     }
 
-    private String executionLabel(String action) {
+    private String executionLabel(String action, String photoType) {
         return switch (action) {
             case "WORKER_READY" -> "Ready";
             case "WORKER_VIEWED_DISPATCH" -> "Viewed dispatch";
@@ -1270,8 +1329,8 @@ public class WorkerJobService {
             case "WORKER_CHECKLIST_COMPLETED" -> "Checklist completed";
             case "WORKER_MATERIAL_USED" -> "Material used";
             case "WORKER_TOOL_RETURNED" -> "Tool returned";
-            case "WORKER_PHOTO_CAPTURED" -> "Photo added";
-            case "WORKER_PURCHASE_RECEIPT_UPLOADED" -> "Receipt uploaded";
+            case "WORKER_PHOTO_CAPTURED" -> evidencePhotoLabel(photoType) + " uploaded";
+            case "WORKER_PURCHASE_RECEIPT_UPLOADED" -> "Purchase receipt uploaded";
             case "WORKER_EVIDENCE_DELETED" -> "Evidence deleted";
             case "WORKER_MAINTENANCE_RECORD_SAVED" -> "Maintenance record saved";
             case "WORKER_NOTE_ADDED" -> "Note added";
@@ -1279,6 +1338,16 @@ public class WorkerJobService {
             case "WORKER_COMPLETE_WORK" -> "Submitted work";
             case "WORKER_LEFT_EMERGENCY" -> "Emergency leave";
             default -> "Timeline updated";
+        };
+    }
+
+    private String evidencePhotoLabel(String photoType) {
+        return switch (photoType == null ? "" : photoType.trim().toUpperCase()) {
+            case "BEFORE" -> "Before photo";
+            case "AFTER" -> "After photo";
+            case "ISSUE" -> "Issue photo";
+            case "COMPLETION" -> "Completion photo";
+            default -> "Photo";
         };
     }
 

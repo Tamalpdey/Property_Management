@@ -108,6 +108,17 @@ class InvoiceController {
         return ApiResponse.ok(invoiceService.deleteLine(principal.tenantId(), principal.userId(), invoiceId, lineId));
     }
 
+    @PatchMapping("/{invoiceId}/lines/{lineId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<InvoiceDto> updateLine(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID invoiceId,
+            @PathVariable UUID lineId,
+            @Valid @RequestBody InvoiceLineRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.updateLine(principal.tenantId(), principal.userId(), invoiceId, lineId, request));
+    }
+
     @PatchMapping("/{invoiceId}/status")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
     ApiResponse<InvoiceDto> updateStatus(

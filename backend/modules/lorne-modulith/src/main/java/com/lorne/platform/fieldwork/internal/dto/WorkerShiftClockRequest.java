@@ -8,6 +8,7 @@ public record WorkerShiftClockRequest(
         BigDecimal locationAccuracyMeters,
         String deviceTimestamp,
         String userAgent,
-        String platform
+        String platform,
+        String note
 ) {
 }

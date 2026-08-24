@@ -12,6 +12,7 @@ import type {
   WorkerStepKey,
   WorkerJobAction,
   WorkerAssignedJob,
+  WorkerActivity,
   WorkerJobChecklistItem,
   WorkerJobMaterial,
   WorkerJobAsset,
@@ -910,6 +911,55 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
         </form>
       </p-dialog>
 
+      <p-dialog
+        header="Finish activity first"
+        [modal]="true"
+        [visible]="activityConflictOpen()"
+        [closable]="!activityConflictSaving()"
+        [style]="{ width: 'min(30rem, 94vw)' }"
+        (visibleChange)="!$event && closeActivityConflict()"
+      >
+        <section class="space-y-3">
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+            <p class="text-sm font-black text-amber-950">An activity is still running.</p>
+            <p class="mt-1 text-xs font-bold leading-5 text-amber-900">
+              End this activity before starting or advancing the work order. The activity stays on the Day Ticket at the time it actually happened.
+            </p>
+          </div>
+
+          @if (activeActivityConflict(); as activity) {
+            <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <p class="text-xs font-black uppercase tracking-wide text-teal-700">{{ activityTypeLabel(activity.activityType) }}</p>
+              <p class="mt-1 text-base font-black text-slate-950">{{ activity.title }}</p>
+              @if (activity.locationName || activity.address) {
+                <p class="text-sm font-bold text-slate-600">{{ activity.locationName || activity.address }}</p>
+              }
+              <p class="mt-2 text-xs font-black text-slate-500">Started {{ activity.startedAt | date:'MMM d, h:mm a' }}</p>
+            </div>
+          }
+
+          <label class="block">
+            <span class="mb-1 block text-sm font-bold text-slate-700">End notes</span>
+            <textarea
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              rows="3"
+              name="activityConflictEndNote"
+              placeholder="Optional note, for example: picked up materials and leaving for job."
+              [(ngModel)]="activityConflictEndNote"
+            ></textarea>
+          </label>
+
+          @if (activityConflictError()) {
+            <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{{ activityConflictError() }}</p>
+          }
+
+          <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3">
+            <button pButton type="button" severity="secondary" icon="pi pi-times" label="Close" [disabled]="activityConflictSaving()" (click)="closeActivityConflict()"></button>
+            <button pButton type="button" icon="pi pi-play" label="End activity and continue" [loading]="activityConflictSaving()" (click)="closeActivityAndContinue()"></button>
+          </div>
+        </section>
+      </p-dialog>
+
       <ng-template #uploadedEvidenceGrid let-selectedJob="job">
         <section class="rounded-lg border border-slate-200 bg-slate-50 p-2">
           <div class="mb-2 flex items-center justify-between gap-2">
@@ -958,14 +1008,15 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
         header="Evidence preview"
         [modal]="true"
         [visible]="!!workerEvidencePreview()"
-        [style]="{ width: 'min(34rem, 94vw)' }"
+        [style]="{ width: 'min(52rem, 96vw)' }"
+        [contentStyle]="{ 'max-height': '86vh', overflow: 'auto' }"
         (visibleChange)="!$event && closeWorkerEvidence()"
       >
         @if (workerEvidencePreview(); as item) {
           <section class="space-y-3">
-            <div class="overflow-hidden rounded-lg bg-slate-950">
+            <div class="grid max-h-[76vh] min-h-60 place-items-center overflow-auto rounded-lg bg-slate-950 p-2">
               @if (isImageEvidence(item) && item.viewUrl) {
-                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="max-h-[70vh] w-full object-contain" />
+                <img [src]="item.viewUrl" [alt]="evidenceLabel(item)" class="max-h-[74vh] max-w-full object-contain" />
               } @else if (item.viewUrl) {
                 <div class="grid min-h-72 place-items-center p-6 text-center text-white">
                   <span>
@@ -1143,9 +1194,14 @@ export class WorkerJobDetailComponent implements OnDestroy {
   protected readonly workerEvidencePreview = signal<WorkerJobEvidence | null>(null);
   protected readonly maintenanceRecordOpen = signal(false);
   protected readonly maintenanceRecord = signal<WorkOrderMaintenanceRecord | null>(null);
+  protected readonly activityConflictOpen = signal(false);
+  protected readonly activityConflictSaving = signal(false);
+  protected readonly activityConflictError = signal('');
+  protected readonly activeActivityConflict = signal<WorkerActivity | null>(null);
   protected readonly now = signal(Date.now());
   protected readonly maxEvidencePerGroup = 15;
   protected readonly steps = WORKER_STEPS;
+  protected readonly activityTypeLabel = activityTypeLabel;
   protected readonly pickupSteps = [
     { key: 'ready' as WorkerStepKey, label: 'Ready', icon: 'pi pi-check-circle' },
     { key: 'travel' as WorkerStepKey, label: 'Travel', icon: 'pi pi-map' },
@@ -1155,10 +1211,13 @@ export class WorkerJobDetailComponent implements OnDestroy {
     { key: 'complete' as WorkerStepKey, label: 'Done', icon: 'pi pi-verified' }
   ];
   protected actionForm: WorkerJobActionRequest = { action: 'ADD_NOTE', photoType: 'OTHER', quantity: 1 };
+  protected activityConflictEndNote = '';
   protected maintenanceForm: MaintenanceRecordForm = emptyMaintenanceRecordForm();
   private readonly selectedPhotoFiles = signal<File[]>([]);
   private readonly timerHandle = window.setInterval(() => this.now.set(Date.now()), 30000);
   private dictationBaseNote = '';
+  private pendingActivityConflictRequest: WorkerJobActionRequest | null = null;
+  private pendingActivityConflictJobId = '';
 
   protected readonly job = computed(() => this.jobs().find((candidate) => candidate.id === this.jobId()) ?? null);
 
@@ -2229,10 +2288,71 @@ export class WorkerJobDetailComponent implements OnDestroy {
       this.message.set(response.message);
       return true;
     } catch (error) {
+      if (isOpenActivityConflict(error) && isWorkOrderExecutionAction(request.action)) {
+        await this.openActivityConflict(job, request);
+        return false;
+      }
       this.error.set(workerErrorMessage(error, 'Unable to save worker action. Please try again or contact dispatch.'));
       return false;
     } finally {
       this.savingAction.set(false);
+    }
+  }
+
+  private async openActivityConflict(job: WorkerAssignedJob, request: WorkerJobActionRequest): Promise<void> {
+    try {
+      const loadout = await firstValueFrom(this.workerJobService.loadout(toDateInput(new Date())));
+      const activity = (loadout.activities ?? []).find((candidate) => candidate.open) ?? null;
+      if (!activity) {
+        this.error.set('The previous activity was already closed. Try the work-order action again.');
+        return;
+      }
+      this.pendingActivityConflictRequest = request;
+      this.pendingActivityConflictJobId = job.id;
+      this.activeActivityConflict.set(activity);
+      this.activityConflictEndNote = '';
+      this.activityConflictError.set('');
+      this.activityConflictOpen.set(true);
+    } catch (loadError) {
+      this.error.set(workerErrorMessage(loadError, 'End the current worker activity before starting this work-order action.'));
+    }
+  }
+
+  protected closeActivityConflict(): void {
+    if (this.activityConflictSaving()) {
+      return;
+    }
+    this.activityConflictOpen.set(false);
+    this.activeActivityConflict.set(null);
+    this.activityConflictError.set('');
+    this.activityConflictEndNote = '';
+    this.pendingActivityConflictRequest = null;
+    this.pendingActivityConflictJobId = '';
+  }
+
+  protected async closeActivityAndContinue(): Promise<void> {
+    const activity = this.activeActivityConflict();
+    const request = this.pendingActivityConflictRequest;
+    const job = this.jobs().find((candidate) => candidate.id === this.pendingActivityConflictJobId) ?? this.job();
+    if (!activity || !request || !job || this.activityConflictSaving()) {
+      return;
+    }
+    this.activityConflictSaving.set(true);
+    this.activityConflictError.set('');
+    try {
+      await firstValueFrom(this.workerJobService.endActivity(toDateInput(new Date()), activity.id, {
+        notes: this.activityConflictEndNote.trim() || 'Ended to continue work order.'
+      }));
+      this.activityConflictOpen.set(false);
+      this.activeActivityConflict.set(null);
+      this.activityConflictEndNote = '';
+      this.pendingActivityConflictRequest = null;
+      this.pendingActivityConflictJobId = '';
+      await this.runAction(job, request);
+    } catch (error) {
+      this.activityConflictError.set(workerErrorMessage(error, 'Unable to end activity and continue. Please try again.'));
+    } finally {
+      this.activityConflictSaving.set(false);
     }
   }
 
@@ -2640,6 +2760,53 @@ function viewAction(panel: WorkerDetailPanel): WorkerJobAction {
       return 'VIEW_COMPLETION_CHECKLIST';
     default:
       return 'VIEW_DISPATCH';
+  }
+}
+
+function isWorkOrderExecutionAction(action?: WorkerJobAction): boolean {
+  return !!action && new Set<WorkerJobAction>([
+    'START_TRAVEL',
+    'ARRIVE_ON_SITE',
+    'START_WORK',
+    'RESUME_WORK',
+    'ARRIVE_ROUTE_STOP',
+    'COMPLETE_ROUTE_STOP',
+    'SKIP_ROUTE_STOP',
+    'COMPLETE_WORK'
+  ]).has(action);
+}
+
+function isOpenActivityConflict(error: unknown): boolean {
+  return rawHttpErrorMessage(error).toLowerCase().includes('current worker activity');
+}
+
+function rawHttpErrorMessage(error: unknown): string {
+  const payload = error as {
+    error?: {
+      error?: { message?: string };
+      message?: string;
+    };
+    message?: string;
+  };
+  return payload.error?.error?.message ?? payload.error?.message ?? payload.message ?? '';
+}
+
+function activityTypeLabel(activityType: string): string {
+  switch (activityType) {
+    case 'OFFICE':
+      return 'Office activity';
+    case 'SUPPLIER':
+      return 'Supplier activity';
+    case 'SHOP':
+      return 'Shop activity';
+    case 'WAREHOUSE':
+      return 'Warehouse activity';
+    case 'TRAVEL':
+      return 'Travel activity';
+    case 'BREAK':
+      return 'Break';
+    default:
+      return 'Worker activity';
   }
 }
 

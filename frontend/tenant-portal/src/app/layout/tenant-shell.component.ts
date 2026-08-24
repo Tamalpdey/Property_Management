@@ -1,9 +1,11 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import type { CurrentUser } from '@lorne/contracts';
+import { firstValueFrom } from 'rxjs';
+import type { CurrentUser, TenantSettingsRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
+import { TenantSettingsService } from '../features/settings/services/tenant-settings.service';
 
 @Component({
   selector: 'lorne-tenant-shell',
@@ -11,7 +13,7 @@ import { AuthService } from '../core/services/auth.service';
   imports: [ButtonModule, NgTemplateOutlet, RouterLink, RouterLinkActive, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="min-h-screen bg-slate-100 lg:grid lg:grid-cols-[14.5rem_1fr]">
+    <div class="min-h-screen bg-slate-100 lg:grid lg:grid-cols-[17rem_1fr]">
       <aside class="sticky top-0 hidden h-screen border-r border-slate-200 bg-white lg:flex lg:flex-col">
         <ng-container *ngTemplateOutlet="sidebarContent" />
       </aside>
@@ -31,8 +33,8 @@ import { AuthService } from '../core/services/auth.service';
                 <button pButton type="button" severity="secondary" text rounded icon="pi pi-bars" (click)="mobileMenuOpen.set(true)"></button>
               </div>
               <div class="min-w-0">
-                <p class="truncate text-[0.95rem] font-bold text-slate-950">{{ workspaceRoleLabel() }}</p>
-                <p class="truncate text-xs font-semibold text-slate-500">Portfolio operations workspace</p>
+                <p class="truncate text-[0.95rem] font-bold text-slate-950">{{ userDisplayName() }} logged in as {{ userRoleLabel() }}</p>
+                <p class="truncate text-xs font-semibold text-slate-500">Operations workspace</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -53,12 +55,17 @@ import { AuthService } from '../core/services/auth.service';
 
     <ng-template #sidebarContent>
       <div class="flex h-full min-h-0 flex-col">
-        <div class="border-b border-slate-200 px-2 py-2">
-          <a routerLink="/dashboard" class="flex min-w-0 items-center gap-2.5 text-slate-950 no-underline" (click)="mobileMenuOpen.set(false)">
-            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-950 text-sm font-bold text-white shadow-sm shadow-slate-300">L</span>
+        <div class="border-b border-slate-200 px-2.5 py-2.5">
+          <a routerLink="/dashboard" class="flex min-w-0 items-center gap-3 text-slate-950 no-underline" (click)="mobileMenuOpen.set(false)">
+            <span class="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-white p-1.5 text-sm font-black text-teal-800 shadow-sm shadow-slate-300">
+              @if (brandLogoUrl()) {
+                <img class="max-h-full max-w-full object-contain" [src]="brandLogoUrl()" [alt]="brandName() + ' logo'" />
+              } @else {
+                {{ brandInitials() }}
+              }
+            </span>
             <span class="min-w-0">
-              <span class="block truncate text-[0.92rem] font-bold leading-tight">Lorne PropertyOps</span>
-              <span class="block truncate text-xs font-semibold text-slate-500">Tenant command center</span>
+              <span class="block whitespace-normal break-words text-[0.92rem] font-bold leading-tight">{{ brandName() }}</span>
             </span>
           </a>
         </div>
@@ -97,22 +104,31 @@ import { AuthService } from '../core/services/auth.service';
 })
 export class TenantShellComponent {
   private readonly auth = inject(AuthService);
+  private readonly tenantSettingsService = inject(TenantSettingsService);
   protected readonly mobileMenuOpen = signal(false);
-  protected readonly workspaceRoleLabel = computed(() => {
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
+  protected readonly brandName = computed(() => {
+    const settings = this.tenantSettings();
+    return this.firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'PropertyOps');
+  });
+  protected readonly brandLogoUrl = computed(() => this.tenantSettings()?.logoUrl || '');
+  protected readonly brandInitials = computed(() => this.initials(this.brandName()));
+  protected readonly userDisplayName = computed(() => this.displayName(this.auth.currentUser()));
+  protected readonly userRoleLabel = computed(() => {
     const user = this.auth.currentUser();
     if (!user) {
-      return 'Tenant workspace';
+      return 'Workspace';
     }
     if (user.roles.includes('TENANT_ADMIN')) {
-      return 'Tenant admin';
+      return 'Admin';
     }
     if (user.roles.includes('OPERATIONS')) {
-      return 'Tenant operations';
+      return 'Operations';
     }
     if (user.roles.includes('FINANCE')) {
-      return 'Tenant finance';
+      return 'Finance';
     }
-    return 'Tenant workspace';
+    return 'Workspace';
   });
   protected readonly navSections = computed(() => this.allNavSections
     .map((section) => ({
@@ -172,10 +188,23 @@ export class TenantShellComponent {
       items: [
         { label: 'Users', path: '/users', icon: 'pi pi-user-edit', roles: ['TENANT_ADMIN'] },
         { label: 'Email templates', path: '/email-templates', icon: 'pi pi-envelope', roles: ['TENANT_ADMIN', 'FINANCE'] },
+        { label: 'Email audit', path: '/email-audit', icon: 'pi pi-send', roles: ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'] },
         { label: 'Settings', path: '/settings', icon: 'pi pi-cog', roles: ['TENANT_ADMIN'] }
       ]
     }
   ];
+
+  constructor() {
+    void this.loadTenantSettings();
+  }
+
+  private async loadTenantSettings(): Promise<void> {
+    try {
+      this.tenantSettings.set(await firstValueFrom(this.tenantSettingsService.get()));
+    } catch {
+      this.tenantSettings.set(null);
+    }
+  }
 
   private canAccess(item: TenantNavItem): boolean {
     return !item.roles || this.auth.hasAnyRole(item.roles);
@@ -184,6 +213,39 @@ export class TenantShellComponent {
   signOut(): void {
     this.auth.signOut();
     location.assign('/login');
+  }
+
+  private firstNonBlank(...values: Array<string | undefined | null>): string {
+    return values.map((value) => value?.trim()).find(Boolean) || '';
+  }
+
+  private initials(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'P';
+  }
+
+  private displayName(user: CurrentUser | null): string {
+    if (!user) {
+      return 'User';
+    }
+    const name = user.displayName?.trim();
+    if (name && !/^tenant\s+(admin|operations|finance|workspace)$/i.test(name)) {
+      return name;
+    }
+    const emailName = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+    return emailName ? this.titleCase(emailName) : 'User';
+  }
+
+  private titleCase(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
   }
 }
 

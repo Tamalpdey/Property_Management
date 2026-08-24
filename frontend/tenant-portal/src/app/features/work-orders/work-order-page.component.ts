@@ -22,6 +22,7 @@ import type {
   WorkOrderAssignment,
   WorkOrderLink,
   CreateWorkOrderRequest,
+  SendWorkOrderOwnerEmailRequest,
   TenantSettingsRecord
 } from '@lorne/contracts';
 import { AssetService } from '../inventory/services/asset.service';
@@ -255,7 +256,7 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
           [canManageBilling]="canManageBilling()"
           (reviewAction)="submitReviewAction($event)"
           (generateInvoice)="generateInvoice()"
-          (notifyOwner)="notifyOwner()"
+          (notifyOwner)="notifyOwner($event)"
           (sendInvoiceEmail)="sendInvoiceEmail($event)"
           (printWorkOrder)="printReview()"
           (printMaintenanceRecord)="printMaintenanceRecord()"
@@ -554,7 +555,7 @@ export class WorkOrderPageComponent {
     }
   }
 
-  protected async notifyOwner(): Promise<void> {
+  protected async notifyOwner(request: SendWorkOrderOwnerEmailRequest): Promise<void> {
     const workOrder = this.reviewingWorkOrder();
     if (!workOrder || this.reviewSaving()) {
       return;
@@ -563,7 +564,7 @@ export class WorkOrderPageComponent {
     this.reviewError.set('');
     this.error.set('');
     try {
-      const review = await firstValueFrom(this.workOrderService.notifyOwner(workOrder.id));
+      const review = await firstValueFrom(this.workOrderService.notifyOwner(workOrder.id, request));
       this.review.set(review);
       this.reviewingWorkOrder.set(review.workOrder);
       this.reviewTarget.set('COMMUNICATION');

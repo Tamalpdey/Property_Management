@@ -44,7 +44,12 @@ public class TenantSettingsService implements TenantSettingsOperations {
                        ts.email_sender_name, ts.email_from_address, ts.email_reply_to_address,
                        ts.smtp_host, ts.smtp_port, ts.smtp_username, ts.smtp_password,
                        ts.smtp_password IS NOT NULL AS smtp_password_configured,
-                       coalesce(ts.smtp_use_tls, true) AS smtp_use_tls
+                       coalesce(ts.smtp_use_tls, true) AS smtp_use_tls,
+                       ts.graph_tenant_id, ts.graph_client_id, ts.graph_client_secret,
+                       ts.graph_client_secret IS NOT NULL AS graph_client_secret_configured,
+                       ts.graph_sender_user,
+                       coalesce(ts.auto_send_work_completed_email, false) AS auto_send_work_completed_email,
+                       coalesce(ts.auto_send_invoice_email, false) AS auto_send_invoice_email
                 FROM tenants t
                 LEFT JOIN tenant_settings ts ON ts.tenant_id = t.id
                 WHERE t.id = ?
@@ -70,7 +75,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
         var safeRequest = request == null ? new UpdateTenantSettingsRequest(
                 null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null
         ) : request;
         var provider = provider(safeRequest.emailProvider());
         var primaryColor = color(safeRequest.themePrimaryColor(), "#0f766e", "Primary color must use #RRGGBB format.");
@@ -102,6 +108,14 @@ public class TenantSettingsService implements TenantSettingsOperations {
                         WHEN CAST(? AS boolean) THEN CAST(? AS text)
                         ELSE smtp_password
                     END,
+                    graph_tenant_id = ?, graph_client_id = ?, graph_sender_user = ?,
+                    graph_client_secret = CASE
+                        WHEN CAST(? AS boolean) THEN NULL
+                        WHEN CAST(? AS boolean) THEN CAST(? AS text)
+                        ELSE graph_client_secret
+                    END,
+                    auto_send_work_completed_email = ?,
+                    auto_send_invoice_email = ?,
                     updated_by = ?, updated_at = now()
                 WHERE tenant_id = ?
                 """,
@@ -131,13 +145,23 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 Boolean.TRUE.equals(safeRequest.clearSmtpPassword()),
                 text(safeRequest.smtpPassword()) != null,
                 text(safeRequest.smtpPassword()),
+                text(safeRequest.graphTenantId()),
+                text(safeRequest.graphClientId()),
+                text(safeRequest.graphSenderUser()),
+                Boolean.TRUE.equals(safeRequest.clearGraphClientSecret()),
+                text(safeRequest.graphClientSecret()) != null,
+                text(safeRequest.graphClientSecret()),
+                Boolean.TRUE.equals(safeRequest.autoSendWorkCompletedEmail()),
+                Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail()),
                 actorUserId,
                 tenantId
         );
         auditWriter.record(tenantId, actorUserId, "TENANT_SETTINGS_UPDATED", "TENANT", tenantId, Map.of(
                 "organizationNameManagedBy", "SUPER_ADMIN",
                 "emailProvider", provider,
-                "invoicePrefix", invoicePrefix
+                "invoicePrefix", invoicePrefix,
+                "autoSendWorkCompletedEmail", Boolean.TRUE.equals(safeRequest.autoSendWorkCompletedEmail()),
+                "autoSendInvoiceEmail", Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail())
         ));
         return get(tenantId);
     }
@@ -172,7 +196,14 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("smtp_username"),
                 rs.getString("smtp_password"),
                 rs.getBoolean("smtp_password_configured"),
-                rs.getBoolean("smtp_use_tls")
+                rs.getBoolean("smtp_use_tls"),
+                rs.getString("graph_tenant_id"),
+                rs.getString("graph_client_id"),
+                rs.getString("graph_client_secret"),
+                rs.getBoolean("graph_client_secret_configured"),
+                rs.getString("graph_sender_user"),
+                rs.getBoolean("auto_send_work_completed_email"),
+                rs.getBoolean("auto_send_invoice_email")
         );
     }
 
@@ -205,14 +236,20 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.smtpPort(),
                 settings.smtpUsername(),
                 settings.smtpPasswordConfigured(),
-                settings.smtpUseTls()
+                settings.smtpUseTls(),
+                settings.graphTenantId(),
+                settings.graphClientId(),
+                settings.graphClientSecretConfigured(),
+                settings.graphSenderUser(),
+                settings.autoSendWorkCompletedEmail(),
+                settings.autoSendInvoiceEmail()
         );
     }
 
     private String provider(String value) {
         var normalized = firstNonBlank(value, "SYSTEM").toUpperCase(Locale.ROOT);
-        if (!Set.of("SYSTEM", "TENANT_SMTP").contains(normalized)) {
-            throw new BadRequestException("Email provider must be SYSTEM or TENANT_SMTP.");
+        if (!Set.of("SYSTEM", "TENANT_SMTP", "TENANT_GRAPH").contains(normalized)) {
+            throw new BadRequestException("Email provider must be SYSTEM, TENANT_SMTP, or TENANT_GRAPH.");
         }
         return normalized;
     }

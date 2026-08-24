@@ -46,7 +46,8 @@ public class InvoiceEmailService {
 
     @Transactional
     public SendInvoiceEmailResponse sendInvoice(UUID tenantId, UUID actorUserId, InvoiceDto invoice, SendInvoiceEmailRequest request) {
-        var safeRequest = request == null ? new SendInvoiceEmailRequest(null, null, null, null) : request;
+        var safeRequest = request == null ? new SendInvoiceEmailRequest(null, null, null, null, null, null, null) : request;
+        var deliveryMode = deliveryMode(safeRequest.deliveryMode(), "SENT".equals(invoice.status()) ? "RESEND" : "MANUAL");
         var template = safeRequest.templateId() == null
                 ? emailTemplateOperations.ensureDefaultInvoiceTemplate(tenantId, actorUserId)
                 : emailTemplateOperations.template(tenantId, EmailTemplateOperations.INVOICE_OWNER_TEMPLATE_KEY);
@@ -58,19 +59,23 @@ public class InvoiceEmailService {
         var values = templateValues(invoice, settings.invoiceBrandName());
         var subject = emailTemplateOperations.render(firstNonBlank(safeRequest.subject(), template.subject()), values);
         var body = emailTemplateOperations.render(firstNonBlank(safeRequest.body(), template.body()), values);
+        var ccRecipients = emailList(safeRequest.ccEmails());
+        var bccRecipients = emailList(safeRequest.bccEmails());
         var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(
                 recipient,
                 subject,
                 body,
-                List.of(new OutboundEmailAttachment(safeFilename(invoice.invoiceNumber()) + ".pdf", invoicePdfService.generate(invoice, tenantId, settings), "application/pdf"))
+                List.of(new OutboundEmailAttachment(safeFilename(invoice.invoiceNumber()) + ".pdf", invoicePdfService.generate(invoice, tenantId, settings), "application/pdf")),
+                ccRecipients,
+                bccRecipients
         ));
 
         var deliveryLogId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
                     tenant_id, template_id, invoice_id, customer_id, recipient_email,
-                    subject, body, status, provider_message, sent_at, created_by, updated_by
+                    cc_emails, bcc_emails, subject, body, status, provider_message, sent_at, delivery_mode, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId,
@@ -78,11 +83,14 @@ public class InvoiceEmailService {
                 invoice.id(),
                 invoice.customerId(),
                 recipient,
+                joinedEmails(ccRecipients),
+                joinedEmails(bccRecipients),
                 subject,
                 body,
                 delivery.status(),
                 delivery.providerMessage(),
                 delivery.sentAt() == null ? null : Timestamp.from(delivery.sentAt()),
+                deliveryMode,
                 actorUserId,
                 actorUserId
         );
@@ -96,7 +104,10 @@ public class InvoiceEmailService {
         auditWriter.record(tenantId, actorUserId, "INVOICE_EMAIL_SENT", "INVOICE", invoice.id(), Map.of(
                 "invoiceNumber", invoice.invoiceNumber(),
                 "recipientEmail", recipient,
+                "ccEmails", joinedEmails(ccRecipients) == null ? "" : joinedEmails(ccRecipients),
+                "bccEmails", joinedEmails(bccRecipients) == null ? "" : joinedEmails(bccRecipients),
                 "status", delivery.status(),
+                "deliveryMode", deliveryMode,
                 "provider", delivery.provider(),
                 "fromAddress", delivery.fromAddress()
         ));
@@ -135,5 +146,28 @@ public class InvoiceEmailService {
 
     private String safeFilename(String value) {
         return value == null ? "invoice" : value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private List<String> emailList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(value.split("[,;\\s]+"))
+                .map(String::trim)
+                .filter(email -> !email.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private String joinedEmails(List<String> values) {
+        return values == null || values.isEmpty() ? null : String.join(", ", values);
+    }
+
+    private String deliveryMode(String value, String fallback) {
+        var normalized = firstNonBlank(value, fallback);
+        return switch (normalized.toUpperCase(java.util.Locale.ROOT)) {
+            case "AUTO", "MANUAL", "RESEND", "TEST" -> normalized.toUpperCase(java.util.Locale.ROOT);
+            default -> fallback;
+        };
     }
 }

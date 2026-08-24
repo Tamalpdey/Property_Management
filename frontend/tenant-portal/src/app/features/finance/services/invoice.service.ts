@@ -48,6 +48,12 @@ export class InvoiceService {
       .pipe(map((response) => response.data));
   }
 
+  updateLine(invoiceId: string, lineId: string, request: InvoiceLineRequest) {
+    return this.http
+      .patch<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/lines/${lineId}`, request)
+      .pipe(map((response) => response.data));
+  }
+
   deleteLine(invoiceId: string, lineId: string) {
     return this.http
       .delete<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/${invoiceId}/lines/${lineId}`)

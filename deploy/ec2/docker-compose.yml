@@ -61,7 +61,7 @@ services:
       SERVER_PORT: 8091
       REDIS_HOST: redis
       SPRING_FLYWAY_ENABLED: "false"
-      LORNE_BOOTSTRAP_ENABLED: ${LORNE_BOOTSTRAP_ENABLED:-true}
+      LORNE_BOOTSTRAP_ENABLED: ${LORNE_BOOTSTRAP_ENABLED:-false}
       LOGGING_FILE_NAME: /app/logs/lorne-modulith.log
     volumes:
       - backend_logs:/app/logs

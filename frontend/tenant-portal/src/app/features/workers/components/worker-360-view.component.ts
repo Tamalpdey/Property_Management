@@ -1,15 +1,18 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
-import type { TenantAsset, WorkerRecord, WorkOrderRecord } from '@lorne/contracts';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
+import type { TenantAsset, WorkerActivityRecord, WorkerRecord, WorkOrderRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
+import { WorkerManagementService } from '../services/worker-management.service';
 
-type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
+type Worker360Tab = 'OVERVIEW' | 'WORK' | 'ACTIVITY' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
 
 @Component({
   selector: 'lorne-worker-360-view',
   standalone: true,
-  imports: [ButtonModule, DatePipe, TagModule],
+  imports: [ButtonModule, DatePipe, FormsModule, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="flex h-full flex-col gap-3 overflow-auto pr-1">
@@ -58,7 +61,7 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
         </div>
       </div>
 
-      <div class="grid grid-cols-5 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+      <div class="grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 md:grid-cols-6">
         @for (tab of tabs; track tab.value) {
           <button
             type="button"
@@ -69,7 +72,7 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
             [class.text-teal-700]="activeTab() === tab.value"
             [class.shadow-sm]="activeTab() === tab.value"
             [attr.aria-pressed]="activeTab() === tab.value"
-            (click)="activeTab.set(tab.value)"
+            (click)="setActiveTab(tab.value)"
           >
             <i [class]="tab.icon"></i>
             <span class="hidden sm:inline">{{ tab.label }}</span>
@@ -120,6 +123,17 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
                         <p><span class="block font-black uppercase text-slate-500">Work started</span>{{ dateTimeOrDash(assignment.actualWorkStartedAt) }}</p>
                         <p><span class="block font-black uppercase text-slate-500">Finished</span>{{ dateTimeOrDash(assignment.actualFinishedAt) }}</p>
                       </div>
+                      @if (assignment.timingOverride) {
+                        <p class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">
+                          Operations override
+                          @if (assignment.overrideUpdatedAt) {
+                            <span> · {{ dateTimeOrDash(assignment.overrideUpdatedAt) }}</span>
+                          }
+                          @if (assignment.overrideReason) {
+                            <span class="block font-semibold">{{ assignment.overrideReason }}</span>
+                          }
+                        </p>
+                      }
                     </div>
                   }
                 } @empty {
@@ -224,6 +238,17 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
                           <p><span class="font-black text-slate-950">Work started:</span> <span class="font-semibold text-slate-600">{{ dateTimeOrDash(assignment.actualWorkStartedAt) }}</span></p>
                           <p><span class="font-black text-slate-950">Finished:</span> <span class="font-semibold text-slate-600">{{ dateTimeOrDash(assignment.actualFinishedAt) }}</span></p>
                           <p><span class="font-black text-slate-950">Duration:</span> <span class="font-semibold text-slate-600">{{ minutesLabel(assignment.actualWorkMinutes || 0) }}</span></p>
+                          @if (assignment.timingOverride) {
+                            <p class="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-bold text-amber-800 sm:col-span-2">
+                              Operations override
+                              @if (assignment.overrideUpdatedAt) {
+                                <span> · {{ dateTimeOrDash(assignment.overrideUpdatedAt) }}</span>
+                              }
+                              @if (assignment.overrideReason) {
+                                <span class="block font-semibold">{{ assignment.overrideReason }}</span>
+                              }
+                            </p>
+                          }
                         </div>
                       } @else {
                         <p class="text-xs font-semibold text-slate-500">Not assigned</p>
@@ -243,6 +268,151 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
           @if (workerJobs().length > 20) {
             <p class="mt-2 text-xs font-bold text-slate-500">Showing latest 20 of {{ workerJobs().length }} assignments.</p>
           }
+        </section>
+      }
+
+      @if (activeTab() === 'ACTIVITY') {
+        <section class="grid min-h-0 gap-3 lg:grid-cols-[1fr_24rem]">
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Standalone worker activity</p>
+                <h3 class="text-lg font-black text-slate-950">Office, supplier, shop, travel, break</h3>
+                <p class="text-xs font-bold text-slate-500">These rows are not tied to a work order and print on the worker Day Ticket.</p>
+              </div>
+              <div class="flex flex-wrap items-end gap-2">
+                <label class="grid gap-1 text-xs font-black uppercase text-slate-500">
+                  From
+                  <input type="date" class="h-9 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityFrom" />
+                </label>
+                <label class="grid gap-1 text-xs font-black uppercase text-slate-500">
+                  To
+                  <input type="date" class="h-9 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityTo" />
+                </label>
+                <button pButton type="button" size="small" severity="secondary" icon="pi pi-refresh" label="Load" [loading]="activityLoading()" (click)="loadActivities()"></button>
+              </div>
+            </div>
+
+            @if (activityError()) {
+              <p class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{{ activityError() }}</p>
+            }
+
+            <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table class="w-full min-w-[52rem] border-collapse text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-3 py-2">Activity</th>
+                    <th class="px-3 py-2">Location</th>
+                    <th class="px-3 py-2">Started</th>
+                    <th class="px-3 py-2">Ended</th>
+                    <th class="px-3 py-2">Duration</th>
+                    <th class="px-3 py-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  @for (activity of workerActivities(); track activity.id) {
+                    <tr [class.bg-teal-50]="selectedActivityId() === activity.id">
+                      <td class="px-3 py-2">
+                        <p class="font-black text-teal-700">{{ activityLabel(activity.activityType) }}</p>
+                        <p class="text-xs font-semibold text-slate-600">{{ activity.title }}</p>
+                        @if (activity.notes) {
+                          <p class="mt-1 max-w-64 truncate text-xs font-semibold text-slate-500">{{ activity.notes }}</p>
+                        }
+                        @if (activity.override) {
+                          <p class="mt-1 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.7rem] font-black uppercase tracking-wide text-amber-800">
+                            Operations override
+                          </p>
+                          @if (activity.overrideReason) {
+                            <p class="mt-1 max-w-64 truncate text-xs font-semibold text-amber-700">{{ activity.overrideReason }}</p>
+                          }
+                        }
+                      </td>
+                      <td class="px-3 py-2">
+                        <p class="font-bold text-slate-800">{{ activity.locationName || '-' }}</p>
+                        <p class="text-xs font-semibold text-slate-500">{{ activity.address || '' }}</p>
+                      </td>
+                      <td class="px-3 py-2 font-semibold text-slate-600">{{ dateTimeOrDash(activity.startedAt) }}</td>
+                      <td class="px-3 py-2 font-semibold text-slate-600">{{ dateTimeOrDash(activity.endedAt) }}</td>
+                      <td class="px-3 py-2 font-black text-slate-800">{{ minutesLabel(activity.durationMinutes || 0) }}</td>
+                      <td class="px-3 py-2">
+                        <div class="flex justify-end gap-1">
+                          <button pButton type="button" size="small" text icon="pi pi-pencil" label="Edit" (click)="editActivity(activity)"></button>
+                          <button pButton type="button" size="small" text severity="danger" icon="pi pi-trash" label="Delete" (click)="deleteActivity(activity)"></button>
+                        </div>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="6" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No standalone activity found for this range.</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <aside class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-xs font-black uppercase tracking-wide text-amber-800">Operations correction</p>
+                <h3 class="text-lg font-black text-slate-950">{{ selectedActivityId() ? 'Edit activity' : 'Add activity' }}</h3>
+              </div>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-plus" label="New" (click)="newActivity()"></button>
+            </div>
+            <div class="mt-3 grid gap-2">
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Reason *
+                <textarea class="min-h-20 rounded-md border border-amber-200 px-2 py-2 text-sm font-semibold normal-case text-slate-800" placeholder="Example: corrected from phone call after worker missed activity close-out." [(ngModel)]="activityForm.reason"></textarea>
+              </label>
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Type
+                <select class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.activityType" (ngModelChange)="syncActivityTitle()">
+                  <option value="OFFICE">Office</option>
+                  <option value="SUPPLIER">Supplier</option>
+                  <option value="SHOP">Shop</option>
+                  <option value="WAREHOUSE">Warehouse</option>
+                  <option value="TRAVEL">Travel</option>
+                  <option value="BREAK">Break</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </label>
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Title *
+                <input class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.title" />
+              </label>
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Location
+                <input class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.locationName" />
+              </label>
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Address
+                <input class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.address" />
+              </label>
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                  Started *
+                  <input type="datetime-local" class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.startedAt" />
+                </label>
+                <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                  Ended *
+                  <input type="datetime-local" class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.endedAt" />
+                </label>
+              </div>
+              <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
+                Notes
+                <textarea class="min-h-20 rounded-md border border-slate-300 px-2 py-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.notes"></textarea>
+              </label>
+              <button
+                pButton
+                type="button"
+                icon="pi pi-save"
+                label="Save activity override"
+                [disabled]="activitySaving() || !activityForm.reason.trim() || !activityForm.title.trim() || !activityForm.startedAt || !activityForm.endedAt"
+                [loading]="activitySaving()"
+                (click)="saveActivityOverride()"
+              ></button>
+            </div>
+          </aside>
         </section>
       }
 
@@ -334,6 +504,8 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
   `
 })
 export class Worker360ViewComponent {
+  private readonly workerManagementService = inject(WorkerManagementService);
+
   readonly worker = input.required<WorkerRecord>();
   readonly workOrders = input.required<WorkOrderRecord[]>();
   readonly assets = input.required<TenantAsset[]>();
@@ -348,10 +520,123 @@ export class Worker360ViewComponent {
   protected readonly tabs: Array<{ value: Worker360Tab; label: string; shortLabel: string; icon: string }> = [
     { value: 'OVERVIEW', label: 'Overview', shortLabel: 'Info', icon: 'pi pi-id-card' },
     { value: 'WORK', label: 'Work', shortLabel: 'Work', icon: 'pi pi-briefcase' },
+    { value: 'ACTIVITY', label: 'Activity', shortLabel: 'Time', icon: 'pi pi-clock' },
     { value: 'SCHEDULE', label: 'Schedule', shortLabel: 'Plan', icon: 'pi pi-calendar-clock' },
     { value: 'TOOLS', label: 'Tools', shortLabel: 'Tools', icon: 'pi pi-box' },
     { value: 'SAFETY', label: 'Safety', shortLabel: 'Safe', icon: 'pi pi-verified' }
   ];
+  protected readonly workerActivities = signal<WorkerActivityRecord[]>([]);
+  protected readonly activityLoading = signal(false);
+  protected readonly activitySaving = signal(false);
+  protected readonly activityError = signal('');
+  protected readonly selectedActivityId = signal<string | null>(null);
+  protected activityFrom = dateInput(new Date());
+  protected activityTo = dateInput(new Date());
+  protected activityForm = defaultActivityForm();
+
+  protected setActiveTab(tab: Worker360Tab): void {
+    this.activeTab.set(tab);
+    if (tab === 'ACTIVITY' && this.workerActivities().length === 0) {
+      void this.loadActivities();
+    }
+  }
+
+  protected async loadActivities(): Promise<void> {
+    if (this.activityLoading()) {
+      return;
+    }
+    this.activityLoading.set(true);
+    this.activityError.set('');
+    try {
+      this.workerActivities.set(await firstValueFrom(this.workerManagementService.activities(this.worker().id, this.activityFrom, this.activityTo)));
+    } catch (error) {
+      this.activityError.set(errorMessage(error, 'Unable to load worker activity corrections.'));
+    } finally {
+      this.activityLoading.set(false);
+    }
+  }
+
+  protected newActivity(): void {
+    this.selectedActivityId.set(null);
+    this.activityForm = defaultActivityForm();
+  }
+
+  protected editActivity(activity: WorkerActivityRecord): void {
+    this.selectedActivityId.set(activity.id);
+    this.activityForm = {
+      activityType: activity.activityType || 'OTHER',
+      title: activity.title || defaultActivityTitle(activity.activityType),
+      locationName: activity.locationName || '',
+      address: activity.address || '',
+      notes: activity.notes || '',
+      startedAt: toDateTimeInput(activity.startedAt),
+      endedAt: toDateTimeInput(activity.endedAt),
+      reason: ''
+    };
+  }
+
+  protected async saveActivityOverride(): Promise<void> {
+    if (this.activitySaving()) {
+      return;
+    }
+    this.activitySaving.set(true);
+    this.activityError.set('');
+    try {
+      const rows = await firstValueFrom(this.workerManagementService.overrideActivity(this.worker().id, {
+        activityId: this.selectedActivityId() || undefined,
+        activityType: this.activityForm.activityType,
+        title: this.activityForm.title.trim(),
+        locationName: this.activityForm.locationName.trim(),
+        address: this.activityForm.address.trim(),
+        notes: this.activityForm.notes.trim(),
+        startedAt: fromDateTimeInput(this.activityForm.startedAt),
+        endedAt: fromDateTimeInput(this.activityForm.endedAt),
+        reason: this.activityForm.reason.trim()
+      }));
+      this.workerActivities.set(rows);
+      this.activityFrom = rows[0]?.startedAt ? dateInput(new Date(rows[0].startedAt)) : this.activityFrom;
+      this.activityTo = this.activityFrom;
+      this.newActivity();
+    } catch (error) {
+      this.activityError.set(errorMessage(error, 'Unable to save worker activity override.'));
+    } finally {
+      this.activitySaving.set(false);
+    }
+  }
+
+  protected async deleteActivity(activity: WorkerActivityRecord): Promise<void> {
+    const reason = this.activityForm.reason.trim();
+    if (!reason) {
+      this.activityError.set('Enter an override reason before deleting an activity.');
+      this.editActivity(activity);
+      return;
+    }
+    this.activitySaving.set(true);
+    this.activityError.set('');
+    try {
+      this.workerActivities.set(await firstValueFrom(this.workerManagementService.overrideActivity(this.worker().id, {
+        activityId: activity.id,
+        delete: true,
+        reason
+      })));
+      this.newActivity();
+    } catch (error) {
+      this.activityError.set(errorMessage(error, 'Unable to delete worker activity.'));
+    } finally {
+      this.activitySaving.set(false);
+    }
+  }
+
+  protected syncActivityTitle(): void {
+    const knownTitles = ['Office visit', 'Supplier stop', 'Shop work', 'Warehouse stop', 'Travel', 'Break', 'Other activity'];
+    if (!this.activityForm.title.trim() || knownTitles.includes(this.activityForm.title)) {
+      this.activityForm.title = defaultActivityTitle(this.activityForm.activityType);
+    }
+  }
+
+  protected activityLabel(value: string): string {
+    return value.toLowerCase().replaceAll('_', ' ');
+  }
 
   protected readonly workerJobs = computed(() => this.workOrders()
     .filter((workOrder) => workOrder.assignments.some((assignment) => assignment.workerId === this.worker().id))
@@ -488,4 +773,79 @@ function minutesLabel(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+interface ActivityOverrideForm {
+  activityType: string;
+  title: string;
+  locationName: string;
+  address: string;
+  notes: string;
+  startedAt: string;
+  endedAt: string;
+  reason: string;
+}
+
+function defaultActivityForm(): ActivityOverrideForm {
+  return {
+    activityType: 'OFFICE',
+    title: 'Office visit',
+    locationName: '',
+    address: '',
+    notes: '',
+    startedAt: '',
+    endedAt: '',
+    reason: ''
+  };
+}
+
+function defaultActivityTitle(activityType?: string): string {
+  switch ((activityType || 'OFFICE').trim().toUpperCase()) {
+    case 'SUPPLIER':
+      return 'Supplier stop';
+    case 'SHOP':
+      return 'Shop work';
+    case 'WAREHOUSE':
+      return 'Warehouse stop';
+    case 'TRAVEL':
+      return 'Travel';
+    case 'BREAK':
+      return 'Break';
+    case 'OTHER':
+      return 'Other activity';
+    default:
+      return 'Office visit';
+  }
+}
+
+function dateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toDateTimeInput(value?: string): string {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function fromDateTimeInput(value: string): string {
+  return new Date(value).toISOString();
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'object' && error && 'error' in error) {
+    const response = error as { error?: { error?: { message?: string }; message?: string } };
+    return response.error?.error?.message || response.error?.message || fallback;
+  }
+  return fallback;
 }

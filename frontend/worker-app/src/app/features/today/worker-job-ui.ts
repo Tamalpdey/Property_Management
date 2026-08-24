@@ -20,7 +20,7 @@ export function stepForStatus(status: WorkOrderStatus): WorkerStepKey {
   if (status === 'IN_PROGRESS' || status === 'PAUSED') {
     return 'work';
   }
-  if (status === 'PENDING_COMPLETION' || status === 'COMPLETED' || status === 'APPROVED') {
+  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(status)) {
     return 'complete';
   }
   return 'ready';
@@ -108,6 +108,12 @@ export function primaryActionLabel(job: WorkerAssignedJob): string {
       return 'Completed';
     case 'APPROVED':
       return 'Approved';
+    case 'CUSTOMER_NOTIFIED':
+      return 'Customer notified';
+    case 'INVOICED':
+      return 'Invoiced';
+    case 'PAID':
+      return 'Paid';
     case 'ON_HOLD':
       return 'On hold';
     case 'CANCELLED':
@@ -135,7 +141,7 @@ export function checklistDisabledReason(job: WorkerAssignedJob, phase: 'PRE_STAR
     return 'This job is scheduled for a future date. Field actions unlock on the service date.';
   }
   if (phase === 'PRE_START') {
-    if (['IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'COMPLETED', 'APPROVED'].includes(job.status)) {
+    if (['IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(job.status)) {
       return 'Pre-start checks are closed after work starts.';
     }
     return 'Pre-start checks unlock when the job is assigned.';
@@ -143,7 +149,7 @@ export function checklistDisabledReason(job: WorkerAssignedJob, phase: 'PRE_STAR
   if (job.status === 'PAUSED') {
     return 'Work is paused. Resume before completing more checks.';
   }
-  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED'].includes(job.status)) {
+  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(job.status)) {
     return 'Completion checks are already submitted for review.';
   }
   return 'Checklist unlocks after you start work on site.';

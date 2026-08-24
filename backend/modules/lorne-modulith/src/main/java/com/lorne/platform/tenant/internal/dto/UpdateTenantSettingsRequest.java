@@ -26,6 +26,13 @@ public record UpdateTenantSettingsRequest(
         String smtpUsername,
         String smtpPassword,
         Boolean clearSmtpPassword,
-        Boolean smtpUseTls
+        Boolean smtpUseTls,
+        String graphTenantId,
+        String graphClientId,
+        String graphClientSecret,
+        Boolean clearGraphClientSecret,
+        String graphSenderUser,
+        Boolean autoSendWorkCompletedEmail,
+        Boolean autoSendInvoiceEmail
 ) {
 }

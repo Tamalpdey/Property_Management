@@ -39,6 +39,7 @@ public class WorkerDailyLoadoutService {
     public WorkerDailyLoadoutDto loadout(UUID tenantId, UUID userId, String email, LocalDate date) {
         var worker = worker(tenantId, userId, email);
         var loadoutDate = date == null ? LocalDate.now(tenantZoneId(tenantId)) : date;
+        closeStaleOpenActivities(tenantId, worker, userId, LocalDate.now(tenantZoneId(tenantId)), Instant.now());
         var loadoutId = ensureLoadout(tenantId, worker.id(), loadoutDate, userId);
         return loadout(tenantId, worker, loadoutId, loadoutDate);
     }
@@ -63,12 +64,13 @@ public class WorkerDailyLoadoutService {
         workerShiftClockService.requireClockedIn(tenantId, userId, email);
         var worker = worker(tenantId, userId, email);
         var loadoutDate = date == null ? LocalDate.now(tenantZoneId(tenantId)) : date;
+        var now = Instant.now();
+        closeStaleOpenActivities(tenantId, worker, userId, LocalDate.now(tenantZoneId(tenantId)), now);
         if (hasOpenActivity(tenantId, worker.id())) {
             throw new BadRequestException("End the current worker activity before starting another.");
         }
         var activityType = activityType(request == null ? null : request.activityType());
         var title = blankToNull(request == null ? null : request.title());
-        var now = Instant.now();
         var activityId = jdbcTemplate.queryForObject("""
                 INSERT INTO worker_daily_activities (
                     tenant_id, worker_id, activity_date, activity_type, title, location_name, address, notes,
@@ -314,6 +316,63 @@ public class WorkerDailyLoadoutService {
         ), tenantId, workerId, loadoutDate);
     }
 
+    private void closeStaleOpenActivities(UUID tenantId, WorkerRef worker, UUID userId, LocalDate currentDate, Instant actionAt) {
+        var zoneId = tenantZoneId(tenantId);
+        var staleActivities = jdbcTemplate.query("""
+                SELECT id, activity_date, activity_type, title, started_at
+                FROM worker_daily_activities
+                WHERE tenant_id = ?
+                  AND worker_id = ?
+                  AND ended_at IS NULL
+                  AND activity_date < ?
+                ORDER BY started_at
+                """, (rs, rowNum) -> new OpenActivity(
+                rs.getObject("id", UUID.class),
+                rs.getObject("activity_date", LocalDate.class),
+                rs.getString("activity_type"),
+                rs.getString("title"),
+                instant("started_at", rs)
+        ), tenantId, worker.id(), currentDate);
+        for (var activity : staleActivities) {
+            var dayBoundary = activity.activityDate().plusDays(1).atStartOfDay(zoneId).toInstant();
+            var preferredEnd = staleActivityEndAt(tenantId, worker.id(), activity, dayBoundary);
+            var endedAt = preferredEnd.isAfter(actionAt) ? actionAt : preferredEnd;
+            if (!endedAt.isAfter(activity.startedAt())) {
+                endedAt = actionAt.isAfter(activity.startedAt()) ? actionAt : activity.startedAt().plusSeconds(60);
+            }
+            var updated = jdbcTemplate.update("""
+                    UPDATE worker_daily_activities
+                    SET ended_at = ?, updated_by = ?, updated_at = now()
+                    WHERE tenant_id = ? AND worker_id = ? AND id = ? AND ended_at IS NULL
+                    """, timestamp(endedAt), userId, tenantId, worker.id(), activity.id());
+            if (updated != 1) {
+                continue;
+            }
+            auditWriter.record(tenantId, userId, "WORKER_ACTIVITY_AUTO_ENDED", "WORKER", worker.id(), autoEndedActivityMetadata(
+                    worker,
+                    activity,
+                    endedAt,
+                    "Activity was left open from a previous day.",
+                    actionAt
+            ));
+        }
+    }
+
+    private Instant staleActivityEndAt(UUID tenantId, UUID workerId, OpenActivity activity, Instant dayBoundary) {
+        var clockOut = jdbcTemplate.query("""
+                SELECT ended_at
+                FROM worker_shift_clock_entries
+                WHERE tenant_id = ?
+                  AND worker_id = ?
+                  AND ended_at IS NOT NULL
+                  AND ended_at > ?
+                  AND ended_at <= ?
+                ORDER BY ended_at DESC
+                LIMIT 1
+                """, rs -> rs.next() ? instant("ended_at", rs) : null, tenantId, workerId, timestamp(activity.startedAt()), timestamp(dayBoundary));
+        return clockOut == null ? dayBoundary : clockOut;
+    }
+
     private boolean hasOpenActivity(UUID tenantId, UUID workerId) {
         return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
@@ -450,6 +509,28 @@ public class WorkerDailyLoadoutService {
         return metadata;
     }
 
+    private Map<String, Object> autoEndedActivityMetadata(
+            WorkerRef worker,
+            OpenActivity activity,
+            Instant endedAt,
+            String reason,
+            Instant actionAt
+    ) {
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("workerId", worker.id().toString());
+        metadata.put("workerName", worker.displayName());
+        metadata.put("workerEmail", worker.email());
+        metadata.put("activityId", activity.id().toString());
+        metadata.put("activityDate", activity.activityDate().toString());
+        metadata.put("activityType", activity.activityType() == null ? "" : activity.activityType());
+        metadata.put("title", activity.title() == null ? "" : activity.title());
+        metadata.put("startedAt", activity.startedAt().toString());
+        metadata.put("endedAt", endedAt.toString());
+        metadata.put("reason", reason);
+        metadata.put("actionAt", actionAt.toString());
+        return metadata;
+    }
+
     private String auditAction(String status) {
         return switch (status) {
             case "CHECKED_OUT" -> "WORKER_LOADOUT_TOOL_CHECKED_OUT";
@@ -484,7 +565,7 @@ public class WorkerDailyLoadoutService {
 
     private String activityType(String value) {
         var type = value == null ? "OFFICE" : value.trim().toUpperCase();
-        if (!Set.of("OFFICE", "SUPPLIER", "SHOP", "WAREHOUSE", "BREAK", "OTHER").contains(type)) {
+        if (!Set.of("OFFICE", "SUPPLIER", "SHOP", "WAREHOUSE", "TRAVEL", "BREAK", "OTHER").contains(type)) {
             throw new BadRequestException("Worker activity type is not supported.");
         }
         return type;
@@ -495,6 +576,7 @@ public class WorkerDailyLoadoutService {
             case "SUPPLIER" -> "Supplier stop";
             case "SHOP" -> "Shop work";
             case "WAREHOUSE" -> "Warehouse stop";
+            case "TRAVEL" -> "Travel";
             case "BREAK" -> "Break";
             case "OTHER" -> "Other activity";
             default -> "Office visit";
@@ -518,5 +600,8 @@ public class WorkerDailyLoadoutService {
     }
 
     private record LoadoutCounts(int total, int checkedOut, int returned, int issues) {
+    }
+
+    private record OpenActivity(UUID id, LocalDate activityDate, String activityType, String title, Instant startedAt) {
     }
 }

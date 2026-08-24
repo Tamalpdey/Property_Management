@@ -72,6 +72,11 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/notifications/email-template-page.component').then((m) => m.EmailTemplatePageComponent)
       },
       {
+        path: 'email-audit',
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
+        loadComponent: () => import('./features/notifications/email-audit-page.component').then((m) => m.EmailAuditPageComponent)
+      },
+      {
         path: 'invoices',
         canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/finance/invoice-page.component').then((m) => m.InvoicePageComponent)

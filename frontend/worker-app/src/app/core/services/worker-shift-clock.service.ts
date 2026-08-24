@@ -15,6 +15,7 @@ export class WorkerShiftClockService {
   readonly loading = this.loadingSignal.asReadonly();
   readonly error = this.errorSignal.asReadonly();
   readonly clockedIn = computed(() => this.stateSignal().clockedIn);
+  readonly paused = computed(() => Boolean(this.stateSignal().paused));
 
   constructor() {
     void this.load();
@@ -42,6 +43,14 @@ export class WorkerShiftClockService {
 
   async clockOut(): Promise<void> {
     await this.clock('/field-worker/clock/out', 'Unable to clock out.');
+  }
+
+  async pause(): Promise<void> {
+    await this.clock('/field-worker/clock/pause', 'Unable to pause shift.');
+  }
+
+  async resume(): Promise<void> {
+    await this.clock('/field-worker/clock/resume', 'Unable to resume shift.');
   }
 
   private async clock(path: string, fallback: string): Promise<void> {

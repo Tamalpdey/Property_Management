@@ -6,6 +6,7 @@ import com.lorne.platform.fieldwork.internal.dto.WorkerShiftClockRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -44,14 +45,32 @@ public class WorkerShiftClockService {
             return open;
         }
         var last = jdbcTemplate.query("""
-                SELECT id, started_at, ended_at
-                FROM worker_shift_clock_entries
-                WHERE tenant_id = ? AND worker_id = ?
+                SELECT wsce.id, wsce.started_at, wsce.ended_at,
+                       COALESCE(pt.pause_minutes, 0)::bigint AS pause_minutes
+                FROM worker_shift_clock_entries wsce
+                LEFT JOIN LATERAL (
+                    SELECT floor(sum(extract(epoch from (ended_at - started_at))) / 60)::bigint AS pause_minutes
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NOT NULL
+                ) pt ON true
+                WHERE wsce.tenant_id = ? AND wsce.worker_id = ?
                 ORDER BY started_at DESC
                 LIMIT 1
                 """, rs -> rs.next()
-                        ? new WorkerShiftClockDto(false, rs.getObject("id", UUID.class), instant("started_at", rs), instant("ended_at", rs))
-                        : new WorkerShiftClockDto(false, null, null, null), tenantId, worker.id());
+                        ? clockDto(
+                                false,
+                                rs.getObject("id", UUID.class),
+                                instant("started_at", rs),
+                                instant("ended_at", rs),
+                                false,
+                                null,
+                                null,
+                                longValue(rs.getObject("pause_minutes"))
+                        )
+                        : clockDto(false, null, null, null, false, null, null, 0L), tenantId, worker.id());
         return last;
     }
 
@@ -84,7 +103,7 @@ public class WorkerShiftClockService {
                 userId
         );
         auditWriter.record(tenantId, userId, "WORKER_CLOCK_IN", "WORKER", worker.id(), metadata(worker, request, now));
-        return new WorkerShiftClockDto(true, entryId, now, null);
+        return clockDto(true, entryId, now, null, false, null, null, 0L);
     }
 
     @Transactional
@@ -95,6 +114,10 @@ public class WorkerShiftClockService {
             return state(tenantId, userId, email);
         }
         var now = Instant.now();
+        if (open.paused() && open.pauseId() != null) {
+            closePause(tenantId, worker.id(), open.pauseId(), userId, request, now);
+        }
+        closeOpenWorkerActivities(tenantId, worker.id(), worker.displayName(), worker.email(), userId, now, "shift clock-out", now);
         jdbcTemplate.update("""
                 UPDATE worker_shift_clock_entries
                 SET ended_at = ?, end_latitude = ?, end_longitude = ?, end_accuracy_meters = ?,
@@ -114,14 +137,71 @@ public class WorkerShiftClockService {
                 open.entryId()
         );
         auditWriter.record(tenantId, userId, "WORKER_CLOCK_OUT", "WORKER", worker.id(), metadata(worker, request, now));
-        return new WorkerShiftClockDto(false, open.entryId(), open.startedAt(), now);
+        var pauseMinutes = pauseMinutes(tenantId, worker.id(), open.entryId());
+        return clockDto(false, open.entryId(), open.startedAt(), now, false, null, null, pauseMinutes);
+    }
+
+    @Transactional
+    public WorkerShiftClockDto pause(UUID tenantId, UUID userId, String email, WorkerShiftClockRequest request) {
+        var worker = worker(tenantId, userId, email);
+        var open = openEntry(tenantId, worker.id());
+        if (open == null) {
+            throw new BadRequestException("Clock in before pausing your shift.");
+        }
+        if (open.paused()) {
+            return open;
+        }
+        var now = Instant.now();
+        jdbcTemplate.update("""
+                INSERT INTO worker_shift_clock_pauses (
+                    tenant_id, worker_id, shift_clock_entry_id, started_at, start_latitude, start_longitude,
+                    start_accuracy_meters, device_started_at, start_platform, start_user_agent, note, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                tenantId,
+                worker.id(),
+                open.entryId(),
+                timestamp(now),
+                request == null ? null : request.latitude(),
+                request == null ? null : request.longitude(),
+                request == null ? null : request.locationAccuracyMeters(),
+                timestamp(deviceTimestamp(request)),
+                request == null ? null : blankToNull(request.platform()),
+                request == null ? null : truncate(blankToNull(request.userAgent()), 512),
+                request == null ? null : truncate(blankToNull(request.note()), 1000),
+                userId,
+                userId
+        );
+        auditWriter.record(tenantId, userId, "WORKER_SHIFT_PAUSE", "WORKER", worker.id(), metadata(worker, request, now));
+        return openEntry(tenantId, worker.id());
+    }
+
+    @Transactional
+    public WorkerShiftClockDto resume(UUID tenantId, UUID userId, String email, WorkerShiftClockRequest request) {
+        var worker = worker(tenantId, userId, email);
+        var open = openEntry(tenantId, worker.id());
+        if (open == null) {
+            throw new BadRequestException("Clock in before resuming your shift.");
+        }
+        if (!open.paused() || open.pauseId() == null) {
+            return open;
+        }
+        var now = Instant.now();
+        closePause(tenantId, worker.id(), open.pauseId(), userId, request, now);
+        auditWriter.record(tenantId, userId, "WORKER_SHIFT_RESUME", "WORKER", worker.id(), metadata(worker, request, now));
+        return openEntry(tenantId, worker.id());
     }
 
     @Transactional(readOnly = true)
     public void requireClockedIn(UUID tenantId, UUID userId, String email) {
         var worker = worker(tenantId, userId, email);
-        if (openEntry(tenantId, worker.id()) == null) {
+        var open = openEntry(tenantId, worker.id());
+        if (open == null) {
             throw new BadRequestException("Clock in before working on assigned jobs.");
+        }
+        if (open.paused()) {
+            throw new BadRequestException("Resume your shift before working on assigned jobs.");
         }
     }
 
@@ -139,6 +219,19 @@ public class WorkerShiftClockService {
                 continue;
             }
             var endedAt = autoClockOutAt.isBefore(entry.startedAt()) ? now : autoClockOutAt;
+            jdbcTemplate.update("""
+                    UPDATE worker_shift_clock_pauses
+                    SET ended_at = ?, device_ended_at = ?, end_platform = ?, end_user_agent = ?, updated_at = now()
+                    WHERE tenant_id = ? AND worker_id = ? AND shift_clock_entry_id = ? AND ended_at IS NULL
+                    """,
+                    timestamp(endedAt),
+                    timestamp(now),
+                    "system",
+                    "auto-clock-out",
+                    entry.tenantId(),
+                    entry.workerId(),
+                    entry.entryId()
+            );
             var updated = jdbcTemplate.update("""
                     UPDATE worker_shift_clock_entries
                     SET ended_at = ?, device_ended_at = ?, end_platform = ?, end_user_agent = ?, updated_at = now()
@@ -155,6 +248,16 @@ public class WorkerShiftClockService {
             if (updated == 0) {
                 continue;
             }
+            closeOpenWorkerActivities(
+                    entry.tenantId(),
+                    entry.workerId(),
+                    entry.workerName(),
+                    entry.workerEmail(),
+                    null,
+                    endedAt,
+                    "shift auto clock-out",
+                    now
+            );
             auditWriter.record(entry.tenantId(), null, "WORKER_CLOCK_OUT_AUTO", "WORKER", entry.workerId(), Map.of(
                     "workerName", entry.workerName(),
                     "workerEmail", entry.workerEmail() == null ? "" : entry.workerEmail(),
@@ -173,13 +276,98 @@ public class WorkerShiftClockService {
 
     private WorkerShiftClockDto openEntry(UUID tenantId, UUID workerId) {
         return jdbcTemplate.query("""
-                SELECT id, started_at
-                FROM worker_shift_clock_entries
-                WHERE tenant_id = ? AND worker_id = ? AND ended_at IS NULL
+                SELECT wsce.id, wsce.started_at,
+                       open_pause.id AS pause_id,
+                       open_pause.started_at AS paused_at,
+                       COALESCE(pt.pause_minutes, 0)::bigint AS pause_minutes
+                FROM worker_shift_clock_entries wsce
+                LEFT JOIN LATERAL (
+                    SELECT id, started_at
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NULL
+                    ORDER BY wscp.started_at DESC
+                    LIMIT 1
+                ) open_pause ON true
+                LEFT JOIN LATERAL (
+                    SELECT floor(sum(extract(epoch from (ended_at - started_at))) / 60)::bigint AS pause_minutes
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NOT NULL
+                ) pt ON true
+                WHERE wsce.tenant_id = ? AND wsce.worker_id = ? AND wsce.ended_at IS NULL
                 LIMIT 1
                 """, rs -> rs.next()
-                        ? new WorkerShiftClockDto(true, rs.getObject("id", UUID.class), instant("started_at", rs), null)
+                        ? clockDto(
+                                true,
+                                rs.getObject("id", UUID.class),
+                                instant("started_at", rs),
+                                null,
+                                rs.getObject("pause_id") != null,
+                                rs.getObject("pause_id", UUID.class),
+                                instant("paused_at", rs),
+                                longValue(rs.getObject("pause_minutes"))
+                        )
                         : null, tenantId, workerId);
+    }
+
+    private void closePause(UUID tenantId, UUID workerId, UUID pauseId, UUID userId, WorkerShiftClockRequest request, Instant now) {
+        jdbcTemplate.update("""
+                UPDATE worker_shift_clock_pauses
+                SET ended_at = ?, end_latitude = ?, end_longitude = ?, end_accuracy_meters = ?,
+                    device_ended_at = ?, end_platform = ?, end_user_agent = ?, updated_by = ?, updated_at = now()
+                WHERE tenant_id = ? AND worker_id = ? AND id = ? AND ended_at IS NULL
+                """,
+                timestamp(now),
+                request == null ? null : request.latitude(),
+                request == null ? null : request.longitude(),
+                request == null ? null : request.locationAccuracyMeters(),
+                timestamp(deviceTimestamp(request)),
+                request == null ? null : blankToNull(request.platform()),
+                request == null ? null : truncate(blankToNull(request.userAgent()), 512),
+                userId,
+                tenantId,
+                workerId,
+                pauseId
+        );
+    }
+
+    private Long pauseMinutes(UUID tenantId, UUID workerId, UUID entryId) {
+        var value = jdbcTemplate.queryForObject("""
+                SELECT COALESCE(floor(sum(extract(epoch from (ended_at - started_at))) / 60), 0)::bigint
+                FROM worker_shift_clock_pauses
+                WHERE tenant_id = ? AND worker_id = ? AND shift_clock_entry_id = ? AND ended_at IS NOT NULL
+                """, Long.class, tenantId, workerId, entryId);
+        return value == null ? 0L : value;
+    }
+
+    private WorkerShiftClockDto clockDto(
+            boolean clockedIn,
+            UUID entryId,
+            Instant startedAt,
+            Instant endedAt,
+            boolean paused,
+            UUID pauseId,
+            Instant pausedAt,
+            Long pauseMinutes
+    ) {
+        var basePauseMinutes = pauseMinutes == null ? 0L : pauseMinutes;
+        var currentPauseMinutes = paused && pausedAt != null ? minutesBetween(pausedAt, Instant.now()) : 0L;
+        var totalPauseMinutes = basePauseMinutes + currentPauseMinutes;
+        var end = endedAt == null && startedAt != null ? Instant.now() : endedAt;
+        var activeMinutes = Math.max(0L, minutesBetween(startedAt, end) - totalPauseMinutes);
+        return new WorkerShiftClockDto(clockedIn, entryId, startedAt, endedAt, paused, pauseId, pausedAt, basePauseMinutes, activeMinutes);
+    }
+
+    private long minutesBetween(Instant start, Instant end) {
+        if (start == null || end == null || !end.isAfter(start)) {
+            return 0L;
+        }
+        return Math.max(0L, Duration.between(start, end).toMinutes());
     }
 
     private List<OpenClockEntry> openClockEntries() {
@@ -260,8 +448,60 @@ public class WorkerShiftClockService {
             putIfPresent(metadata, "deviceTimestamp", blankToNull(request.deviceTimestamp()));
             putIfPresent(metadata, "platform", blankToNull(request.platform()));
             putIfPresent(metadata, "userAgent", truncate(blankToNull(request.userAgent()), 512));
+            putIfPresent(metadata, "note", truncate(blankToNull(request.note()), 1000));
         }
         return metadata;
+    }
+
+    private Long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+    private void closeOpenWorkerActivities(
+            UUID tenantId,
+            UUID workerId,
+            String workerName,
+            String workerEmail,
+            UUID userId,
+            Instant endedAt,
+            String reason,
+            Instant actionAt
+    ) {
+        var activities = jdbcTemplate.query("""
+                SELECT id, activity_date, activity_type, title, started_at
+                FROM worker_daily_activities
+                WHERE tenant_id = ? AND worker_id = ? AND ended_at IS NULL
+                ORDER BY started_at
+                """, (rs, rowNum) -> new OpenActivity(
+                rs.getObject("id", UUID.class),
+                rs.getObject("activity_date", LocalDate.class),
+                rs.getString("activity_type"),
+                rs.getString("title"),
+                instant("started_at", rs)
+        ), tenantId, workerId);
+        for (var activity : activities) {
+            var activityEndedAt = endedAt.isAfter(activity.startedAt()) ? endedAt : activity.startedAt().plusSeconds(60);
+            var updated = jdbcTemplate.update("""
+                    UPDATE worker_daily_activities
+                    SET ended_at = ?, updated_by = ?, updated_at = now()
+                    WHERE tenant_id = ? AND worker_id = ? AND id = ? AND ended_at IS NULL
+                    """, timestamp(activityEndedAt), userId, tenantId, workerId, activity.id());
+            if (updated != 1) {
+                continue;
+            }
+            var metadata = new LinkedHashMap<String, Object>();
+            metadata.put("workerName", workerName == null ? "" : workerName);
+            metadata.put("workerEmail", workerEmail == null ? "" : workerEmail);
+            metadata.put("activityId", activity.id().toString());
+            metadata.put("activityDate", activity.activityDate().toString());
+            metadata.put("activityType", activity.activityType() == null ? "" : activity.activityType());
+            metadata.put("title", activity.title() == null ? "" : activity.title());
+            metadata.put("startedAt", activity.startedAt().toString());
+            metadata.put("endedAt", activityEndedAt.toString());
+            metadata.put("reason", reason);
+            metadata.put("actionAt", actionAt.toString());
+            auditWriter.record(tenantId, userId, "WORKER_ACTIVITY_AUTO_ENDED", "WORKER", workerId, metadata);
+        }
     }
 
     private void putIfPresent(Map<String, Object> metadata, String key, Object value) {
@@ -326,5 +566,8 @@ public class WorkerShiftClockService {
             Instant startedAt,
             Instant shiftEndAt
     ) {
+    }
+
+    private record OpenActivity(UUID id, LocalDate activityDate, String activityType, String title, Instant startedAt) {
     }
 }

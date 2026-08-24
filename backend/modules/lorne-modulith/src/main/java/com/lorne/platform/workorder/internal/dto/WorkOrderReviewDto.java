@@ -96,6 +96,7 @@ public record WorkOrderReviewDto(
             String body,
             String status,
             String providerMessage,
+            String deliveryMode,
             Instant sentAt,
             Instant createdAt
     ) {

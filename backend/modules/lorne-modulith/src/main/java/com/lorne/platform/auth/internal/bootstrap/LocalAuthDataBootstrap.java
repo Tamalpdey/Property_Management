@@ -1,5 +1,6 @@
 package com.lorne.platform.auth.internal.bootstrap;
 
+import java.util.List;
 import java.util.UUID;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -26,6 +27,9 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
     private final PasswordEncoder passwordEncoder;
+    private UUID superAdminUserId = SUPER_ADMIN_ID;
+    private UUID workerUserId = WORKER_USER_ID;
+    private UUID tenantAdminUserId = TENANT_ADMIN_ID;
 
     LocalAuthDataBootstrap(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder) {
         this.jdbcTemplate = jdbcTemplate;
@@ -51,12 +55,13 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
     }
 
     private void seedUsers() {
-        seedUser(SUPER_ADMIN_ID, "superadmin@lorne.local", "Super Admin");
-        seedUser(WORKER_USER_ID, "worker@lorne.local", "Field Worker");
-        seedUser(TENANT_ADMIN_ID, "tenantadmin@lorne.local", "Tenant Admin");
+        superAdminUserId = seedUser(SUPER_ADMIN_ID, "superadmin@lorne.local", "Super Admin");
+        workerUserId = seedUser(WORKER_USER_ID, "worker@lorne.local", "Field Worker");
+        tenantAdminUserId = seedUser(TENANT_ADMIN_ID, "tenantadmin@lorne.local", "Tenant Admin");
     }
 
-    private void seedUser(UUID userId, String email, String displayName) {
+    private UUID seedUser(UUID preferredUserId, String email, String displayName) {
+        UUID userId = resolveBootstrapUserId(preferredUserId, email);
         jdbcTemplate.update("""
                 INSERT INTO app_users (id, email, display_name, password_hash, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 'ACTIVE', now(), now())
@@ -66,12 +71,34 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
                     status = 'ACTIVE',
                     updated_at = now()
                 """, userId, email, displayName, passwordEncoder.encode("Password123!"));
+        return userId;
+    }
+
+    private UUID resolveBootstrapUserId(UUID preferredUserId, String email) {
+        List<UUID> existingEmailIds = jdbcTemplate.query("""
+                SELECT id
+                FROM app_users
+                WHERE lower(email) = lower(?)
+                LIMIT 1
+                """, (rs, rowNum) -> rs.getObject("id", UUID.class), email);
+        if (!existingEmailIds.isEmpty()) {
+            return existingEmailIds.getFirst();
+        }
+
+        Boolean preferredIdTaken = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM app_users
+                    WHERE id = ?
+                )
+                """, Boolean.class, preferredUserId);
+        return Boolean.TRUE.equals(preferredIdTaken) ? UUID.randomUUID() : preferredUserId;
     }
 
     private void seedUserRoles() {
-        assignRole(SUPER_ADMIN_ID, null, "SUPER_ADMIN");
-        assignRole(TENANT_ADMIN_ID, DEMO_TENANT_ID, "TENANT_ADMIN");
-        assignRole(WORKER_USER_ID, DEMO_TENANT_ID, "FIELD_WORKER");
+        assignRole(superAdminUserId, null, "SUPER_ADMIN");
+        assignRole(tenantAdminUserId, DEMO_TENANT_ID, "TENANT_ADMIN");
+        assignRole(workerUserId, DEMO_TENANT_ID, "FIELD_WORKER");
     }
 
     private void assignRole(UUID userId, UUID tenantId, String roleCode) {
@@ -170,6 +197,6 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
                     display_name = EXCLUDED.display_name,
                     status = 'ACTIVE',
                     updated_at = now()
-                """, DEMO_TENANT_ID, WORKER_USER_ID);
+                """, DEMO_TENANT_ID, workerUserId);
     }
 }

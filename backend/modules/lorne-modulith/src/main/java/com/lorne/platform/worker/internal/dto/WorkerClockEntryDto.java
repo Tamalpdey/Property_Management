@@ -8,6 +8,7 @@ public record WorkerClockEntryDto(
         UUID workerId,
         Instant startedAt,
         Instant endedAt,
-        Long durationMinutes
+        Long durationMinutes,
+        Long pauseMinutes
 ) {
 }

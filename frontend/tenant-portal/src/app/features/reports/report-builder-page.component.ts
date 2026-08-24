@@ -20,7 +20,7 @@ import {
   selectedReportRows,
   statusLabel,
   workerNames
-} from './report-generation';
+} from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 import { ReportTotalComponent } from './reports-page.component';
 
 @Component({

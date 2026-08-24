@@ -38,7 +38,8 @@ public record WorkOrderDto(
         List<TaskDto> tasks,
         List<RouteStopDto> routeStops,
         List<LinkedWorkOrderDto> linkedWorkOrders,
-        List<LinkedWorkOrderDto> linkedFromWorkOrders
+        List<LinkedWorkOrderDto> linkedFromWorkOrders,
+        List<FieldNoteDto> fieldNotes
 ) {
     public record AssignmentDto(
             UUID workerId,
@@ -48,10 +49,15 @@ public record WorkOrderDto(
             String assignmentStatus,
             String assignmentRole,
             String notes,
+            Instant actualTravelStartedAt,
             Instant actualArrivedAt,
             Instant actualWorkStartedAt,
             Instant actualFinishedAt,
             Long actualWorkMinutes,
+            Integer estimatedTravelMinutes,
+            Integer estimatedTravelDistanceMeters,
+            String travelEstimateProvider,
+            Instant travelEstimatedAt,
             boolean timingOverride,
             String overrideReason,
             Instant overrideUpdatedAt
@@ -102,6 +108,11 @@ public record WorkOrderDto(
             String address,
             String instructions,
             Instant plannedArrival,
+            boolean visibleToWorker,
+            Integer estimatedTravelMinutes,
+            Integer estimatedTravelDistanceMeters,
+            String travelEstimateProvider,
+            Instant travelEstimatedAt,
             Instant arrivedAt,
             Instant completedAt,
             Instant skippedAt,
@@ -117,6 +128,17 @@ public record WorkOrderDto(
             String status,
             String linkType,
             String notes
+    ) {
+    }
+
+    public record FieldNoteDto(
+            UUID id,
+            UUID workerId,
+            String workerName,
+            String workerEmail,
+            String note,
+            Instant createdAt,
+            Instant updatedAt
     ) {
     }
 }

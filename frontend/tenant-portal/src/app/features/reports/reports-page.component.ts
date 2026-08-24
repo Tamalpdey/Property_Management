@@ -14,7 +14,7 @@ import {
   dateRangeLabel,
   statusLabel,
   workOrdersInDateRange
-} from './report-generation';
+} from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 
 interface ReportBucket {
   label: string;

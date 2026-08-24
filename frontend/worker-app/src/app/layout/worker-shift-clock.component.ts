@@ -17,7 +17,12 @@ import { WorkerShiftClockService } from '../core/services/worker-shift-clock.ser
             <p class="truncate text-sm font-black text-red-700">{{ clock.error() }}</p>
           } @else {
           @if (clock.state().clockedIn) {
-            <p class="truncate text-sm font-black text-teal-800 sm:text-base">Clocked in {{ shiftDuration() }} · since {{ clock.state().startedAt | date:'shortTime' }}</p>
+            <p class="truncate text-sm font-black sm:text-base" [class.text-amber-800]="clock.state().paused" [class.text-teal-800]="!clock.state().paused">
+              {{ clock.state().paused ? 'Paused' : 'Clocked in' }} {{ activeDuration() }} · since {{ clock.state().startedAt | date:'shortTime' }}
+            </p>
+            @if (pauseDuration() !== '0m') {
+              <p class="truncate text-[0.72rem] font-bold text-slate-500">Break {{ pauseDuration() }}{{ clock.state().pausedAt ? ' · paused ' + (clock.state().pausedAt | date:'shortTime') : '' }}</p>
+            }
           } @else {
             <p class="truncate text-sm font-black text-slate-900 sm:text-base">
               Not clocked in{{ clock.state().endedAt ? ' · last out ' + (clock.state().endedAt | date:'shortTime') : '' }}
@@ -26,7 +31,14 @@ import { WorkerShiftClockService } from '../core/services/worker-shift-clock.ser
           }
         </div>
         @if (clock.state().clockedIn) {
-          <button pButton type="button" size="small" severity="danger" icon="pi pi-stop-circle" label="Clock out" class="shrink-0" [loading]="clock.loading()" (click)="clock.clockOut()"></button>
+          <div class="flex shrink-0 items-center gap-1.5">
+            @if (clock.state().paused) {
+              <button pButton type="button" size="small" severity="success" icon="pi pi-play-circle" label="Resume" [loading]="clock.loading()" (click)="clock.resume()"></button>
+            } @else {
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-pause-circle" label="Pause" [loading]="clock.loading()" (click)="clock.pause()"></button>
+            }
+            <button pButton type="button" size="small" severity="danger" icon="pi pi-stop-circle" label="Clock out" [loading]="clock.loading()" (click)="clock.clockOut()"></button>
+          </div>
         } @else {
           <button pButton type="button" size="small" severity="success" icon="pi pi-play-circle" label="Clock in" class="shrink-0" [loading]="clock.loading()" (click)="clock.clockIn()"></button>
         }
@@ -43,17 +55,31 @@ export class WorkerShiftClockComponent implements OnDestroy {
     window.clearInterval(this.timerHandle);
   }
 
-  protected shiftDuration(): string {
-    const startedAt = this.clock.state().startedAt;
-    if (!startedAt) {
+  protected activeDuration(): string {
+    const state = this.clock.state();
+    if (!state.startedAt) {
       return '0m';
     }
-    return compactDuration(Math.max(0, this.now() - new Date(startedAt).getTime()));
+    const rawMinutes = Math.max(0, Math.floor((this.now() - new Date(state.startedAt).getTime()) / 60000));
+    return compactMinutes(Math.max(0, rawMinutes - this.pauseMinutes()));
+  }
+
+  protected pauseDuration(): string {
+    return compactMinutes(this.pauseMinutes());
+  }
+
+  private pauseMinutes(): number {
+    const state = this.clock.state();
+    const completed = state.pauseMinutes ?? 0;
+    const current = state.paused && state.pausedAt
+      ? Math.max(0, Math.floor((this.now() - new Date(state.pausedAt).getTime()) / 60000))
+      : 0;
+    return completed + current;
   }
 }
 
-function compactDuration(durationMs: number): string {
-  const totalMinutes = Math.max(0, Math.floor(durationMs / 60000));
+function compactMinutes(minutesValue: number): string {
+  const totalMinutes = Math.max(0, Math.floor(minutesValue));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   if (hours <= 0) {

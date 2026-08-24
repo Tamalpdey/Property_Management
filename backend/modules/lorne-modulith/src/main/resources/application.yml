@@ -78,6 +78,18 @@ lorne:
   mail:
     enabled: ${LORNE_MAIL_ENABLED:false}
     from: ${LORNE_MAIL_FROM:no-reply@lorne.local}
+  maps:
+    travel-estimates:
+      enabled: ${LORNE_TRAVEL_ESTIMATES_ENABLED:false}
+      provider: ${LORNE_TRAVEL_ESTIMATES_PROVIDER:GOOGLE_MAPS}
+      api-key: ${GOOGLE_MAPS_API_KEY:}
+      endpoint: ${GOOGLE_MAPS_ROUTES_ENDPOINT:https://routes.googleapis.com/directions/v2:computeRoutes}
+      routing-preference: ${LORNE_TRAVEL_ESTIMATES_ROUTING_PREFERENCE:TRAFFIC_AWARE_OPTIMAL}
+      traffic-model: ${LORNE_TRAVEL_ESTIMATES_TRAFFIC_MODEL:BEST_GUESS}
+      avoid-tolls: ${LORNE_TRAVEL_ESTIMATES_AVOID_TOLLS:false}
+      avoid-highways: ${LORNE_TRAVEL_ESTIMATES_AVOID_HIGHWAYS:false}
+      avoid-ferries: ${LORNE_TRAVEL_ESTIMATES_AVOID_FERRIES:false}
+      timeout-ms: ${LORNE_TRAVEL_ESTIMATES_TIMEOUT_MS:2500}
   worker-clock:
     auto-clock-out:
       enabled: ${LORNE_WORKER_AUTO_CLOCK_OUT_ENABLED:true}

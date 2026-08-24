@@ -1,7 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { EmailTemplateRecord, InvoiceLineRequest, InvoiceRecord, InvoiceStatus, OwnerStatementRecord, PropertyOwner, PropertyRecord, TenantSettingsRecord, WorkOrderRecord } from '@lorne/contracts';
+import type { EmailTemplateRecord, InvoiceLineRecord, InvoiceLineRequest, InvoiceRecord, InvoiceStatus, OwnerStatementRecord, PropertyOwner, PropertyRecord, TenantSettingsRecord, WorkOrderRecord } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -134,16 +134,61 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                 </div>
               }
               @for (line of invoice.lines; track line.id) {
-                <div class="grid gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-start">
-                  <span>
-                    <p class="text-sm font-black text-slate-950"><span class="mr-1 rounded-full bg-white px-2 py-0.5 text-[0.65rem] uppercase text-teal-700">{{ line.lineType.toLowerCase() }}</span>{{ line.description }}</p>
-                    <p class="mt-1 text-xs font-semibold text-slate-500">{{ line.quantity }} x {{ currency(line.unitPrice) }} @if (line.taxable) { · tax {{ percent(line.taxRate) }} }</p>
-                    <p class="mt-1 text-sm font-black text-slate-800">{{ currency(line.lineTotal) }}</p>
-                  </span>
-                  @if (invoice.status === 'DRAFT') {
-                    <button pButton type="button" size="small" severity="danger" icon="pi pi-trash" [text]="true" [disabled]="!canManageBilling() || savingLine()" (click)="deleteLine(invoice, line.id)"></button>
-                  }
-                </div>
+                @if (editingLineId() === line.id) {
+                  <form class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2" (ngSubmit)="updateLine(invoice, line)">
+                    <div class="grid gap-2 sm:grid-cols-[7rem_1fr]">
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Type</span>
+                        <select class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" name="editLineType{{ line.id }}" [(ngModel)]="lineEditForm.lineType">
+                          <option value="LABOR">Labor</option>
+                          <option value="MATERIAL">Material</option>
+                          <option value="CUSTOM">Custom</option>
+                          <option value="DISCOUNT">Discount</option>
+                        </select>
+                      </label>
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Description</span>
+                        <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" name="editLineDescription{{ line.id }}" [(ngModel)]="lineEditForm.description" />
+                      </label>
+                    </div>
+                    <div class="mt-2 grid gap-2 sm:grid-cols-[6rem_8rem_6rem_1fr] sm:items-end">
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Qty</span>
+                        <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" min="0.01" step="0.01" name="editLineQuantity{{ line.id }}" [(ngModel)]="lineEditForm.quantity" />
+                      </label>
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Unit price</span>
+                        <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" step="0.01" name="editLineUnitPrice{{ line.id }}" [(ngModel)]="lineEditForm.unitPrice" />
+                      </label>
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Tax %</span>
+                        <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" min="0" max="100" step="0.01" name="editLineTaxRate{{ line.id }}" [(ngModel)]="lineEditForm.taxRatePercent" />
+                      </label>
+                      <div class="flex flex-wrap items-center justify-end gap-2">
+                        <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
+                          <input type="checkbox" name="editLineTaxable{{ line.id }}" [(ngModel)]="lineEditForm.taxable" />
+                          Tax
+                        </label>
+                        <button pButton type="button" size="small" severity="secondary" label="Cancel" [disabled]="savingLine()" (click)="cancelEditLine()"></button>
+                        <button pButton type="submit" size="small" icon="pi pi-save" label="Save" [loading]="savingLine()"></button>
+                      </div>
+                    </div>
+                  </form>
+                } @else {
+                  <div class="grid gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:grid-cols-[1fr_auto] sm:items-start">
+                    <span>
+                      <p class="text-sm font-black text-slate-950"><span class="mr-1 rounded-full bg-white px-2 py-0.5 text-[0.65rem] uppercase text-teal-700">{{ line.lineType.toLowerCase() }}</span>{{ line.description }}</p>
+                      <p class="mt-1 text-xs font-semibold text-slate-500">{{ line.quantity }} x {{ currency(line.unitPrice) }} @if (line.taxable) { · tax {{ percent(line.taxRate) }} }</p>
+                      <p class="mt-1 text-sm font-black text-slate-800">{{ currency(line.lineTotal) }}</p>
+                    </span>
+                    @if (invoice.status === 'DRAFT') {
+                      <div class="flex justify-end gap-1">
+                        <button pButton type="button" size="small" severity="secondary" icon="pi pi-pencil" [text]="true" [disabled]="!canManageBilling() || savingLine()" (click)="startEditLine(line)"></button>
+                        <button pButton type="button" size="small" severity="danger" icon="pi pi-trash" [text]="true" [disabled]="!canManageBilling() || savingLine()" (click)="deleteLine(invoice, line.id)"></button>
+                      </div>
+                    }
+                  </div>
+                }
               } @empty {
                 <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">No line items.</p>
               }
@@ -227,6 +272,16 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
             <span class="mb-1 block text-sm font-bold text-slate-700">To</span>
             <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="recipientEmail" [(ngModel)]="sendForm.recipientEmail" />
           </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-bold text-slate-700">CC</span>
+              <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="ccEmails" placeholder="comma separated" [(ngModel)]="sendForm.ccEmails" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-bold text-slate-700">BCC</span>
+              <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="bccEmails" placeholder="comma separated" [(ngModel)]="sendForm.bccEmails" />
+            </label>
+          </div>
           <label class="block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Subject</span>
             <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="sendForm.subject" />
@@ -458,8 +513,17 @@ export class InvoicePageComponent {
     dueOn: addDaysInput(30),
     additionalLines: []
   };
-  protected readonly sendForm = { recipientEmail: '', subject: '', body: '' };
+  protected readonly sendForm = { recipientEmail: '', ccEmails: '', bccEmails: '', subject: '', body: '' };
   protected readonly lineForm: { lineType: InvoiceLineType; description: string; quantity: number; unitPrice: number; taxable: boolean; taxRatePercent: number } = {
+    lineType: 'CUSTOM',
+    description: '',
+    quantity: 1,
+    unitPrice: 0,
+    taxable: false,
+    taxRatePercent: 0
+  };
+  protected readonly editingLineId = signal<string | null>(null);
+  protected readonly lineEditForm: { lineType: InvoiceLineType; description: string; quantity: number; unitPrice: number; taxable: boolean; taxRatePercent: number } = {
     lineType: 'CUSTOM',
     description: '',
     quantity: 1,
@@ -535,6 +599,7 @@ export class InvoicePageComponent {
   }
 
   protected select(invoice: InvoiceRecord): void {
+    this.cancelEditLine();
     this.selectedInvoice.set(invoice);
   }
 
@@ -675,9 +740,62 @@ export class InvoicePageComponent {
     try {
       const updated = await firstValueFrom(this.invoiceService.deleteLine(invoice.id, lineId));
       this.replaceInvoice(updated);
+      if (this.editingLineId() === lineId) {
+        this.cancelEditLine();
+      }
       this.message.set('Draft invoice line deleted.');
     } catch (exception) {
       this.error.set(apiErrorMessage(exception, 'Unable to delete invoice line.'));
+    } finally {
+      this.savingLine.set(false);
+    }
+  }
+
+  protected startEditLine(line: InvoiceLineRecord): void {
+    this.editingLineId.set(line.id);
+    this.lineEditForm.lineType = line.lineType;
+    this.lineEditForm.description = line.description;
+    this.lineEditForm.quantity = Number(line.quantity || 0);
+    this.lineEditForm.unitPrice = Number(line.unitPrice || 0);
+    this.lineEditForm.taxable = Boolean(line.taxable);
+    this.lineEditForm.taxRatePercent = Number(line.taxRate || 0) * 100;
+    this.error.set('');
+    this.message.set('');
+  }
+
+  protected cancelEditLine(): void {
+    this.editingLineId.set(null);
+  }
+
+  protected async updateLine(invoice: InvoiceRecord, line: InvoiceLineRecord): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
+    if (this.savingLine()) {
+      return;
+    }
+    const description = this.lineEditForm.description.trim();
+    if (!description) {
+      this.error.set('Line description is required.');
+      return;
+    }
+    this.savingLine.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const updated = await firstValueFrom(this.invoiceService.updateLine(invoice.id, line.id, {
+        lineType: this.lineEditForm.lineType,
+        description,
+        quantity: Number(this.lineEditForm.quantity || 0),
+        unitPrice: Number(this.lineEditForm.unitPrice || 0),
+        taxable: this.lineEditForm.taxable,
+        taxRate: Number(this.lineEditForm.taxRatePercent || 0) / 100
+      }));
+      this.replaceInvoice(updated);
+      this.cancelEditLine();
+      this.message.set('Draft invoice line updated.');
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to update invoice line.'));
     } finally {
       this.savingLine.set(false);
     }
@@ -792,6 +910,8 @@ export class InvoicePageComponent {
     const template = this.template();
     this.sendTarget.set(invoice);
     this.sendForm.recipientEmail = this.ownerEmail(invoice);
+    this.sendForm.ccEmails = '';
+    this.sendForm.bccEmails = '';
     this.sendForm.subject = render(template?.subject || 'Invoice {{invoiceNumber}}', invoice, this.settings());
     this.sendForm.body = render(template?.body || '', invoice, this.settings());
     this.showSend.set(true);
@@ -812,6 +932,8 @@ export class InvoicePageComponent {
       const result = await firstValueFrom(this.invoiceService.sendEmail(invoice.id, {
         templateId: this.template()?.id,
         recipientEmail: this.sendForm.recipientEmail,
+        ccEmails: this.sendForm.ccEmails,
+        bccEmails: this.sendForm.bccEmails,
         subject: this.sendForm.subject,
         body: this.sendForm.body
       }));

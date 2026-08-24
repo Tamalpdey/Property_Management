@@ -63,7 +63,8 @@ public record CreateWorkOrderRequest(
             @NotBlank String name,
             String address,
             String instructions,
-            Instant plannedArrival
+            Instant plannedArrival,
+            Boolean visibleToWorker
     ) {
     }
 

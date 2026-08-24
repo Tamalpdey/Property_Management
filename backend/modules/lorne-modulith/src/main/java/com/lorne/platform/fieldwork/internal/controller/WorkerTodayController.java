@@ -170,6 +170,24 @@ class WorkerTodayController {
         return ApiResponse.ok(workerShiftClockService.clockOut(principal.tenantId(), principal.userId(), principal.email(), request));
     }
 
+    @PostMapping("/clock/pause")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<WorkerShiftClockDto> pauseClock(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestBody(required = false) WorkerShiftClockRequest request
+    ) {
+        return ApiResponse.ok(workerShiftClockService.pause(principal.tenantId(), principal.userId(), principal.email(), request));
+    }
+
+    @PostMapping("/clock/resume")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<WorkerShiftClockDto> resumeClock(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestBody(required = false) WorkerShiftClockRequest request
+    ) {
+        return ApiResponse.ok(workerShiftClockService.resume(principal.tenantId(), principal.userId(), principal.email(), request));
+    }
+
     @PostMapping("/jobs/{workOrderId}/actions")
     @PreAuthorize("hasRole('FIELD_WORKER')")
     ApiResponse<WorkerJobActionResponse> action(

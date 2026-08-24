@@ -7,7 +7,7 @@ import { TagModule } from 'primeng/tag';
 import type { TenantSettingsRecord, UpdateTenantSettingsRequest } from '@lorne/contracts';
 import { TenantSettingsService } from './services/tenant-settings.service';
 
-type SettingsTab = 'profile' | 'invoice' | 'email';
+type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
 
 @Component({
   selector: 'lorne-tenant-settings-page',
@@ -36,7 +36,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email';
       <section class="grid gap-3 xl:grid-cols-[1fr_24rem]">
         <form class="rounded-lg border border-slate-200 bg-white shadow-sm" (ngSubmit)="save()">
           <div class="border-b border-slate-200 p-3">
-            <div class="settings-tabs grid grid-cols-3 rounded-lg border border-slate-200 bg-slate-100 p-1 text-sm font-bold">
+            <div class="settings-tabs grid grid-cols-4 rounded-lg border border-slate-200 bg-slate-100 p-1 text-sm font-bold">
               @for (tab of tabs; track tab.key) {
                 <button
                   type="button"
@@ -167,6 +167,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email';
                   <select class="field-input" name="emailProvider" [(ngModel)]="form.emailProvider">
                     <option value="SYSTEM">Use platform sender</option>
                     <option value="TENANT_SMTP">Use tenant SMTP account</option>
+                    <option value="TENANT_GRAPH">Use Microsoft Graph</option>
                   </select>
                 </label>
                 <label class="block">
@@ -205,6 +206,74 @@ type SettingsTab = 'profile' | 'invoice' | 'email';
                   <input type="checkbox" name="clearSmtpPassword" [disabled]="!settings()?.smtpPasswordConfigured" [(ngModel)]="form.clearSmtpPassword" />
                   Clear saved SMTP password
                 </label>
+                @if (form.emailProvider === 'TENANT_SMTP') {
+                  <div class="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
+                    SMTP login usually needs the mailbox username and an app password from the email provider.
+                    Use port 587 with STARTTLS, or port 465 for SSL. The from address must be allowed for that mailbox.
+                  </div>
+                }
+                <label class="block">
+                  <span class="field-label">Graph tenant ID</span>
+                  <input class="field-input" name="graphTenantId" [disabled]="form.emailProvider !== 'TENANT_GRAPH'" [(ngModel)]="form.graphTenantId" />
+                </label>
+                <label class="block">
+                  <span class="field-label">Graph client ID</span>
+                  <input class="field-input" name="graphClientId" [disabled]="form.emailProvider !== 'TENANT_GRAPH'" [(ngModel)]="form.graphClientId" />
+                </label>
+                <label class="block">
+                  <span class="field-label">Graph sender mailbox</span>
+                  <input class="field-input" name="graphSenderUser" placeholder="service@company.com" [disabled]="form.emailProvider !== 'TENANT_GRAPH'" [(ngModel)]="form.graphSenderUser" />
+                </label>
+                <label class="block">
+                  <span class="field-label">Graph client secret</span>
+                  <input class="field-input" name="graphClientSecret" type="password" [placeholder]="settings()?.graphClientSecretConfigured ? 'Client secret configured' : ''" [disabled]="form.emailProvider !== 'TENANT_GRAPH'" [(ngModel)]="form.graphClientSecret" />
+                </label>
+                <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  <input type="checkbox" name="clearGraphClientSecret" [disabled]="!settings()?.graphClientSecretConfigured" [(ngModel)]="form.clearGraphClientSecret" />
+                  Clear saved Graph client secret
+                </label>
+                @if (form.emailProvider === 'TENANT_GRAPH') {
+                  <div class="md:col-span-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold leading-5 text-sky-900">
+                    Microsoft Graph uses an Entra app registration with Mail.Send application permission and admin consent. The sender mailbox is used for /users/sender/sendMail.
+                  </div>
+                }
+              </div>
+            }
+
+            @if (activeTab() === 'settings') {
+              <div class="grid gap-3">
+                <section class="rounded-lg border border-teal-100 bg-teal-50/60 p-3">
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div class="max-w-2xl">
+                      <p class="text-xs font-black uppercase tracking-wide text-teal-700">Owner email automation</p>
+                      <h2 class="mt-1 text-lg font-black text-slate-950">Manual by default</h2>
+                      <p class="mt-1 text-sm font-semibold leading-6 text-slate-600">
+                        Keep these off when operations should review the work order or invoice, then manually send with confirmation.
+                      </p>
+                    </div>
+                    <p-tag [value]="automationSummary()" severity="info" />
+                  </div>
+                  <div class="mt-3 grid gap-2 md:grid-cols-2">
+                    <label class="flex items-start gap-2 rounded-lg border border-teal-100 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                      <input class="mt-1" type="checkbox" name="autoSendWorkCompletedEmail" [(ngModel)]="form.autoSendWorkCompletedEmail" />
+                      <span>
+                        <span class="block">Auto-send work completed email</span>
+                        <span class="block text-xs font-semibold text-slate-500">After completion is approved. Leave off for manual confirmation.</span>
+                      </span>
+                    </label>
+                    <label class="flex items-start gap-2 rounded-lg border border-teal-100 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                      <input class="mt-1" type="checkbox" name="autoSendInvoiceEmail" [(ngModel)]="form.autoSendInvoiceEmail" />
+                      <span>
+                        <span class="block">Auto-send invoice email</span>
+                        <span class="block text-xs font-semibold text-slate-500">When invoice is marked sent. Leave off for manual confirmation.</span>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+                <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-xs font-black uppercase tracking-wide text-slate-500">More tenant controls</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-600">Additional tenant-wide behavior switches can live here without crowding profile, invoice, or email setup.</p>
+                </section>
               </div>
             }
           </div>
@@ -236,18 +305,43 @@ type SettingsTab = 'profile' | 'invoice' | 'email';
 
           <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <p class="text-xs font-black uppercase tracking-wide text-teal-700">Email sender</p>
-            <h2 class="mt-1 text-lg font-black text-slate-950">{{ form.emailProvider === 'TENANT_SMTP' ? 'Tenant SMTP' : 'Platform sender' }}</h2>
+            <h2 class="mt-1 text-lg font-black text-slate-950">{{ emailProviderLabel() }}</h2>
             <p class="mt-2 text-sm font-semibold leading-6 text-slate-600">
-              {{ form.emailProvider === 'TENANT_SMTP'
-                ? 'Emails will be sent through this tenant SMTP account once host, port, username, password, and from address are configured.'
-                : 'Emails use the platform mail sender, with tenant sender name and reply-to applied where possible.' }}
+              {{ emailProviderSummary() }}
             </p>
             <div class="mt-3 grid gap-2 text-sm font-bold text-slate-700">
-              <span class="rounded-lg bg-slate-50 px-3 py-2">From: {{ form.emailFromAddress || 'platform default' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">From: {{ fromPreview() }}</span>
               <span class="rounded-lg bg-slate-50 px-3 py-2">Reply-to: {{ form.emailReplyToAddress || form.supportEmail || 'not set' }}</span>
-              <span class="rounded-lg bg-slate-50 px-3 py-2">Password: {{ settings()?.smtpPasswordConfigured ? 'configured' : 'not configured' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">SMTP password: {{ settings()?.smtpPasswordConfigured ? 'configured' : 'not configured' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">Graph secret: {{ settings()?.graphClientSecretConfigured ? 'configured' : 'not configured' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">Work completed: {{ form.autoSendWorkCompletedEmail ? 'auto-send on' : 'manual confirmation' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">Invoice email: {{ form.autoSendInvoiceEmail ? 'auto-send on' : 'manual confirmation' }}</span>
+            </div>
+            <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div class="flex items-start justify-between gap-2">
+                <span>
+                  <span class="block text-xs font-black uppercase tracking-wide text-teal-700">Email test</span>
+                  <span class="mt-1 block text-xs font-semibold leading-5 text-slate-500">Sends through the configured provider and records an audited delivery log.</span>
+                </span>
+                <p-tag [value]="providerTag()" severity="info" />
+              </div>
+              <div class="mt-3 grid gap-2">
+                <input class="field-input" name="testRecipientEmail" type="email" placeholder="Recipient email" [(ngModel)]="testEmailForm.recipientEmail" [ngModelOptions]="{ standalone: true }" />
+                <input class="field-input" name="testEmailSubject" placeholder="Subject (optional)" [(ngModel)]="testEmailForm.subject" [ngModelOptions]="{ standalone: true }" />
+                <textarea class="field-input min-h-20" name="testEmailBody" placeholder="Message (optional)" [(ngModel)]="testEmailForm.body" [ngModelOptions]="{ standalone: true }"></textarea>
+                <button
+                  pButton
+                  type="button"
+                  icon="pi pi-send"
+                  label="Send test email"
+                  [loading]="testingEmail()"
+                  [disabled]="!testEmailForm.recipientEmail || testingEmail()"
+                  (click)="sendTestEmail()"
+                ></button>
+              </div>
             </div>
           </div>
+
         </aside>
       </section>
     </section>
@@ -275,16 +369,23 @@ export class TenantSettingsPageComponent {
   protected readonly tabs: Array<{ key: SettingsTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'pi pi-building' },
     { key: 'invoice', label: 'Invoice', icon: 'pi pi-file-edit' },
-    { key: 'email', label: 'Email', icon: 'pi pi-envelope' }
+    { key: 'email', label: 'Email', icon: 'pi pi-envelope' },
+    { key: 'settings', label: 'Settings', icon: 'pi pi-sliders-h' }
   ];
   protected readonly activeTab = signal<SettingsTab>('profile');
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
   protected readonly uploadingLogo = signal(false);
+  protected readonly testingEmail = signal(false);
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly form: UpdateTenantSettingsRequest = {};
+  protected readonly testEmailForm = {
+    recipientEmail: '',
+    subject: '',
+    body: ''
+  };
   protected readonly brandName = computed(() => this.form.organizationName || this.settings()?.tenantName || 'Tenant');
 
   constructor() {
@@ -366,6 +467,29 @@ export class TenantSettingsPageComponent {
     this.form.logoUrl = '';
   }
 
+  protected async sendTestEmail(): Promise<void> {
+    if (this.testingEmail()) {
+      return;
+    }
+    this.testingEmail.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const result = await firstValueFrom(this.tenantSettingsService.sendTestEmail({
+        recipientEmail: this.testEmailForm.recipientEmail,
+        subject: this.testEmailForm.subject,
+        body: this.testEmailForm.body
+      }));
+      this.message.set(result.status === 'SENT'
+        ? `Test email sent to ${result.recipientEmail}.`
+        : `Test email ${result.status.toLowerCase()} for ${result.recipientEmail}: ${result.providerMessage || 'Review email settings.'}`);
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to send test email.'));
+    } finally {
+      this.testingEmail.set(false);
+    }
+  }
+
   private populate(settings: TenantSettingsRecord): void {
     Object.assign(this.form, {
       organizationName: settings.organizationName || settings.tenantName,
@@ -393,8 +517,54 @@ export class TenantSettingsPageComponent {
       smtpUsername: settings.smtpUsername || '',
       smtpPassword: '',
       clearSmtpPassword: false,
-      smtpUseTls: settings.smtpUseTls
+      smtpUseTls: settings.smtpUseTls,
+      graphTenantId: settings.graphTenantId || '',
+      graphClientId: settings.graphClientId || '',
+      graphClientSecret: '',
+      clearGraphClientSecret: false,
+      graphSenderUser: settings.graphSenderUser || '',
+      autoSendWorkCompletedEmail: settings.autoSendWorkCompletedEmail,
+      autoSendInvoiceEmail: settings.autoSendInvoiceEmail
     });
+    this.testEmailForm.recipientEmail ||= settings.supportEmail || settings.billingEmail || settings.emailFromAddress || '';
+    this.testEmailForm.subject ||= `Email test from ${settings.organizationName || settings.tenantName}`;
+  }
+
+  protected emailProviderLabel(): string {
+    if (this.form.emailProvider === 'TENANT_GRAPH') {
+      return 'Microsoft Graph';
+    }
+    return this.form.emailProvider === 'TENANT_SMTP' ? 'Tenant SMTP' : 'Platform sender';
+  }
+
+  protected emailProviderSummary(): string {
+    if (this.form.emailProvider === 'TENANT_GRAPH') {
+      return 'Emails will be sent through Microsoft Graph using this tenant app registration and sender mailbox.';
+    }
+    return this.form.emailProvider === 'TENANT_SMTP'
+      ? 'Emails will be sent through this tenant SMTP account once host, port, username, password, and from address are configured.'
+      : 'Emails use the platform mail sender, with tenant sender name and reply-to applied where possible.';
+  }
+
+  protected fromPreview(): string {
+    if (this.form.emailProvider === 'TENANT_GRAPH') {
+      return this.form.graphSenderUser || this.form.emailFromAddress || 'Graph sender not set';
+    }
+    return this.form.emailFromAddress || 'platform default';
+  }
+
+  protected providerTag(): string {
+    if (this.form.emailProvider === 'TENANT_GRAPH') {
+      return 'microsoft graph';
+    }
+    return this.form.emailProvider === 'TENANT_SMTP' ? 'tenant smtp' : 'platform';
+  }
+
+  protected automationSummary(): string {
+    if (this.form.autoSendWorkCompletedEmail || this.form.autoSendInvoiceEmail) {
+      return 'auto-send enabled';
+    }
+    return 'manual';
   }
 }
 

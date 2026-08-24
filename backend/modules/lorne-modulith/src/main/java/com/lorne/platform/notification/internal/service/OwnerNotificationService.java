@@ -45,7 +45,8 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
     @Transactional
     @Override
     public NotificationDeliveryResult sendWorkOrderCompleted(UUID tenantId, UUID actorUserId, WorkOrderCompletionEmail email) {
-        var recipient = firstNonBlank(email.ownerBillingEmail(), email.ownerEmail());
+        var recipient = firstNonBlank(email.recipientEmailOverride(), email.ownerBillingEmail(), email.ownerEmail());
+        var deliveryMode = deliveryMode(email.deliveryMode(), "MANUAL");
         if (recipient == null) {
             auditWriter.record(tenantId, actorUserId, "WORK_ORDER_OWNER_NOTIFICATION_FAILED", "WORK_ORDER", email.workOrderId(), Map.of(
                     "workOrderNumber", safe(email.workOrderNumber()),
@@ -59,14 +60,18 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
         var values = templateValues(email, tenantSettingsOperations.settings(tenantId).invoiceBrandName());
         var subject = emailTemplateOperations.render(template.subject(), values);
         var body = emailTemplateOperations.render(template.body(), values);
-        var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(recipient, subject, body, List.of()));
+        var ccRecipients = emailList(email.ccEmails());
+        var bccRecipients = emailList(email.bccEmails());
+        var ccEmails = joinedEmails(ccRecipients);
+        var bccEmails = joinedEmails(bccRecipients);
+        var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(recipient, subject, body, List.of(), ccRecipients, bccRecipients));
 
         var deliveryLogId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
                     tenant_id, template_id, work_order_id, customer_id, recipient_email,
-                    subject, body, status, provider_message, sent_at, created_by, updated_by
+                    cc_emails, bcc_emails, subject, body, status, provider_message, sent_at, delivery_mode, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId,
@@ -74,18 +79,24 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
                 email.workOrderId(),
                 email.customerId(),
                 recipient,
+                ccEmails,
+                bccEmails,
                 subject,
                 body,
                 delivery.status(),
                 delivery.providerMessage(),
                 delivery.sentAt() == null ? null : Timestamp.from(delivery.sentAt()),
+                deliveryMode,
                 actorUserId,
                 actorUserId
         );
         auditWriter.record(tenantId, actorUserId, "WORK_ORDER_OWNER_NOTIFICATION_SENT", "WORK_ORDER", email.workOrderId(), Map.of(
                 "workOrderNumber", safe(email.workOrderNumber()),
                 "recipientEmail", recipient,
+                "ccEmails", safe(ccEmails),
+                "bccEmails", safe(bccEmails),
                 "status", delivery.status(),
+                "deliveryMode", deliveryMode,
                 "provider", delivery.provider(),
                 "fromAddress", delivery.fromAddress()
         ));
@@ -124,5 +135,28 @@ public class OwnerNotificationService implements OwnerNotificationOperations {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private List<String> emailList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(value.split("[,;\\s]+"))
+                .map(String::trim)
+                .filter(email -> !email.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private String joinedEmails(List<String> values) {
+        return values == null || values.isEmpty() ? null : String.join(", ", values);
+    }
+
+    private String deliveryMode(String value, String fallback) {
+        var normalized = firstNonBlank(value, fallback);
+        return switch (normalized.toUpperCase(java.util.Locale.ROOT)) {
+            case "AUTO", "MANUAL", "RESEND", "TEST" -> normalized.toUpperCase(java.util.Locale.ROOT);
+            default -> fallback;
+        };
     }
 }

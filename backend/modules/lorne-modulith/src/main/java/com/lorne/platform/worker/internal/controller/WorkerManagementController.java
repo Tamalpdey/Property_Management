@@ -4,6 +4,7 @@ import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
 import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
 import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
+import com.lorne.platform.worker.internal.dto.WorkerActivityOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityDto;
 import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
@@ -59,6 +60,16 @@ class WorkerManagementController {
             @RequestParam(required = false) LocalDate to
     ) {
         return ApiResponse.ok(workerManagementService.activities(principal.tenantId(), workerId, from, to));
+    }
+
+    @PostMapping("/{workerId}/activities/override")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<List<WorkerActivityDto>> overrideActivity(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workerId,
+            @Valid @RequestBody WorkerActivityOverrideRequest request
+    ) {
+        return ApiResponse.ok(workerManagementService.overrideActivity(principal.tenantId(), principal.userId(), workerId, request));
     }
 
     @PostMapping

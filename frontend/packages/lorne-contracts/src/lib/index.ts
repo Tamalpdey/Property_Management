@@ -159,6 +159,11 @@ export interface WorkerShiftClockState {
   entryId?: string;
   startedAt?: string;
   endedAt?: string;
+  paused?: boolean;
+  pauseId?: string;
+  pausedAt?: string;
+  pauseMinutes?: number;
+  activeMinutes?: number;
 }
 
 export interface WorkerShiftClockRequest {
@@ -168,6 +173,7 @@ export interface WorkerShiftClockRequest {
   deviceTimestamp?: string;
   userAgent?: string;
   platform?: string;
+  note?: string;
 }
 
 export interface WorkerAssignedJob {
@@ -184,6 +190,10 @@ export interface WorkerAssignedJob {
   priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   scheduledStart?: string;
   scheduledEnd?: string;
+  estimatedTravelMinutes?: number;
+  estimatedTravelDistanceMeters?: number;
+  travelEstimateProvider?: string;
+  travelEstimatedAt?: string;
   notes?: string;
   leadWorker: boolean;
   assignmentStatus: string;
@@ -265,6 +275,11 @@ export interface WorkOrderRouteStop {
   address?: string;
   instructions?: string;
   plannedArrival?: string;
+  visibleToWorker?: boolean;
+  estimatedTravelMinutes?: number;
+  estimatedTravelDistanceMeters?: number;
+  travelEstimateProvider?: string;
+  travelEstimatedAt?: string;
   arrivedAt?: string;
   completedAt?: string;
   skippedAt?: string;
@@ -399,7 +414,7 @@ export interface WorkerLoadoutToolActionRequest {
 
 export interface WorkerActivity {
   id: string;
-  activityType: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'BREAK' | 'OTHER' | string;
+  activityType: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'TRAVEL' | 'BREAK' | 'OTHER' | string;
   title: string;
   locationName?: string;
   address?: string;
@@ -412,14 +427,25 @@ export interface WorkerActivity {
 
 export interface WorkerActivityRecord extends WorkerActivity {
   workerId: string;
+  override?: boolean;
+  overrideReason?: string;
+  overrideUpdatedAt?: string;
 }
 
 export interface WorkerActivityRequest {
-  activityType?: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'BREAK' | 'OTHER' | string;
+  activityType?: 'OFFICE' | 'SUPPLIER' | 'SHOP' | 'WAREHOUSE' | 'TRAVEL' | 'BREAK' | 'OTHER' | string;
   title?: string;
   locationName?: string;
   address?: string;
   notes?: string;
+}
+
+export interface WorkerActivityOverrideRequest extends WorkerActivityRequest {
+  activityId?: string;
+  delete?: boolean;
+  startedAt?: string;
+  endedAt?: string;
+  reason: string;
 }
 
 export interface SuperAdminOverviewResponse {
@@ -704,6 +730,7 @@ export interface WorkerClockEntryRecord {
   startedAt: string;
   endedAt?: string;
   durationMinutes?: number;
+  pauseMinutes?: number;
 }
 
 export type WorkerEngagementType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACTOR' | 'SEASONAL';
@@ -792,6 +819,7 @@ export interface WorkOrderRecord {
   routeStops: WorkOrderRouteStop[];
   linkedWorkOrders: WorkOrderLink[];
   linkedFromWorkOrders: WorkOrderLink[];
+  fieldNotes?: WorkOrderReviewFieldNote[];
 }
 
 export interface WorkOrderLink {
@@ -877,12 +905,16 @@ export interface WorkOrderCommunication {
   body: string;
   status: 'RECORDED' | 'SENT' | 'FAILED' | string;
   providerMessage?: string;
+  deliveryMode?: 'AUTO' | 'MANUAL' | 'RESEND' | 'TEST' | string;
   sentAt?: string;
   createdAt: string;
 }
 
 export interface SendWorkOrderOwnerEmailRequest {
   note?: string;
+  recipientEmail?: string;
+  ccEmails?: string;
+  bccEmails?: string;
 }
 
 export interface InvoiceRecord {
@@ -1022,7 +1054,7 @@ export interface TenantSettingsRecord {
   logoUrl?: string;
   themePrimaryColor: string;
   themeAccentColor: string;
-  emailProvider: 'SYSTEM' | 'TENANT_SMTP';
+  emailProvider: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
   emailSenderName?: string;
   emailFromAddress?: string;
   emailReplyToAddress?: string;
@@ -1031,6 +1063,12 @@ export interface TenantSettingsRecord {
   smtpUsername?: string;
   smtpPasswordConfigured: boolean;
   smtpUseTls: boolean;
+  graphTenantId?: string;
+  graphClientId?: string;
+  graphClientSecretConfigured: boolean;
+  graphSenderUser?: string;
+  autoSendWorkCompletedEmail: boolean;
+  autoSendInvoiceEmail: boolean;
 }
 
 export interface UpdateTenantSettingsRequest {
@@ -1050,7 +1088,7 @@ export interface UpdateTenantSettingsRequest {
   logoUrl?: string;
   themePrimaryColor?: string;
   themeAccentColor?: string;
-  emailProvider?: 'SYSTEM' | 'TENANT_SMTP';
+  emailProvider?: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
   emailSenderName?: string;
   emailFromAddress?: string;
   emailReplyToAddress?: string;
@@ -1060,13 +1098,37 @@ export interface UpdateTenantSettingsRequest {
   smtpPassword?: string;
   clearSmtpPassword?: boolean;
   smtpUseTls?: boolean;
+  graphTenantId?: string;
+  graphClientId?: string;
+  graphClientSecret?: string;
+  clearGraphClientSecret?: boolean;
+  graphSenderUser?: string;
+  autoSendWorkCompletedEmail?: boolean;
+  autoSendInvoiceEmail?: boolean;
+}
+
+export interface TestTenantEmailRequest {
+  recipientEmail?: string;
+  subject?: string;
+  body?: string;
+}
+
+export interface TestTenantEmailResponse {
+  deliveryLogId: string;
+  status: 'RECORDED' | 'SENT' | 'FAILED';
+  recipientEmail: string;
+  sentAt?: string;
+  providerMessage?: string;
 }
 
 export interface SendInvoiceEmailRequest {
   templateId?: string;
   recipientEmail?: string;
+  ccEmails?: string;
+  bccEmails?: string;
   subject?: string;
   body?: string;
+  deliveryMode?: 'AUTO' | 'MANUAL' | 'RESEND' | 'TEST' | string;
 }
 
 export interface SendInvoiceEmailResponse {
@@ -1074,6 +1136,32 @@ export interface SendInvoiceEmailResponse {
   status: 'RECORDED' | 'SENT' | 'FAILED';
   recipientEmail: string;
   sentAt?: string;
+}
+
+export interface EmailDeliveryLogRecord {
+  id: string;
+  communicationType: 'WORK_ORDER_COMPLETION' | 'INVOICE_EMAIL' | 'TEST_EMAIL' | 'OWNER_EMAIL' | string;
+  deliveryMode: 'AUTO' | 'MANUAL' | 'RESEND' | 'TEST' | string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  workOrderId?: string;
+  workOrderNumber?: string;
+  ownerName?: string;
+  recipientEmail: string;
+  ccEmails?: string;
+  bccEmails?: string;
+  subject: string;
+  body?: string;
+  status: 'RECORDED' | 'SENT' | 'FAILED' | string;
+  providerMessage?: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface ResendEmailDeliveryRequest {
+  recipientEmail?: string;
+  ccEmails?: string;
+  bccEmails?: string;
 }
 
 export interface WorkOrderAuditEntry {
@@ -1150,6 +1238,7 @@ export interface WorkOrderRouteStopOverride {
   address?: string;
   instructions?: string;
   plannedArrival?: string;
+  visibleToWorker?: boolean;
   arrivedAt?: string;
   completedAt?: string;
   skippedAt?: string;
@@ -1236,10 +1325,15 @@ export interface WorkOrderAssignment {
   assignmentStatus: string;
   assignmentRole?: string;
   notes?: string;
+  actualTravelStartedAt?: string;
   actualArrivedAt?: string;
   actualWorkStartedAt?: string;
   actualFinishedAt?: string;
   actualWorkMinutes?: number;
+  estimatedTravelMinutes?: number;
+  estimatedTravelDistanceMeters?: number;
+  travelEstimateProvider?: string;
+  travelEstimatedAt?: string;
   timingOverride?: boolean;
   overrideReason?: string;
   overrideUpdatedAt?: string;
@@ -1349,6 +1443,7 @@ export interface CreateWorkOrderRouteStopRequest {
   address?: string;
   instructions?: string;
   plannedArrival?: string;
+  visibleToWorker?: boolean;
 }
 
 export interface CreateWorkOrderLinkRequest {

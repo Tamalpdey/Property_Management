@@ -249,7 +249,7 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
               <button pButton type="button" size="small" severity="secondary" icon="pi pi-plus" label="Add stop" (click)="addRouteStop()"></button>
             </div>
             @for (stop of routeStopRows; track stop.id; let index = $index) {
-              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-[8rem_1fr_1fr_11rem_auto]">
+              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-[8rem_1fr_1fr_11rem_10rem_auto]">
                 <select class="w-full border border-slate-300 px-2 py-2 text-sm" name="routeStopType{{ stop.id }}" [(ngModel)]="stop.stopType">
                   <option value="PICKUP">Pickup</option>
                   <option value="DELIVERY">Delivery</option>
@@ -263,8 +263,12 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
                 <input pInputText class="w-full" name="routeStopName{{ stop.id }}" placeholder="Stop name" [(ngModel)]="stop.name" />
                 <input pInputText class="w-full" name="routeStopAddress{{ stop.id }}" placeholder="Address or location" [(ngModel)]="stop.address" />
                 <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="routeStopArrival{{ stop.id }}" type="datetime-local" [(ngModel)]="stop.plannedArrival" />
+                <label class="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 text-xs font-black text-slate-700">
+                  <input type="checkbox" name="routeStopVisible{{ stop.id }}" [(ngModel)]="stop.visibleToWorker" />
+                  Show to worker
+                </label>
                 <button pButton type="button" severity="secondary" icon="pi pi-trash" [text]="true" (click)="removeRouteStop(stop.id)"></button>
-                <textarea class="md:col-span-5 w-full border border-slate-300 px-3 py-2 text-sm" name="routeStopInstructions{{ stop.id }}" rows="2" placeholder="Stop instructions, confirmation notes, contact, shelf/bin, etc." [(ngModel)]="stop.instructions"></textarea>
+                <textarea class="md:col-span-6 w-full border border-slate-300 px-3 py-2 text-sm" name="routeStopInstructions{{ stop.id }}" rows="2" placeholder="Stop instructions, confirmation notes, contact, shelf/bin, etc." [(ngModel)]="stop.instructions"></textarea>
               </div>
             } @empty {
               <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500">No pre-site stops added.</p>
@@ -842,7 +846,8 @@ export class WorkOrderFormComponent {
           name: stop.name.trim(),
           address: stop.address.trim() || undefined,
           instructions: stop.instructions.trim() || undefined,
-          plannedArrival: stop.plannedArrival ? new Date(stop.plannedArrival).toISOString() : undefined
+          plannedArrival: stop.plannedArrival ? new Date(stop.plannedArrival).toISOString() : undefined,
+          visibleToWorker: stop.visibleToWorker
         })),
       linkedWorkOrders: this.linkRows
         .filter((link) => link.linkedWorkOrderId)
@@ -1240,7 +1245,8 @@ export class WorkOrderFormComponent {
       name: stop.name,
       address: stop.address || '',
       instructions: stop.instructions || '',
-      plannedArrival: toDateTimeInput(stop.plannedArrival)
+      plannedArrival: toDateTimeInput(stop.plannedArrival),
+      visibleToWorker: stop.visibleToWorker ?? true
     }));
     this.linkRows = (workOrder.linkedWorkOrders ?? []).map((link) => ({
       id: `${link.linkedWorkOrderId}-${link.linkType}`,
@@ -1321,7 +1327,7 @@ export class WorkOrderFormComponent {
   }
 
   private blankRouteStop(): RouteStopRow {
-    return { id: crypto.randomUUID(), stopType: 'PICKUP', name: '', address: '', instructions: '', plannedArrival: '' };
+    return { id: crypto.randomUUID(), stopType: 'PICKUP', name: '', address: '', instructions: '', plannedArrival: '', visibleToWorker: true };
   }
 
   private blankLink(): LinkRow {
@@ -1505,6 +1511,7 @@ interface RouteStopRow {
   address: string;
   instructions: string;
   plannedArrival: string;
+  visibleToWorker: boolean;
 }
 
 interface LinkRow {
