@@ -33,6 +33,14 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/day-ticket/worker-day-ticket.component').then((m) => m.WorkerDayTicketComponent)
       },
       {
+        path: 'messages',
+        loadComponent: () => import('./features/messages/worker-messages.component').then((m) => m.WorkerMessagesComponent)
+      },
+      {
+        path: 'guide',
+        loadComponent: () => import('./features/guide/worker-guide.component').then((m) => m.WorkerGuideComponent)
+      },
+      {
         path: 'jobs/:id',
         loadComponent: () => import('./features/job-detail/worker-job-detail.component').then((m) => m.WorkerJobDetailComponent)
       }

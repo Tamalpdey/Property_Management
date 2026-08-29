@@ -8,6 +8,7 @@ import com.lorne.platform.shared.security.JwtPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,6 +38,12 @@ class EmailTemplateController {
         return ApiResponse.ok(emailTemplateService.updateInvoiceTemplate(principal.tenantId(), principal.userId(), request));
     }
 
+    @PostMapping("/invoice-owner/reset")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<EmailTemplateDto> resetInvoiceTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(emailTemplateService.resetInvoiceTemplate(principal.tenantId(), principal.userId()));
+    }
+
     @GetMapping("/work-order-completed-owner")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
     ApiResponse<EmailTemplateDto> workOrderCompletedTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
@@ -50,5 +57,11 @@ class EmailTemplateController {
             @RequestBody UpdateEmailTemplateRequest request
     ) {
         return ApiResponse.ok(emailTemplateService.updateWorkOrderCompletedTemplate(principal.tenantId(), principal.userId(), request));
+    }
+
+    @PostMapping("/work-order-completed-owner/reset")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<EmailTemplateDto> resetWorkOrderCompletedTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(emailTemplateService.resetWorkOrderCompletedTemplate(principal.tenantId(), principal.userId()));
     }
 }

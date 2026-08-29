@@ -8,16 +8,29 @@ public record OutboundEmailMessage(
         String body,
         List<OutboundEmailAttachment> attachments,
         List<String> ccRecipients,
-        List<String> bccRecipients
+        List<String> bccRecipients,
+        List<OutboundEmailInlineImage> inlineImages
 ) {
     public OutboundEmailMessage(String recipient, String subject, String body, List<OutboundEmailAttachment> attachments) {
         this(recipient, subject, body, attachments, List.of(), List.of());
+    }
+
+    public OutboundEmailMessage(
+            String recipient,
+            String subject,
+            String body,
+            List<OutboundEmailAttachment> attachments,
+            List<String> ccRecipients,
+            List<String> bccRecipients
+    ) {
+        this(recipient, subject, body, attachments, ccRecipients, bccRecipients, List.of());
     }
 
     public OutboundEmailMessage {
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
         ccRecipients = copyEmails(ccRecipients);
         bccRecipients = copyEmails(bccRecipients);
+        inlineImages = inlineImages == null ? List.of() : List.copyOf(inlineImages);
     }
 
     private static List<String> copyEmails(List<String> values) {

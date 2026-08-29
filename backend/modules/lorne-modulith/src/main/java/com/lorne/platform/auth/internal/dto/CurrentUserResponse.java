@@ -7,6 +7,7 @@ public record CurrentUserResponse(
         UUID id,
         UUID tenantId,
         String displayName,
+        String profilePhotoUrl,
         String email,
         List<String> roles,
         List<String> permissions

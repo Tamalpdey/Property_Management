@@ -39,16 +39,18 @@ public class TenantUserManagementService {
         return jdbcTemplate.query("""
                 SELECT u.id, u.display_name, u.email, u.phone, u.status::text AS status, u.last_login_at, u.created_at,
                        string_agg(r.code, ',' ORDER BY r.code) AS role_codes,
+                       u.profile_photo_url,
                        w.id AS worker_id, w.display_name AS worker_name
                 FROM app_users u
                 JOIN user_tenant_roles utr ON utr.user_id = u.id AND utr.tenant_id = ?
                 JOIN roles r ON r.id = utr.role_id
                 LEFT JOIN workers w ON w.tenant_id = utr.tenant_id AND w.user_id = u.id
-                GROUP BY u.id, u.display_name, u.email, u.phone, u.status, u.last_login_at, u.created_at, w.id, w.display_name
+                GROUP BY u.id, u.display_name, u.profile_photo_url, u.email, u.phone, u.status, u.last_login_at, u.created_at, w.id, w.display_name
                 ORDER BY u.display_name
                 """, (rs, rowNum) -> new TenantUserDto(
                 rs.getObject("id", UUID.class),
                 rs.getString("display_name"),
+                rs.getString("profile_photo_url"),
                 rs.getString("email"),
                 rs.getString("phone"),
                 rs.getString("status"),
@@ -93,14 +95,14 @@ public class TenantUserManagementService {
 
         var userId = userIdByEmail(email);
         if (userId == null) {
-            userId = createUser(email, request.displayName().trim(), blankToNull(request.phone()), password, actorUserId);
+            userId = createUser(email, request.displayName().trim(), blankToNull(request.profilePhotoUrl()), blankToNull(request.phone()), password, actorUserId);
         } else {
             jdbcTemplate.update("""
                     UPDATE app_users
-                    SET display_name = ?, phone = ?, password_hash = ?, status = 'ACTIVE'::user_status,
+                    SET display_name = ?, profile_photo_url = ?, phone = ?, password_hash = ?, status = 'ACTIVE'::user_status,
                         updated_at = now(), updated_by = ?
                     WHERE id = ?
-                    """, request.displayName().trim(), blankToNull(request.phone()), passwordEncoder.encode(password), actorUserId, userId);
+                    """, request.displayName().trim(), blankToNull(request.profilePhotoUrl()), blankToNull(request.phone()), passwordEncoder.encode(password), actorUserId, userId);
         }
 
         replaceTenantRoles(tenantId, actorUserId, userId, roles);
@@ -113,6 +115,7 @@ public class TenantUserManagementService {
         }
         auditWriter.record(tenantId, actorUserId, "TENANT_USER_UPSERTED", "USER", userId, Map.of(
                 "email", email,
+                "profilePhotoConfigured", request.profilePhotoUrl() != null && !request.profilePhotoUrl().isBlank(),
                 "roles", roles,
                 "workerId", workerId == null ? "" : workerId
         ));
@@ -141,15 +144,15 @@ public class TenantUserManagementService {
             var updated = password.isBlank()
                     ? jdbcTemplate.update("""
                             UPDATE app_users
-                            SET display_name = ?, email = ?, phone = ?, updated_at = now(), updated_by = ?
+                            SET display_name = ?, profile_photo_url = ?, email = ?, phone = ?, updated_at = now(), updated_by = ?
                             WHERE id = ?
-                            """, request.displayName().trim(), email, blankToNull(request.phone()), actorUserId, userId)
+                            """, request.displayName().trim(), blankToNull(request.profilePhotoUrl()), email, blankToNull(request.phone()), actorUserId, userId)
                     : jdbcTemplate.update("""
                             UPDATE app_users
-                            SET display_name = ?, email = ?, phone = ?, password_hash = ?, status = 'ACTIVE'::user_status,
+                            SET display_name = ?, profile_photo_url = ?, email = ?, phone = ?, password_hash = ?, status = 'ACTIVE'::user_status,
                                 updated_at = now(), updated_by = ?
                             WHERE id = ?
-                            """, request.displayName().trim(), email, blankToNull(request.phone()), passwordEncoder.encode(password), actorUserId, userId);
+                            """, request.displayName().trim(), blankToNull(request.profilePhotoUrl()), email, blankToNull(request.phone()), passwordEncoder.encode(password), actorUserId, userId);
             if (updated != 1) {
                 throw new ResourceNotFoundException("Tenant user not found.");
             }
@@ -167,6 +170,7 @@ public class TenantUserManagementService {
         }
         auditWriter.record(tenantId, actorUserId, "TENANT_USER_UPDATED", "USER", userId, Map.of(
                 "email", email,
+                "profilePhotoConfigured", request.profilePhotoUrl() != null && !request.profilePhotoUrl().isBlank(),
                 "roles", roles,
                 "workerId", workerId == null ? "" : workerId
         ));
@@ -231,13 +235,13 @@ public class TenantUserManagementService {
         ));
     }
 
-    private UUID createUser(String email, String displayName, String phone, String password, UUID actorUserId) {
+    private UUID createUser(String email, String displayName, String profilePhotoUrl, String phone, String password, UUID actorUserId) {
         try {
             return jdbcTemplate.queryForObject("""
-                    INSERT INTO app_users (email, display_name, phone, password_hash, status, created_by, updated_by)
-                    VALUES (?, ?, ?, ?, 'ACTIVE'::user_status, ?, ?)
+                    INSERT INTO app_users (email, display_name, profile_photo_url, phone, password_hash, status, created_by, updated_by)
+                    VALUES (?, ?, ?, ?, ?, 'ACTIVE'::user_status, ?, ?)
                     RETURNING id
-                    """, UUID.class, email, displayName, phone, passwordEncoder.encode(password), actorUserId, actorUserId);
+                    """, UUID.class, email, displayName, profilePhotoUrl, phone, passwordEncoder.encode(password), actorUserId, actorUserId);
         } catch (DuplicateKeyException exception) {
             throw new DuplicateResourceException("User email already exists.");
         }

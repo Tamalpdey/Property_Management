@@ -14,6 +14,8 @@ import type {
   WorkOrderType,
   CreateWorkOrderRequest
 } from '@lorne/contracts';
+import { WORK_ORDER_STATUS_GROUPS } from '../work-order-status-options';
+import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
 
 type ChecklistPhase = 'PRE_START' | 'COMPLETION';
 type ResourceTab = 'INVENTORY' | 'TOOLS';
@@ -23,7 +25,7 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
 @Component({
   selector: 'lorne-work-order-form',
   standalone: true,
-  imports: [ButtonModule, FormsModule, InputTextModule],
+  imports: [ButtonModule, FormsModule, InputTextModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="flex h-full min-h-0 flex-col gap-3" (ngSubmit)="submit()">
@@ -148,13 +150,13 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Status</span>
               <select class="w-full border border-slate-300 px-3 py-2" name="status" [(ngModel)]="form.status">
-                <option value="DRAFT">Draft</option>
-                <option value="TO_DO">To do</option>
-                <option value="PENDING">Pending</option>
-                <option value="ON_HOLD">On hold</option>
-                <option value="PENDING_COMPLETION">Pending completion</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="CANCELLED">Cancelled</option>
+                @for (group of statusGroups; track group.label) {
+                  <optgroup [label]="group.label">
+                    @for (status of group.options; track status.value) {
+                      <option [value]="status.value">{{ status.label }}</option>
+                    }
+                  </optgroup>
+                }
               </select>
             </label>
             <label class="block">
@@ -177,6 +179,9 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
             <span class="mb-1 block text-sm font-semibold text-slate-700">Dispatch instructions</span>
             <textarea class="w-full border border-slate-300 px-3 py-2" name="description" rows="2" [(ngModel)]="form.description"></textarea>
           </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <lorne-voice-note-button [text]="form.description || ''" label="Speak instructions" [showUnsupported]="true" (textChange)="form.description = $event" />
+          </div>
 
           <div class="grid gap-2 md:grid-cols-3">
             <input pInputText class="w-full" name="requesterName" placeholder="Requester name" [(ngModel)]="form.requesterName" />
@@ -200,7 +205,7 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Start</span>
-              <input class="w-full border border-slate-300 px-3 py-2" name="scheduledStart" type="datetime-local" [(ngModel)]="scheduledStart" />
+              <input class="w-full border border-slate-300 px-3 py-2" name="scheduledStart" type="datetime-local" [(ngModel)]="scheduledStart" (ngModelChange)="onScheduledStartChange($event)" />
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">End</span>
@@ -268,7 +273,12 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
                   Show to worker
                 </label>
                 <button pButton type="button" severity="secondary" icon="pi pi-trash" [text]="true" (click)="removeRouteStop(stop.id)"></button>
-                <textarea class="md:col-span-6 w-full border border-slate-300 px-3 py-2 text-sm" name="routeStopInstructions{{ stop.id }}" rows="2" placeholder="Stop instructions, confirmation notes, contact, shelf/bin, etc." [(ngModel)]="stop.instructions"></textarea>
+                <div class="md:col-span-6">
+                  <textarea class="w-full border border-slate-300 px-3 py-2 text-sm" name="routeStopInstructions{{ stop.id }}" rows="2" placeholder="Stop instructions, confirmation notes, contact, shelf/bin, etc." [(ngModel)]="stop.instructions"></textarea>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <lorne-voice-note-button [text]="stop.instructions" label="Speak stop note" (textChange)="stop.instructions = $event" />
+                  </div>
+                </div>
               </div>
             } @empty {
               <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500">No pre-site stops added.</p>
@@ -325,7 +335,12 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
                   <p class="mt-0.5 text-xs font-semibold leading-5 text-slate-500">{{ linkTypeRule(link.linkType) }}</p>
                 </div>
 
-                <input pInputText class="w-full" name="linkNotes{{ link.id }}" placeholder="Internal note, reason, supplier PO, return instruction..." [(ngModel)]="link.notes" />
+                <div>
+                  <input pInputText class="w-full" name="linkNotes{{ link.id }}" placeholder="Internal note, reason, supplier PO, return instruction..." [(ngModel)]="link.notes" />
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <lorne-voice-note-button [text]="link.notes" label="Speak link note" (textChange)="link.notes = $event" />
+                  </div>
+                </div>
               </div>
             } @empty {
               <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500">No linked work orders.</p>
@@ -364,6 +379,9 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
               <span class="mb-1 block text-sm font-semibold text-slate-700">Override reason <span class="text-red-600">*</span></span>
               <textarea class="w-full border border-amber-300 px-3 py-2 text-sm font-semibold" name="availabilityOverrideReason" rows="2" [(ngModel)]="availabilityOverrideReason"></textarea>
             </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button [text]="availabilityOverrideReason" label="Speak override reason" (textChange)="availabilityOverrideReason = $event" />
+            </div>
           }
 
           <div class="grid max-h-[34rem] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
@@ -590,6 +608,7 @@ export class WorkOrderFormComponent {
   protected readonly steps = ['Context', 'Schedule', 'Workers', 'Checklist', 'Resources'];
   protected readonly pickupSteps = ['Pickup', 'Stops', 'Worker'];
   protected readonly linkTypeOptions = LINK_TYPE_OPTIONS;
+  protected readonly statusGroups = WORK_ORDER_STATUS_GROUPS;
   protected step = 0;
   protected resourceTab: ResourceTab = 'INVENTORY';
   protected ownerId = '';
@@ -919,6 +938,18 @@ export class WorkOrderFormComponent {
   protected onTitleChange(value: string): void {
     this.titleTouched = true;
     this.form.title = value;
+  }
+
+  protected onScheduledStartChange(value: string): void {
+    this.scheduledStart = value;
+    if (this.scheduledEnd || !value) {
+      return;
+    }
+    const start = new Date(value);
+    if (Number.isNaN(start.getTime())) {
+      return;
+    }
+    this.scheduledEnd = toDateTimeInput(new Date(start.getTime() + 60 * 60 * 1000).toISOString());
   }
 
   private syncSuggestedTitle(): void {

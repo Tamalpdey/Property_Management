@@ -14,6 +14,7 @@ Usage:
 Examples:
 ./run-stack.sh prod pull-deploy
 ./run-stack.sh prod pull-deploy lorne-modulith
+./run-stack.sh prod build-push worker-app linux/amd64
 ./run-stack.sh prod pull-deploy "" linux/amd64
 ./run-stack.sh prod migrate
 
@@ -23,8 +24,11 @@ TARGET_PLATFORM=linux/amd64
 Actions:
 up            Build and deploy all services, or one service
 down          Stop all services
+build         Build image(s) only. Does not start containers
+push          Push image(s) only. Does not start containers
+build-push    Build and push image(s) only. Does not start containers
 restart       Restart all services, or one service
-rebuild       Rebuild and force-recreate all services, or one service
+rebuild       Rebuild image(s) only. Does not push or start containers
 pull          Pull latest image(s)
 deploy        Deploy already-built/pulled image(s) without local build
 pull-deploy   Pull latest image(s) and deploy without local build
@@ -41,6 +45,8 @@ if [[ -z "$MODE" || ("$MODE" != "local" && "$MODE" != "prod") ]]; then
 fi
 
 export DOCKER_DEFAULT_PLATFORM="$PLATFORM"
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+export COMPOSE_DOCKER_CLI_BUILD="${COMPOSE_DOCKER_CLI_BUILD:-1}"
 
 echo "Mode: $MODE"
 echo "Action: $ACTION"
@@ -96,12 +102,32 @@ case "$ACTION" in
   down)
     "${compose_cmd[@]}" down
     ;;
-  rebuild)
-    check_private_ports
+  build)
     if [[ -n "$SERVICE" ]]; then
-      "${compose_cmd[@]}" up -d --build --force-recreate "$SERVICE"
+      "${compose_cmd[@]}" build "$SERVICE"
     else
-      "${compose_cmd[@]}" up -d --build --force-recreate
+      "${compose_cmd[@]}" build
+    fi
+    ;;
+  push)
+    if [[ -n "$SERVICE" ]]; then
+      "${compose_cmd[@]}" push "$SERVICE"
+    else
+      "${compose_cmd[@]}" push
+    fi
+    ;;
+  build-push)
+    if [[ -n "$SERVICE" ]]; then
+      "${compose_cmd[@]}" build --push "$SERVICE"
+    else
+      "${compose_cmd[@]}" build --push
+    fi
+    ;;
+  rebuild)
+    if [[ -n "$SERVICE" ]]; then
+      "${compose_cmd[@]}" build "$SERVICE"
+    else
+      "${compose_cmd[@]}" build
     fi
     ;;
   restart)

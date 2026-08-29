@@ -38,6 +38,25 @@
   redir https://{$APP_DOMAIN}{uri} permanent
 }
 
+platinumservices.ca, www.platinumservices.ca {
+  import security_headers
+
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle /contact {
+    redir /#contact 308
+  }
+
+  handle {
+    root * /srv/platinum-site
+    try_files {path} /index.html
+    file_server
+  }
+}
+
 {$API_DOMAIN}, api.maplepropertyservices.ca {
   import security_headers
 

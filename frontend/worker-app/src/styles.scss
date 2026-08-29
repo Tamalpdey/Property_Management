@@ -5,6 +5,22 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  --p-primary-50: #ecfdf8;
+  --p-primary-100: #d1faee;
+  --p-primary-200: #99f6df;
+  --p-primary-300: #5eeacf;
+  --p-primary-400: #2dd4bf;
+  --p-primary-500: #14b8a6;
+  --p-primary-600: #0f766e;
+  --p-primary-700: #0b5f59;
+  --p-primary-800: #0a4f4a;
+  --p-primary-900: #082f2b;
+  --p-primary-950: #04201d;
+  --p-primary-color: #0f766e;
+  --p-primary-hover-color: #0b5f59;
+  --p-primary-active-color: #0a4f4a;
+  --p-primary-contrast-color: #ffffff;
+  --p-focus-ring-color: rgba(20, 184, 166, 0.24);
 }
 
 html,

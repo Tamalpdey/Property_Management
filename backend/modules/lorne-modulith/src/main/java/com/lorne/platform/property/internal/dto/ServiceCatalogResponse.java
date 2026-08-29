@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public record ServiceCatalogResponse(List<ServiceCategoryDto> categories, List<ServiceTypeDto> serviceTypes) {
-    public record ServiceCategoryDto(UUID id, String name, boolean active) {
+    public record ServiceCategoryDto(UUID id, String name, BigDecimal wsibRatePercent, boolean active) {
     }
 
     public record ServiceTypeDto(

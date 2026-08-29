@@ -1,12 +1,15 @@
 package com.lorne.platform.notification.internal.service;
 
 import com.lorne.platform.audit.AuditWriter;
+import com.lorne.platform.notification.EmailLogoRenderer;
+import com.lorne.platform.notification.OutboundEmailInlineImage;
 import com.lorne.platform.notification.OutboundEmailMessage;
 import com.lorne.platform.notification.OutboundMailOperations;
 import com.lorne.platform.notification.internal.dto.EmailDeliveryLogDto;
 import com.lorne.platform.notification.internal.dto.ResendEmailDeliveryRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import com.lorne.platform.tenant.TenantSettingsOperations;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Arrays;
@@ -22,15 +25,21 @@ public class EmailDeliveryLogService {
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final OutboundMailOperations outboundMailOperations;
+    private final TenantSettingsOperations tenantSettingsOperations;
+    private final EmailLogoRenderer emailLogoRenderer;
 
     public EmailDeliveryLogService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
-            OutboundMailOperations outboundMailOperations
+            OutboundMailOperations outboundMailOperations,
+            TenantSettingsOperations tenantSettingsOperations,
+            EmailLogoRenderer emailLogoRenderer
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.outboundMailOperations = outboundMailOperations;
+        this.tenantSettingsOperations = tenantSettingsOperations;
+        this.emailLogoRenderer = emailLogoRenderer;
     }
 
     @Transactional(readOnly = true)
@@ -98,13 +107,15 @@ public class EmailDeliveryLogService {
         var bccRecipients = emailList(request == null ? source.bccEmails() : request.bccEmails());
         var ccEmails = joinedEmails(ccRecipients);
         var bccEmails = joinedEmails(bccRecipients);
+        var inlineImages = inlineImagesForResend(tenantId, source.body());
         var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(
                 recipient,
                 source.subject(),
                 source.body(),
                 List.of(),
                 ccRecipients,
-                bccRecipients
+                bccRecipients,
+                inlineImages
         ));
         var resentId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
@@ -166,6 +177,18 @@ public class EmailDeliveryLogService {
             throw new ResourceNotFoundException("Email delivery log not found.");
         }
         return rows.getFirst();
+    }
+
+    private List<OutboundEmailInlineImage> inlineImagesForResend(UUID tenantId, String body) {
+        if (body == null || !body.contains("cid:tenant-logo")) {
+            return List.of();
+        }
+        var settings = tenantSettingsOperations.settings(tenantId);
+        return emailLogoRenderer.render(
+                settings.logoUrl(),
+                settings.invoiceBrandName(),
+                firstNonBlank(settings.themePrimaryColor(), "#0f766e")
+        ).inlineImages();
     }
 
     private Instant instant(Timestamp timestamp) {

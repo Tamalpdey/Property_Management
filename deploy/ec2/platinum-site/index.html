@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Platinum Property Services maintenance requests and property service support.">
+    <title>Platinum Property Services | Coming Soon</title>
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #52627a;
+        --line: #d8e1ed;
+        --surface: #ffffff;
+        --soft: #f4f8fb;
+        --brand: #19796f;
+        --brand-dark: #0f5f57;
+        --accent: #c4912f;
+        --danger: #b42318;
+        --shadow: 0 22px 70px rgba(15, 23, 42, 0.13);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          linear-gradient(140deg, rgba(25, 121, 111, 0.12), transparent 38%),
+          linear-gradient(320deg, rgba(196, 145, 47, 0.12), transparent 34%),
+          var(--soft);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 22px 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border: 1px solid rgba(25, 121, 111, 0.22);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--brand);
+        font-weight: 900;
+        letter-spacing: 0;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: clamp(18px, 2vw, 24px);
+        line-height: 1.05;
+      }
+
+      .brand span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 42px;
+        padding: 0 16px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        font-weight: 800;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border-color: var(--brand);
+        background: var(--brand);
+        color: #fff;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 22px;
+        align-items: stretch;
+        padding: 14px 0 34px;
+      }
+
+      .hero-panel,
+      .contact-card,
+      .service-card,
+      .notice {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-panel {
+        min-height: 520px;
+        padding: clamp(28px, 5vw, 58px);
+        background:
+          linear-gradient(125deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.86)),
+          radial-gradient(circle at 78% 20%, rgba(25, 121, 111, 0.35), transparent 30%);
+        color: #fff;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 22px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #d7fff8;
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .hero-panel h2 {
+        max-width: 760px;
+        margin: 0;
+        font-size: clamp(38px, 5vw, 68px);
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .hero-panel p {
+        max-width: 710px;
+        margin: 22px 0 0;
+        color: #d9e4f0;
+        font-size: clamp(17px, 2vw, 21px);
+        line-height: 1.55;
+      }
+
+      .hero-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 36px;
+      }
+
+      .meta-box {
+        min-height: 96px;
+        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .meta-box strong {
+        display: block;
+        font-size: 22px;
+      }
+
+      .meta-box span {
+        display: block;
+        margin-top: 8px;
+        color: #b9c8d9;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .contact-card {
+        padding: 22px;
+      }
+
+      .contact-card h3,
+      .services h3 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .contact-card p {
+        margin: 8px 0 18px;
+        color: var(--muted);
+        font-weight: 650;
+        line-height: 1.4;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        min-height: 42px;
+        border: 1px solid #cbd7e6;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-size: 15px;
+      }
+
+      textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+
+      .span-2 {
+        grid-column: 1 / -1;
+      }
+
+      .form-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .status {
+        min-height: 20px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .status.success {
+        color: var(--brand-dark);
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .services {
+        padding-bottom: 48px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 8px 0 14px;
+      }
+
+      .section-head p {
+        max-width: 660px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+        font-weight: 650;
+      }
+
+      .service-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .service-card {
+        min-height: 150px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .service-card span {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: #e8fbf7;
+        color: var(--brand);
+        font-weight: 900;
+      }
+
+      .service-card h4 {
+        margin: 16px 0 8px;
+        font-size: 18px;
+      }
+
+      .service-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+        font-weight: 650;
+      }
+
+      .notice {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 0 0 42px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .notice strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .notice span {
+        color: var(--muted);
+        font-weight: 650;
+      }
+
+      @media (max-width: 960px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-panel {
+          min-height: auto;
+        }
+
+        .service-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 20px, 1180px);
+        }
+
+        .topbar,
+        .notice,
+        .form-actions,
+        .section-head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .top-actions,
+        .button {
+          width: 100%;
+        }
+
+        .hero-meta,
+        .field-grid,
+        .service-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-panel,
+        .contact-card {
+          padding: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="shell topbar">
+      <div class="brand" aria-label="Platinum Property Services">
+        <div class="brand-mark">PP</div>
+        <div>
+          <h1>Platinum Property Services</h1>
+          <span>Residential and property maintenance</span>
+        </div>
+      </div>
+      <nav class="top-actions" aria-label="Primary">
+        <a class="button" href="tel:+14166225000">416.622.5000</a>
+        <a class="button primary" href="#contact">Contact Us</a>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-panel">
+          <div class="eyebrow">New website coming soon</div>
+          <h2>Property maintenance support is still available.</h2>
+          <p>
+            We are preparing a cleaner online experience for maintenance requests,
+            service updates, and property support. For now, send a request below and
+            our operations team will follow up.
+          </p>
+          <div class="hero-meta" aria-label="Service highlights">
+            <div class="meta-box">
+              <strong>Pool</strong>
+              <span>Maintenance, openings, chemical checks, and repairs</span>
+            </div>
+            <div class="meta-box">
+              <strong>Property</strong>
+              <span>Repairs, debris removal, inspections, and urgent calls</span>
+            </div>
+            <div class="meta-box">
+              <strong>Grounds</strong>
+              <span>Lawn, garden, seasonal cleanup, and service visits</span>
+            </div>
+          </div>
+        </div>
+
+        <form class="contact-card" id="contact" novalidate>
+          <h3>Send a maintenance request</h3>
+          <p>This request goes directly into the property maintenance operations system.</p>
+
+          <div class="field-grid">
+            <label>
+              Your name
+              <input name="name" autocomplete="name" required maxlength="160">
+            </label>
+            <label>
+              Service needed
+              <select name="serviceRequested">
+                <option value="">Select service</option>
+                <option>Pool maintenance</option>
+                <option>Chemical check</option>
+                <option>Property repair</option>
+                <option>Grounds or landscaping</option>
+                <option>Debris removal</option>
+                <option>Other maintenance</option>
+              </select>
+            </label>
+            <label>
+              Email
+              <input name="email" type="email" autocomplete="email" maxlength="254">
+            </label>
+            <label>
+              Phone
+              <input name="phone" type="tel" autocomplete="tel" maxlength="40">
+            </label>
+            <label class="span-2">
+              Property address
+              <input name="propertyAddress" autocomplete="street-address" required maxlength="300">
+            </label>
+            <label class="span-2">
+              Request details
+              <textarea name="message" required maxlength="4000" placeholder="Tell us what needs attention, access notes, timing, or anything urgent."></textarea>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <div class="status" id="form-status" role="status" aria-live="polite"></div>
+            <button class="button primary" type="submit">Submit request</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="services" aria-labelledby="services-title">
+        <div class="section-head">
+          <div>
+            <h3 id="services-title">Maintenance services</h3>
+            <p>Built for owners, property managers, and residents who need fast, trackable service.</p>
+          </div>
+          <a class="button" href="mailto:service@platinumservices.ca">service@platinumservices.ca</a>
+        </div>
+
+        <div class="service-grid">
+          <article class="service-card">
+            <span>01</span>
+            <h4>Scheduled maintenance</h4>
+            <p>Recurring property, pool, lawn, and seasonal work handled through planned service visits.</p>
+          </article>
+          <article class="service-card">
+            <span>02</span>
+            <h4>Ad hoc service calls</h4>
+            <p>One-time requests for repairs, inspections, pickup, delivery, cleanup, and urgent maintenance.</p>
+          </article>
+          <article class="service-card">
+            <span>03</span>
+            <h4>Photo evidence</h4>
+            <p>Before, after, issue, and receipt evidence can be captured against service work.</p>
+          </article>
+          <article class="service-card">
+            <span>04</span>
+            <h4>Owner updates</h4>
+            <p>Work completion records, maintenance notes, and invoices can be sent after operations review.</p>
+          </article>
+        </div>
+      </section>
+
+      <aside class="notice" aria-label="Operations note">
+        <div>
+          <strong>Already working with Platinum?</strong>
+          <span>Use this form for maintenance requests while the full website is being prepared.</span>
+        </div>
+        <a class="button primary" href="#contact">Open contact form</a>
+      </aside>
+    </main>
+
+    <script>
+      const form = document.querySelector("#contact");
+      const status = document.querySelector("#form-status");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.className = "status";
+        status.textContent = "";
+
+        if (!form.reportValidity()) {
+          return;
+        }
+
+        const data = Object.fromEntries(new FormData(form).entries());
+        if (!String(data.email || "").trim() && !String(data.phone || "").trim()) {
+          status.className = "status error";
+          status.textContent = "Please add an email address or phone number.";
+          return;
+        }
+
+        const button = form.querySelector("button[type='submit']");
+        button.disabled = true;
+        button.textContent = "Sending...";
+
+        try {
+          const response = await fetch("/api/v1/public/maintenance-requests", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Request-Source": "platinum-public-site"
+            },
+            body: JSON.stringify({
+              tenantKey: "platinum-services",
+              sourceDomain: window.location.hostname,
+              sourceUrl: window.location.href,
+              name: data.name,
+              email: data.email,
+              phone: data.phone,
+              propertyAddress: data.propertyAddress,
+              serviceRequested: data.serviceRequested,
+              message: data.message
+            })
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.success === false) {
+            throw new Error(payload?.error?.message || "Request could not be submitted.");
+          }
+
+          form.reset();
+          status.className = "status success";
+          status.textContent = `Request received. Reference ${payload.data.requestCode}.`;
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = "We could not submit this online. Please call 416.622.5000 or email service@platinumservices.ca.";
+        } finally {
+          button.disabled = false;
+          button.textContent = "Submit request";
+        }
+      });
+    </script>
+  </body>
+</html>

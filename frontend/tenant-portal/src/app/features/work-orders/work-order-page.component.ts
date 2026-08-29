@@ -43,17 +43,19 @@ import {
   WorkOrderReviewTarget,
   WorkOrderStatusFilter
 } from './components/work-order-list.component';
+import { WORK_ORDER_BULK_STATUS_GROUPS } from './work-order-status-options';
 import { WorkOrderReviewComponent } from './components/work-order-review.component';
 import { WorkOrderFieldOverrideComponent, WorkOrderOverrideEvidenceUploadRequest } from './components/work-order-field-override.component';
 import { maintenanceRecordPrintHtml } from './work-order-maintenance-record';
 import { WorkOrderService } from './services/work-order.service';
 import { TenantSettingsService } from '../settings/services/tenant-settings.service';
 import { TenantAccessService } from '../../core/services/tenant-access.service';
+import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.component';
 
 @Component({
   selector: 'lorne-work-order-page',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, TagModule, WorkOrderFieldOverrideComponent, WorkOrderFormComponent, WorkOrderListComponent, WorkOrderReviewComponent],
+  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, TagModule, VoiceNoteButtonComponent, WorkOrderFieldOverrideComponent, WorkOrderFormComponent, WorkOrderListComponent, WorkOrderReviewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-3">
@@ -65,6 +67,7 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
             <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ workOrders().length }} records</span>
           </div>
           <div class="flex flex-wrap gap-2">
+            <button pButton type="button" severity="secondary" icon="pi pi-question-circle" label="Guide" (click)="showWorkOrderGuide.set(true)"></button>
             <button pButton type="button" severity="secondary" icon="pi pi-box" label="Pickup order" [disabled]="!canManageWorkOrders()" (click)="openCreate('PICKUP_DELIVERY')"></button>
             <button pButton type="button" icon="pi pi-plus" label="Add work order" [disabled]="!canManageWorkOrders()" (click)="openCreate()"></button>
           </div>
@@ -94,10 +97,89 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
       />
 
       <p-dialog
+        header="Work order creation guide"
+        [modal]="true"
+        [visible]="showWorkOrderGuide()"
+        [style]="{ width: 'min(58rem, 96vw)' }"
+        (visibleChange)="showWorkOrderGuide.set($event)"
+      >
+        <section class="grid gap-3 text-sm text-slate-700">
+          <div class="rounded-lg border border-teal-100 bg-teal-50 px-3 py-2.5">
+            <p class="font-black text-teal-900">Choose the right order type first.</p>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+              <p class="rounded border border-teal-100 bg-white px-3 py-2 font-semibold text-teal-800">
+                <span class="font-black">Add work order:</span> property service work such as pool, lawn, repair, inspection, cleaning, or maintenance.
+              </p>
+              <p class="rounded border border-teal-100 bg-white px-3 py-2 font-semibold text-teal-800">
+                <span class="font-black">Pickup order:</span> supplier, office, shop, delivery, or route-only work that supports another job.
+              </p>
+            </div>
+          </div>
+          <div class="grid gap-2 md:grid-cols-2">
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Context</p>
+              <p class="mt-1 font-semibold text-slate-600">Owner, property, service, and title are the core fields. The title is editable, but should stay short enough for dispatch and worker screens.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Schedule</p>
+              <p class="mt-1 font-semibold text-slate-600">Set date/time when known. Save as draft when dispatch still needs to assign the day, worker, or exact time.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Workers</p>
+              <p class="mt-1 font-semibold text-slate-600">Assign one or more workers and choose one lead. Availability helps dispatch, and override should be used only with a reason.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Routes and pickup stops</p>
+              <p class="mt-1 font-semibold text-slate-600">Use route stops when the worker must visit supplier, office, shop, or another location before or after the property.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Checklists</p>
+              <p class="mt-1 font-semibold text-slate-600">Pre-start checks appear before field execution. Completion checks must be done before the worker submits for review.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Resources</p>
+              <p class="mt-1 font-semibold text-slate-600">Add planned materials, inventory, tools, or equipment only when the worker needs to use or return them.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Recurring work</p>
+              <p class="mt-1 font-semibold text-slate-600">Use recurring templates for repeated service. Drafts can be generated ahead and then scheduled by operations.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Operations review</p>
+              <p class="mt-1 font-semibold text-slate-600">When workers submit, open Review to verify actual timing, checklist completion, maintenance record, materials, photos, receipts, notes, route stops, and tool return before approval.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Operations override</p>
+              <p class="mt-1 font-semibold text-slate-600">Use Override worker data to correct field timing, route stops, activity, checklist rows, materials, evidence, and notes. A reason is required, saved in audit, and highlighted in reports where applicable.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Owner completion email</p>
+              <p class="mt-1 font-semibold text-slate-600">Use Comms to send the completion notice after review. It uses the configured template, company branding, and maintenance record details. Automatic sending is controlled from tenant settings and defaults to manual.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Invoice generation</p>
+              <p class="mt-1 font-semibold text-slate-600">Generate invoices after the work is approved or ready to bill. Review service amounts, used materials, receipts, and custom lines before sending or downloading the PDF.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Invoice email</p>
+              <p class="mt-1 font-semibold text-slate-600">Send invoices manually from the invoice actions. Update recipient, CC, or BCC before sending when needed. The delivery log records success, failure, provider message, and resend history.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-3">
+              <p class="font-black text-slate-950">Email audit</p>
+              <p class="mt-1 font-semibold text-slate-600">Every owner notice, invoice email, resend, and test email is logged. Use Email Audit to confirm what was sent, who received it, and why delivery failed.</p>
+            </div>
+          </div>
+          <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-800">
+            Recommended flow: create draft -> schedule -> assign workers -> add required checks/resources -> worker executes -> operations reviews -> correct with override if needed -> notify owner -> generate/send invoice.
+          </p>
+        </section>
+      </p-dialog>
+
+      <p-dialog
         [header]="editingWorkOrder() ? 'Update work order' : 'Add work order'"
         [modal]="true"
         [visible]="showCreate()"
-        [style]="{ width: 'min(72rem, 96vw)', height: 'min(54rem, 94vh)' }"
+        [style]="{ width: 'min(78rem, 98vw)', height: 'min(58rem, 96vh)' }"
         [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'hidden' }"
         (visibleChange)="onDialogVisible($event)"
       >
@@ -157,10 +239,13 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
                   <span class="mb-1 block text-sm font-bold text-slate-700">Status</span>
                   <select class="w-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700" name="bulkStatus" [(ngModel)]="bulkStatus">
                     <option value="">Keep current</option>
-                    <option value="TO_DO">To do</option>
-                    <option value="SCHEDULED">Scheduled</option>
-                    <option value="ASSIGNED">Assigned</option>
-                    <option value="ON_HOLD">On hold</option>
+                    @for (group of bulkStatusGroups; track group.label) {
+                      <optgroup [label]="group.label">
+                        @for (status of group.options; track status.value) {
+                          <option [value]="status.value">{{ status.label }}</option>
+                        }
+                      </optgroup>
+                    }
                   </select>
                 </label>
                 <label class="block">
@@ -187,6 +272,9 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
                   <span class="mb-1 block text-sm font-bold text-slate-700">Override reason <span class="text-red-600">*</span></span>
                   <textarea class="w-full border border-amber-300 px-3 py-2 text-sm font-semibold" name="bulkOverrideReason" rows="3" [(ngModel)]="bulkOverrideReason"></textarea>
                 </label>
+                <div class="flex flex-wrap items-center gap-2">
+                  <lorne-voice-note-button [text]="bulkOverrideReason" label="Speak override reason" [showUnsupported]="true" (textChange)="bulkOverrideReason = $event" />
+                </div>
               }
 
               <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -298,6 +386,9 @@ import { TenantAccessService } from '../../core/services/tenant-access.service';
               <span class="mb-1 block text-sm font-semibold text-slate-700">Cancellation reason</span>
               <textarea class="w-full border border-slate-300 px-3 py-2" name="cancelReason" rows="4" required [(ngModel)]="cancelReason"></textarea>
             </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button [text]="cancelReason" label="Speak cancellation reason" [showUnsupported]="true" (textChange)="cancelReason = $event" />
+            </div>
             @if (cancelError()) {
               <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ cancelError() }}</p>
             }
@@ -339,6 +430,7 @@ export class WorkOrderPageComponent {
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly saving = signal(false);
   protected readonly error = signal('');
+  protected readonly showWorkOrderGuide = signal(false);
   protected readonly showCreate = signal(false);
   protected readonly editingWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly editingStep = signal(0);
@@ -347,6 +439,7 @@ export class WorkOrderPageComponent {
   protected readonly showReview = signal(false);
   protected readonly reviewingWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly review = signal<WorkOrderReview | null>(null);
+  protected readonly bulkStatusGroups = WORK_ORDER_BULK_STATUS_GROUPS;
   protected readonly reviewTarget = signal<WorkOrderReviewTarget>('SUMMARY');
   protected readonly overrideTarget = signal<'WORKERS' | 'ACTIVITY' | 'ROUTES' | 'CHECKLIST' | 'MATERIALS' | 'EVIDENCE' | 'NOTES'>('WORKERS');
   protected readonly reviewLoading = signal(false);

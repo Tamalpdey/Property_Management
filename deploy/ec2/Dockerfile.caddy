@@ -2,3 +2,4 @@ ARG CADDYFILE=Caddyfile
 FROM caddy:2
 ARG CADDYFILE
 COPY ${CADDYFILE} /etc/caddy/Caddyfile
+COPY platinum-site /srv/platinum-site

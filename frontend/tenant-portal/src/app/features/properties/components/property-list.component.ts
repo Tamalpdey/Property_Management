@@ -18,7 +18,7 @@ import { PropertyServicePickerComponent } from './property-service-picker.compon
   template: `
     <div class="space-y-2">
       <lorne-dense-collection-toolbar
-        placeholder="Search properties by name, owner, address, city, service..."
+        placeholder="Search properties by ID, owner ID, name, owner, address, city, service..."
         [query]="collection.query()"
         [totalCount]="properties().length"
         [filteredCount]="collection.filtered().length"
@@ -50,10 +50,16 @@ import { PropertyServicePickerComponent } from './property-service-picker.compon
                   <input type="checkbox" class="h-4 w-4" [checked]="collection.isSelected(property)" (change)="collection.toggle(property)" />
                 </td>
                 <td class="px-3 py-3">
-                  <p class="font-bold text-slate-950">{{ property.name }}</p>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="font-bold text-slate-950">{{ property.name }}</p>
+                    <span class="rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[0.68rem] font-black text-teal-700">{{ property.propertyCode }}</span>
+                  </div>
                   <p class="text-xs text-slate-500">{{ property.serviceNotes || 'No service notes' }}</p>
                 </td>
-                <td class="px-3 py-3 font-semibold text-teal-700">{{ property.ownerName }}</td>
+                <td class="px-3 py-3">
+                  <p class="font-semibold text-teal-700">{{ property.ownerName }}</p>
+                  <p class="mt-0.5 font-mono text-[0.68rem] font-black text-slate-500">{{ property.ownerCode }}</p>
+                </td>
                 <td class="px-3 py-3 text-slate-600">
                   <p>{{ property.addressLine1 }}</p>
                   <p class="text-xs text-slate-500">{{ property.city }}, {{ property.provinceCode }} {{ property.postalCode }}</p>
@@ -115,7 +121,7 @@ import { PropertyServicePickerComponent } from './property-service-picker.compon
           <div class="space-y-4">
             <div>
               <h3 class="text-lg font-bold text-slate-950">{{ property.name }}</h3>
-              <p class="mt-1 text-sm text-slate-600">{{ property.ownerName }} · {{ property.addressLine1 }}, {{ property.city }}</p>
+              <p class="mt-1 text-sm text-slate-600">{{ property.propertyCode }} · {{ property.ownerName }} · {{ property.ownerCode }} · {{ property.addressLine1 }}, {{ property.city }}</p>
             </div>
             <lorne-property-service-picker
               [property]="property"
@@ -144,7 +150,9 @@ export class PropertyListComponent {
     (property) => property.id,
     (property) => [
       property.name,
+      property.propertyCode,
       property.ownerName,
+      property.ownerCode,
       property.addressLine1,
       property.city,
       property.provinceCode,

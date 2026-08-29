@@ -20,6 +20,7 @@ import type {
   WorkOrderMaintenanceRecord,
   SendWorkOrderOwnerEmailRequest
 } from '@lorne/contracts';
+import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
 
 export type WorkOrderReviewTab = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOURCES' | 'INVOICE' | 'COMMUNICATION' | 'TIME' | 'AUDIT';
 type AuditGroupTab = 'WORKER' | 'ADMIN';
@@ -38,7 +39,7 @@ interface WorkOrderWorkerSummary {
 @Component({
   selector: 'lorne-work-order-review',
   standalone: true,
-  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, NgTemplateOutlet, TagModule],
+  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, NgTemplateOutlet, TagModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host .lorne-review-tab-active {
@@ -64,6 +65,8 @@ interface WorkOrderWorkerSummary {
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <p class="text-xs font-black uppercase tracking-wide text-teal-200">{{ data.workOrder.workOrderNumber }}</p>
+                <span class="rounded-full bg-teal-50 px-2 py-0.5 font-mono text-[0.68rem] font-black uppercase tracking-wide text-teal-700">{{ data.workOrder.propertyCode }}</span>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[0.68rem] font-black uppercase tracking-wide text-slate-700">{{ data.workOrder.ownerCode }}</span>
                 <span [class]="workOrderTypeClass(data.workOrder.workOrderType)">{{ workOrderTypeLabel(data.workOrder.workOrderType) }}</span>
               </div>
               <h2 class="mt-1 text-2xl font-black leading-tight">{{ data.workOrder.propertyName }}</h2>
@@ -630,6 +633,10 @@ interface WorkOrderWorkerSummary {
                 </div>
               </div>
 
+              <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
+                Review the Maintenance records on Summary before sending. Use Override worker data for corrections; completion email includes workers on site, reached-site time, worker completion time, service details, deliveries, and client note.
+              </div>
+
               <div class="mt-3 grid gap-2">
                 @for (communication of data.communications; track communication.id) {
                   <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -824,6 +831,9 @@ interface WorkOrderWorkerSummary {
               <span class="mb-1 block text-sm font-black text-amber-900">Review note</span>
               <textarea class="w-full border border-amber-200 px-3 py-2 text-sm" rows="2" name="reviewNote" [(ngModel)]="reviewNote"></textarea>
             </label>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button [text]="reviewNote" label="Speak review note" (textChange)="reviewNote = $event" />
+            </div>
             <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button pButton type="button" severity="secondary" icon="pi pi-replay" label="Send back" [loading]="busy()" (click)="sendBack()"></button>
               <button pButton type="button" icon="pi pi-check-circle" label="Approve work" [loading]="busy()" (click)="approve()"></button>
@@ -843,6 +853,9 @@ interface WorkOrderWorkerSummary {
                 [(ngModel)]="reviewNote"
               ></textarea>
             </label>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button [text]="reviewNote" label="Speak reason" (textChange)="reviewNote = $event" />
+            </div>
             <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p class="text-xs font-bold leading-5 text-red-800">This releases unfinished worker assignments and moves the work order to pending completion for review.</p>
               <button
@@ -877,8 +890,10 @@ interface WorkOrderWorkerSummary {
             <section>
               <h2>Property</h2>
               <p><strong>{{ data.workOrder.propertyName }}</strong></p>
+              <p>Property ID: {{ data.workOrder.propertyCode }}</p>
               <p>{{ data.workOrder.propertyAddress }}</p>
               <p>Owner: {{ data.workOrder.ownerName }}</p>
+              <p>Owner ID: {{ data.workOrder.ownerCode }}</p>
               <p>Service: {{ data.workOrder.serviceName || 'General service' }}</p>
             </section>
             <section>
@@ -1027,6 +1042,9 @@ interface WorkOrderWorkerSummary {
           <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Review note</span>
           <textarea class="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" name="ownerEmailNote" placeholder="Optional note included in the owner completion email" [(ngModel)]="notifyForm.note"></textarea>
         </label>
+        <div class="flex flex-wrap items-center gap-2">
+          <lorne-voice-note-button [text]="notifyForm.note || ''" label="Speak email note" (textChange)="notifyForm.note = $event" />
+        </div>
         <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">This send is audited. If this work order already has a completion notice, it will be recorded as a resend.</p>
         <div class="flex justify-end gap-2 border-t border-slate-200 pt-3">
           <button pButton type="button" severity="secondary" label="Cancel" (click)="closeOwnerEmail()"></button>

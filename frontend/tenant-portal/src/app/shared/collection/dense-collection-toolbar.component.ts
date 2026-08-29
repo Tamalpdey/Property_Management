@@ -36,7 +36,9 @@ export interface DenseToolbarSortOption {
         <div class="flex flex-wrap items-center justify-between gap-1.5 xl:justify-end">
           <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{{ filteredCount() }} / {{ totalCount() }}</span>
           <button pButton type="button" size="small" severity="secondary" icon="pi pi-check-square" [label]="selectedCount() + ' selected'" [disabled]="selectedCount() === 0"></button>
-          <button pButton type="button" size="small" severity="secondary" icon="pi pi-download" label="Export" [disabled]="selectedCount() === 0" (click)="bulkExport.emit()"></button>
+          @if (showExport()) {
+            <button pButton type="button" size="small" severity="secondary" icon="pi pi-download" label="Export" [disabled]="selectedCount() === 0" (click)="bulkExport.emit()"></button>
+          }
           <button pButton type="button" size="small" severity="secondary" icon="pi pi-times" [disabled]="selectedCount() === 0" (click)="clearSelection.emit()"></button>
         </div>
       </div>
@@ -51,6 +53,7 @@ export class DenseCollectionToolbarComponent {
   readonly selectedCount = input(0);
   readonly sortKey = input('');
   readonly sortOptions = input.required<DenseToolbarSortOption[]>();
+  readonly showExport = input(true);
 
   readonly queryChange = output<string>();
   readonly sortKeyChange = output<string>();

@@ -1,10 +1,12 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, interval, map, of, startWith, switchMap } from 'rxjs';
 import type { CurrentUser, TenantSettingsRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
+import { CommunicationService } from '../features/messages/services/communication.service';
 import { TenantSettingsService } from '../features/settings/services/tenant-settings.service';
 
 @Component({
@@ -32,6 +34,13 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
               <div class="lg:hidden">
                 <button pButton type="button" severity="secondary" text rounded icon="pi pi-bars" (click)="mobileMenuOpen.set(true)"></button>
               </div>
+              <span class="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-slate-200 bg-teal-50 text-xs font-black text-teal-800">
+                @if (userPhotoUrl()) {
+                  <img class="h-full w-full object-cover" [src]="userPhotoUrl()" [alt]="userDisplayName() + ' photo'" />
+                } @else {
+                  {{ userInitials() }}
+                }
+              </span>
               <div class="min-w-0">
                 <p class="truncate text-[0.95rem] font-bold text-slate-950">{{ userDisplayName() }} logged in as {{ userRoleLabel() }}</p>
                 <p class="truncate text-xs font-semibold text-slate-500">Operations workspace</p>
@@ -78,13 +87,21 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
                 @for (item of section.items; track item.path) {
                   <a
                     [routerLink]="item.path"
-                    routerLinkActive="border-teal-200 bg-teal-50 text-teal-800"
+                    routerLinkActive="border-teal-500 bg-teal-600 text-white shadow-sm shadow-teal-200"
                     [routerLinkActiveOptions]="{ exact: true }"
                     class="flex items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-[0.92rem] font-semibold text-slate-600 no-underline transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950"
                     (click)="mobileMenuOpen.set(false)"
                   >
                     <i [class]="item.icon + ' w-4 shrink-0 text-center'"></i>
                     <span class="truncate">{{ item.label }}</span>
+                    @if (item.path === '/messages' && unreadMessageCount() > 0) {
+                      <span
+                        class="ml-auto grid min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[0.65rem] font-black leading-none text-white shadow-sm shadow-rose-200"
+                        [attr.aria-label]="unreadMessageCount() + ' unread messages'"
+                      >
+                        {{ unreadMessageLabel() }}
+                      </span>
+                    }
                   </a>
                 }
               </div>
@@ -104,9 +121,15 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
 })
 export class TenantShellComponent {
   private readonly auth = inject(AuthService);
+  private readonly communicationService = inject(CommunicationService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
   protected readonly mobileMenuOpen = signal(false);
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
+  protected readonly unreadMessageCount = signal(0);
+  protected readonly unreadMessageLabel = computed(() => {
+    const count = this.unreadMessageCount();
+    return count > 99 ? '99+' : String(count);
+  });
   protected readonly brandName = computed(() => {
     const settings = this.tenantSettings();
     return this.firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'PropertyOps');
@@ -114,6 +137,8 @@ export class TenantShellComponent {
   protected readonly brandLogoUrl = computed(() => this.tenantSettings()?.logoUrl || '');
   protected readonly brandInitials = computed(() => this.initials(this.brandName()));
   protected readonly userDisplayName = computed(() => this.displayName(this.auth.currentUser()));
+  protected readonly userPhotoUrl = computed(() => this.auth.currentUser()?.profilePhotoUrl || '');
+  protected readonly userInitials = computed(() => this.initials(this.userDisplayName()));
   protected readonly userRoleLabel = computed(() => {
     const user = this.auth.currentUser();
     if (!user) {
@@ -164,6 +189,7 @@ export class TenantShellComponent {
       items: [
         { label: 'Work orders', path: '/work-orders', icon: 'pi pi-calendar-plus' },
         { label: 'Schedule', path: '/schedule', icon: 'pi pi-calendar-clock' },
+        { label: 'Messages', path: '/messages', icon: 'pi pi-comments' },
         { label: 'Inventory', path: '/inventory', icon: 'pi pi-box' },
         { label: 'Work audit', path: '/work-audit', icon: 'pi pi-history' }
       ]
@@ -196,6 +222,7 @@ export class TenantShellComponent {
 
   constructor() {
     void this.loadTenantSettings();
+    this.startUnreadMessagePolling();
   }
 
   private async loadTenantSettings(): Promise<void> {
@@ -204,6 +231,17 @@ export class TenantShellComponent {
     } catch {
       this.tenantSettings.set(null);
     }
+  }
+
+  private startUnreadMessagePolling(): void {
+    interval(12000).pipe(
+      startWith(0),
+      switchMap(() => this.communicationService.list().pipe(
+        map((conversations) => conversations.reduce((total, conversation) => total + (conversation.unreadCount || 0), 0)),
+        catchError(() => of(0))
+      )),
+      takeUntilDestroyed()
+    ).subscribe((count) => this.unreadMessageCount.set(count));
   }
 
   private canAccess(item: TenantNavItem): boolean {

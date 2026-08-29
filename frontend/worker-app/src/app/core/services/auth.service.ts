@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import type { CurrentUser, ApiResponse, LoginRequest, LoginResponse } from '@lorne/contracts';
-import { firstValueFrom } from 'rxjs';
+import type { CurrentUser, ApiResponse, LoginRequest, LoginResponse, PhotoUploadRequest, PresignedPhotoUpload } from '@lorne/contracts';
+import { firstValueFrom, map } from 'rxjs';
 import { authSessionExpiresAt, isAuthSessionExpired, resolveAuthSessionExpiry } from '../../../../../packages/lorne-contracts/src/lib/auth-session';
 import { environment } from '../../../environments/environment';
 
@@ -43,6 +43,31 @@ export class AuthService {
   clearSession(): void {
     this.removeStoredSession();
     this.currentUserSignal.set(null);
+  }
+
+  profilePhotoUploadUrl(request: PhotoUploadRequest) {
+    return this.http
+      .post<ApiResponse<PresignedPhotoUpload>>(`${environment.apiBaseUrl}/auth/me/profile-photo/upload-url`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  uploadProfilePhoto(upload: PresignedPhotoUpload, file: File) {
+    return this.http.put(upload.uploadUrl, file, {
+      headers: upload.headers,
+      responseType: 'text'
+    });
+  }
+
+  profilePhotoUrl(documentId: string): string {
+    return `${environment.apiBaseUrl}/auth/profile-photo/${documentId}`;
+  }
+
+  async updateProfilePhoto(profilePhotoUrl: string): Promise<CurrentUser> {
+    const response = await firstValueFrom(
+      this.http.put<ApiResponse<CurrentUser>>(`${environment.apiBaseUrl}/auth/me/profile-photo`, { profilePhotoUrl })
+    );
+    this.persistUser(response.data);
+    return response.data;
   }
 
   private removeStoredSession(): void {
@@ -91,6 +116,12 @@ export class AuthService {
     localStorage.setItem(EXPIRES_AT_KEY, authSessionExpiresAt(session.expiresInSeconds));
     localStorage.setItem(REFRESH_EXPIRES_AT_KEY, authSessionExpiresAt(session.refreshExpiresInSeconds));
     this.currentUserSignal.set(session.user);
+  }
+
+  private persistUser(user: CurrentUser): void {
+    localStorage.setItem(TENANT_ID_KEY, user.tenantId ?? '');
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    this.currentUserSignal.set(user);
   }
 
   private readUser(): CurrentUser | null {

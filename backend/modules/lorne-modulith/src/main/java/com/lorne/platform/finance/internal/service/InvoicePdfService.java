@@ -215,8 +215,10 @@ public class InvoicePdfService {
             });
             column(middleX, y, middleWidth, "Invoice to", new String[] {
                     value(invoice.ownerName()),
+                    label("Owner ID", invoice.ownerCode()),
                     firstNonBlank(invoice.ownerBillingEmail(), invoice.ownerEmail()),
                     value(invoice.propertyName()),
+                    label("Property ID", invoice.propertyCode()),
                     value(invoice.propertyAddress())
             });
             meta(rightX, y, rightWidth, "Invoice number", invoice.invoiceNumber());
@@ -232,7 +234,13 @@ public class InvoicePdfService {
             textAt(workSummary(invoice), BOLD, 9.5f, MARGIN, y - 16);
             fill(0.35f, 0.42f, 0.52f);
             textAt(propertySummary(invoice), FONT, 8.5f, MARGIN, y - 30);
-            y -= 52;
+            var codeSummary = codeSummary(invoice);
+            if (!codeSummary.isBlank()) {
+                textAt(codeSummary, FONT, 8.5f, MARGIN, y - 43);
+                y -= 64;
+            } else {
+                y -= 52;
+            }
         }
 
         private void lineItems(InvoiceDto invoice) throws IOException {
@@ -645,6 +653,14 @@ public class InvoicePdfService {
             return propertyNames.getFirst();
         }
         return "%d properties included".formatted(propertyNames.size());
+    }
+
+    private static String codeSummary(InvoiceDto invoice) {
+        return join(" | ", label("Owner ID", invoice.ownerCode()), label("Property ID", invoice.propertyCode()));
+    }
+
+    private static String label(String label, String value) {
+        return value == null || value.isBlank() ? "" : label + ": " + value.trim();
     }
 
     private static String join(String delimiter, String... values) {

@@ -57,6 +57,11 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/schedule/dispatch-schedule-page.component').then((m) => m.DispatchSchedulePageComponent)
       },
       {
+        path: 'messages',
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
+        loadComponent: () => import('./features/messages/messages-page.component').then((m) => m.MessagesPageComponent)
+      },
+      {
         path: 'work-audit',
         canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/audit/work-audit-page.component').then((m) => m.WorkAuditPageComponent)

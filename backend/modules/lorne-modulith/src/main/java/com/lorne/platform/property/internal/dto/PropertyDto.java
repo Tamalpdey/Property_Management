@@ -5,7 +5,9 @@ import java.util.UUID;
 
 public record PropertyDto(
         UUID id,
+        String propertyCode,
         UUID ownerId,
+        String ownerCode,
         String ownerName,
         String name,
         String addressLine1,

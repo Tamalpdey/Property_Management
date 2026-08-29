@@ -1,10 +1,12 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CreateTenantUserRequest, TenantAssignableRole, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest, WorkerRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { PasswordModule } from 'primeng/password';
+import { firstValueFrom } from 'rxjs';
+import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
   selector: 'lorne-tenant-user-dialog',
@@ -28,6 +30,33 @@ import { PasswordModule } from 'primeng/password';
             <p class="text-xs font-semibold text-slate-600">{{ linkedWorker.employeeNumber || 'No employee number' }}</p>
           </div>
         }
+
+        <div class="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white text-lg font-black text-teal-700">
+            @if (form.profilePhotoUrl) {
+              <img class="h-full w-full object-cover" [src]="form.profilePhotoUrl" alt="User profile photo" />
+            } @else {
+              {{ avatarInitials }}
+            }
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-slate-950">User photo</p>
+            <p class="text-xs font-semibold text-slate-500">Shown in app headers, worker lists, and user profile views.</p>
+          </div>
+          <input #profilePhotoInput class="hidden" type="file" accept="image/*" (change)="selectProfilePhoto($event)" />
+          <button
+            pButton
+            type="button"
+            severity="secondary"
+            icon="pi pi-upload"
+            [loading]="uploadingPhoto()"
+            label="Upload"
+            (click)="profilePhotoInput.click()"
+          ></button>
+          @if (form.profilePhotoUrl) {
+            <button pButton type="button" severity="secondary" icon="pi pi-times" label="Remove" (click)="clearProfilePhoto()"></button>
+          }
+        </div>
 
         <div class="grid gap-3 md:grid-cols-2">
           <label class="block">
@@ -150,8 +179,46 @@ export class TenantUserDialogComponent implements OnChanges {
       phone: this.form.phone?.trim() || undefined,
       temporaryPassword: this.form.temporaryPassword.trim() || undefined,
       roles: [...this.selectedRoles],
+      profilePhotoUrl: this.form.profilePhotoUrl || undefined,
       workerId: this.selectedRoles.has('FIELD_WORKER') && this.form.workerId ? this.form.workerId : undefined
     } as CreateTenantUserRequest | UpdateTenantUserRequest);
+  }
+
+  protected async selectProfilePhoto(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || this.uploadingPhoto()) {
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      this.formError = 'Choose an image file for the user photo.';
+      return;
+    }
+    if (file.size <= 0 || file.size > 10 * 1024 * 1024) {
+      this.formError = 'User photo must be between 1 byte and 10 MB.';
+      return;
+    }
+
+    this.uploadingPhoto.set(true);
+    this.formError = '';
+    try {
+      const upload = await firstValueFrom(this.auth.profilePhotoUploadUrl({
+        fileName: file.name,
+        contentType: file.type,
+        byteSize: file.size
+      }));
+      await firstValueFrom(this.auth.uploadProfilePhoto(upload, file));
+      this.form.profilePhotoUrl = this.auth.profilePhotoUrl(upload.documentId);
+    } catch {
+      this.formError = 'Unable to upload user photo. Check the image file and try again.';
+    } finally {
+      this.uploadingPhoto.set(false);
+    }
+  }
+
+  protected clearProfilePhoto(): void {
+    this.form.profilePhotoUrl = undefined;
   }
 
   protected toggleRole(role: TenantAssignableRole, event: Event): void {
@@ -169,6 +236,16 @@ export class TenantUserDialogComponent implements OnChanges {
     }
   }
 
+  protected get avatarInitials(): string {
+    const source = this.form.displayName || this.form.email || 'U';
+    return source
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'U';
+  }
+
   protected roleDescription(role: TenantAssignableRole): string {
     switch (role) {
       case 'TENANT_ADMIN':
@@ -184,6 +261,9 @@ export class TenantUserDialogComponent implements OnChanges {
     }
   }
 
+  private readonly auth = inject(AuthService);
+  protected readonly uploadingPhoto = signal(false);
+
   private reset(): void {
     this.form = this.blankForm();
     this.selectedRoles.clear();
@@ -191,6 +271,7 @@ export class TenantUserDialogComponent implements OnChanges {
       this.editingUser.roles.forEach((role) => this.selectedRoles.add(role));
       this.form = {
         displayName: this.editingUser.displayName,
+        profilePhotoUrl: this.editingUser.profilePhotoUrl || undefined,
         email: this.editingUser.email,
         phone: this.editingUser.phone || '',
         temporaryPassword: '',
@@ -213,6 +294,7 @@ export class TenantUserDialogComponent implements OnChanges {
   private blankForm(): CreateTenantUserRequest {
     return {
       displayName: '',
+      profilePhotoUrl: undefined,
       email: '',
       phone: '',
       temporaryPassword: '',

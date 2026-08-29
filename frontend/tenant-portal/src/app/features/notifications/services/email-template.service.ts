@@ -26,9 +26,21 @@ export class EmailTemplateService {
       .pipe(map((response) => response.data));
   }
 
+  resetInvoiceOwner() {
+    return this.http
+      .post<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/invoice-owner/reset`, {})
+      .pipe(map((response) => response.data));
+  }
+
   updateWorkOrderCompletedOwner(request: UpdateEmailTemplateRequest) {
     return this.http
       .put<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/work-order-completed-owner`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  resetWorkOrderCompletedOwner() {
+    return this.http
+      .post<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/work-order-completed-owner/reset`, {})
       .pipe(map((response) => response.data));
   }
 }

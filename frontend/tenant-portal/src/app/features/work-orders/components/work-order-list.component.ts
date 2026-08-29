@@ -9,6 +9,7 @@ import { TagModule } from 'primeng/tag';
 import { DenseCollectionFooterComponent } from '../../../shared/collection/dense-collection-footer.component';
 import { DenseCollectionToolbarComponent } from '../../../shared/collection/dense-collection-toolbar.component';
 import { DenseCollectionState } from '../../../shared/collection/dense-collection-state';
+import { WORK_ORDER_STATUS_GROUPS, workOrderStatusLabel } from '../work-order-status-options';
 
 export type WorkOrderFormResourceTab = 'INVENTORY' | 'TOOLS';
 
@@ -48,7 +49,7 @@ export interface WorkOrderListFilterChange {
   template: `
     <div class="space-y-2">
       <lorne-dense-collection-toolbar
-        placeholder="Search by work order #, property, owner, service, worker, status..."
+        placeholder="Search by work order #, property ID, owner ID, property, owner, service, worker, status..."
         [query]="collection.query()"
         [totalCount]="workOrders().length"
         [filteredCount]="collection.filtered().length"
@@ -72,8 +73,12 @@ export interface WorkOrderListFilterChange {
             <option value="OPEN">Open work</option>
             <option value="REVIEW">Pending review</option>
             <option value="BILLING">Billing ready</option>
-            @for (status of statusOptions; track status) {
-              <option [value]="status">{{ statusLabel(status) }}</option>
+            @for (group of statusGroups; track group.label) {
+              <optgroup [label]="group.label">
+                @for (status of group.options; track status.value) {
+                  <option [value]="status.value">{{ status.label }}</option>
+                }
+              </optgroup>
             }
           </select>
 
@@ -143,7 +148,11 @@ export interface WorkOrderListFilterChange {
                   <td class="px-3 py-3 text-slate-600">{{ sourceLabel(workOrder.source) }}</td>
                   <td class="px-3 py-3">
                     <p class="font-semibold text-teal-700">{{ workOrder.propertyName }}</p>
-                    <p class="text-xs text-slate-500">{{ workOrder.ownerName }}</p>
+                    <div class="mt-1 flex flex-wrap gap-1">
+                      <span class="rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[0.68rem] font-black text-teal-700">{{ workOrder.propertyCode }}</span>
+                      <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.68rem] font-black text-slate-600">{{ workOrder.ownerCode }}</span>
+                    </div>
+                    <p class="mt-1 text-xs text-slate-500">{{ workOrder.ownerName }}</p>
                   </td>
                   <td class="px-3 py-3 text-slate-600">{{ workOrder.serviceName || 'General service' }}</td>
                   <td class="px-3 py-3 text-slate-600">
@@ -223,25 +232,7 @@ export class WorkOrderListComponent {
   readonly filtersChanged = output<WorkOrderListFilterChange>();
   protected readonly selectedWorkOrder = signal<WorkOrderRecord | null>(null);
   protected readonly workOrderMenuItems = signal<MenuItem[]>([]);
-  protected readonly statusOptions: WorkOrderStatus[] = [
-    'DRAFT',
-    'TO_DO',
-    'PENDING',
-    'SCHEDULED',
-    'ASSIGNED',
-    'TRAVELING',
-    'ON_SITE',
-    'IN_PROGRESS',
-    'PAUSED',
-    'ON_HOLD',
-    'PENDING_COMPLETION',
-    'COMPLETED',
-    'APPROVED',
-    'CUSTOMER_NOTIFIED',
-    'INVOICED',
-    'PAID',
-    'CANCELLED'
-  ];
+  protected readonly statusGroups = WORK_ORDER_STATUS_GROUPS;
   protected readonly collection = new DenseCollectionState<WorkOrderRecord>(
     this.workOrders,
     (workOrder) => workOrder.id,
@@ -250,7 +241,9 @@ export class WorkOrderListComponent {
       workOrder.workOrderNumber,
       workOrder.description,
       workOrder.ownerName,
+      workOrder.ownerCode,
       workOrder.propertyName,
+      workOrder.propertyCode,
       workOrder.propertyAddress,
       workOrder.serviceName,
       workOrder.status,
@@ -271,7 +264,7 @@ export class WorkOrderListComponent {
   );
 
   protected statusLabel(status: string): string {
-    return status.toLowerCase().replaceAll('_', ' ');
+    return workOrderStatusLabel(status);
   }
 
   protected workOrderTypeLabel(type: WorkOrderType | undefined): string {

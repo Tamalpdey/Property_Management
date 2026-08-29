@@ -16,6 +16,7 @@ import {
   DayTicketOptions,
   dayTicketRowTypeLabel,
   dayTicketRows,
+  dayTicketShiftSummary,
   dayTicketTotalMinutes,
   minutesLabel,
   printHtmlDocument,
@@ -108,6 +109,48 @@ const CURRENT_WORKER_ID = 'current-worker';
         </div>
       </section>
 
+      @if (options.includeTotals && shiftSummary(); as shift) {
+        <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-xs font-black uppercase tracking-wide text-teal-700">Shift clock</p>
+              <h2 class="text-lg font-black text-slate-950">Clock-in, clock-out, and sessions</h2>
+            </div>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ shift.entries.length }} session{{ shift.entries.length === 1 ? '' : 's' }}</span>
+          </div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-4">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <span class="block text-[0.65rem] font-black uppercase tracking-wide text-slate-500">Clock-in</span>
+              <strong class="text-sm text-slate-950">{{ timeOnly(shift.clockIn) }}</strong>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <span class="block text-[0.65rem] font-black uppercase tracking-wide text-slate-500">Clock-out</span>
+              <strong class="text-sm text-slate-950">{{ timeOnly(shift.clockOut) }}</strong>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <span class="block text-[0.65rem] font-black uppercase tracking-wide text-slate-500">Pause</span>
+              <strong class="text-sm text-slate-950">{{ minutesLabel(shift.pauseMinutes || 0) }}</strong>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <span class="block text-[0.65rem] font-black uppercase tracking-wide text-slate-500">Total</span>
+              <strong class="text-sm text-slate-950">{{ minutesLabel(totalMinutes()) }}</strong>
+            </div>
+          </div>
+          @if (shift.entries.length > 1) {
+            <div class="mt-3 grid gap-2">
+              @for (entry of shift.entries; track entry.id) {
+                <div class="grid gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 sm:grid-cols-[6rem_1fr_1fr_6rem] sm:items-center">
+                  <span class="text-xs font-black uppercase tracking-wide text-slate-500">Session {{ $index + 1 }}</span>
+                  <span>Clock-in: {{ entry.startedAt | date:'MMM d, h:mm a' }}</span>
+                  <span>Clock-out: {{ entry.endedAt ? (entry.endedAt | date:'MMM d, h:mm a') : 'Active' }}</span>
+                  <strong class="text-slate-950">{{ minutesLabel((entry.durationMinutes || 0) - (entry.pauseMinutes || 0)) }}</strong>
+                </div>
+              }
+            </div>
+          }
+        </section>
+      }
+
       <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex items-center justify-between gap-2">
           <div>
@@ -168,6 +211,7 @@ export class WorkerDayTicketComponent {
   protected readonly loadoutWorkerName = signal('Worker');
   protected readonly loadoutWorkerId = signal(CURRENT_WORKER_ID);
   protected readonly loadoutActivities = signal<WorkerActivityRecord[]>([]);
+  protected readonly clockEntries = signal<WorkerClockEntryRecord[]>([]);
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
   protected selectedDate = dateInputValue(new Date());
   protected options: DayTicketOptions = {
@@ -199,13 +243,21 @@ export class WorkerDayTicketComponent {
 
   protected rows() {
     return [
-      ...dayTicketRows({ workOrders: this.jobs().map((job) => this.toWorkOrderRecord(job)) } as never, CURRENT_WORKER_ID, this.selectedDate, this.selectedDate, this.options),
+      ...dayTicketRows({ workOrders: this.jobs().map((job) => this.toWorkOrderRecord(job)) } as never, this.loadoutWorkerId(), this.selectedDate, this.selectedDate, this.options),
       ...this.activityRows()
     ].sort((left, right) => new Date(left.timeIn || '').getTime() - new Date(right.timeIn || '').getTime());
   }
 
   protected totalMinutes(): number {
-    return dayTicketTotalMinutes(this.rows(), this.currentShiftSummary());
+    return dayTicketTotalMinutes(this.rows(), this.shiftSummary());
+  }
+
+  protected shiftSummary() {
+    const entries = this.clockEntries();
+    if (entries.length) {
+      return dayTicketShiftSummary(entries);
+    }
+    return this.currentShiftSummary();
   }
 
   protected async load(): Promise<void> {
@@ -215,15 +267,17 @@ export class WorkerDayTicketComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [jobs, loadout, settings] = await Promise.all([
+      const [jobs, loadout, settings, clockEntries] = await Promise.all([
         firstValueFrom(this.workerJobService.jobs(this.selectedDate, this.selectedDate)),
         firstValueFrom(this.workerJobService.loadout(this.selectedDate)),
-        firstValueFrom(this.workerJobService.settings())
+        firstValueFrom(this.workerJobService.settings()),
+        firstValueFrom(this.workerJobService.clockEntries(this.selectedDate, this.selectedDate))
       ]);
       this.jobs.set(jobs);
       this.settings.set(settings);
       this.loadoutWorkerId.set(loadout.workerId || CURRENT_WORKER_ID);
       this.loadoutWorkerName.set(loadout.workerName || 'Worker');
+      this.clockEntries.set(clockEntries);
       this.loadoutActivities.set((loadout.activities ?? []).map((activity) => ({
         ...activity,
         workerId: loadout.workerId || CURRENT_WORKER_ID
@@ -243,7 +297,7 @@ export class WorkerDayTicketComponent {
       generatedAt: new Date(),
       rows: this.rows(),
       options: this.options,
-      shiftSummary: this.currentShiftSummary(),
+      shiftSummary: this.shiftSummary(),
       settings: this.settings()
     }));
   }
@@ -267,8 +321,10 @@ export class WorkerDayTicketComponent {
       workOrderNumber: job.workOrderNumber,
       workOrderType: job.workOrderType,
       ownerId: '',
+      ownerCode: job.ownerCode || '',
       ownerName: job.ownerName,
       propertyId: '',
+      propertyCode: job.propertyCode || '',
       propertyName: job.propertyName,
       propertyAddress: job.address,
       serviceName: job.serviceName,
@@ -281,7 +337,7 @@ export class WorkerDayTicketComponent {
       scheduledStart: job.scheduledStart,
       scheduledEnd: job.scheduledEnd,
       assignments: [{
-        workerId: CURRENT_WORKER_ID,
+        workerId: this.loadoutWorkerId(),
         workerName: this.loadoutWorkerName(),
         leadWorker: job.leadWorker,
         assignmentStatus: job.assignmentStatus,

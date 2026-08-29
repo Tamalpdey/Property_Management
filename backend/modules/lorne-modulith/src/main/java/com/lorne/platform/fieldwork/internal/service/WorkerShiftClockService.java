@@ -5,6 +5,7 @@ import com.lorne.platform.fieldwork.internal.dto.WorkerShiftClockDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerShiftClockRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -72,6 +73,45 @@ public class WorkerShiftClockService {
                         )
                         : clockDto(false, null, null, null, false, null, null, 0L), tenantId, worker.id());
         return last;
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkerClockEntryDto> entries(UUID tenantId, UUID userId, String email, LocalDate from, LocalDate to) {
+        var worker = worker(tenantId, userId, email);
+        var fromDate = from == null ? LocalDate.now(tenantZoneId(tenantId)) : from;
+        var toDate = to == null ? fromDate : to;
+        if (toDate.isBefore(fromDate)) {
+            throw new BadRequestException("Clock entry end date must be on or after start date.");
+        }
+        return jdbcTemplate.query("""
+                SELECT wsce.id, wsce.worker_id, wsce.started_at, wsce.ended_at,
+                       CASE WHEN wsce.ended_at IS NULL THEN NULL
+                            ELSE floor(extract(epoch from (wsce.ended_at - wsce.started_at)) / 60)::bigint
+                       END AS duration_minutes,
+                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes
+                FROM worker_shift_clock_entries wsce
+                JOIN tenants t ON t.id = wsce.tenant_id
+                LEFT JOIN LATERAL (
+                    SELECT floor(sum(extract(epoch from (ended_at - started_at))) / 60)::bigint AS pause_minutes
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NOT NULL
+                ) pauses ON true
+                WHERE wsce.tenant_id = ?
+                  AND wsce.worker_id = ?
+                  AND (wsce.started_at AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date <= ?
+                  AND (COALESCE(wsce.ended_at, now()) AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date >= ?
+                ORDER BY wsce.started_at
+                """, (rs, rowNum) -> new WorkerClockEntryDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("worker_id", UUID.class),
+                instant("started_at", rs),
+                instant("ended_at", rs),
+                (Long) rs.getObject("duration_minutes"),
+                (Long) rs.getObject("pause_minutes")
+        ), tenantId, worker.id(), toDate, fromDate);
     }
 
     @Transactional
@@ -524,6 +564,11 @@ public class WorkerShiftClockService {
     private Instant instant(String column, java.sql.ResultSet rs) throws java.sql.SQLException {
         var timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private ZoneId tenantZoneId(UUID tenantId) {
+        var timezone = jdbcTemplate.queryForObject("SELECT timezone FROM tenants WHERE id = ?", String.class, tenantId);
+        return zoneId(timezone);
     }
 
     private LocalTime localTime(String column, java.sql.ResultSet rs) throws java.sql.SQLException {

@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ApiResponse, CreateServiceCategoryRequest, CreateServiceTypeRequest, ServiceCatalog, ServiceCategory, ServiceType, UpdateServiceTypeStatusRequest } from '@lorne/contracts';
+import type { ApiResponse, CreateServiceCategoryRequest, CreateServiceTypeRequest, ServiceCatalog, ServiceCategory, ServiceType, UpdateServiceCategoryStatusRequest, UpdateServiceTypeStatusRequest } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -17,6 +17,24 @@ export class ServiceCatalogService {
   createCategory(request: CreateServiceCategoryRequest) {
     return this.http
       .post<ApiResponse<ServiceCategory>>(`${environment.apiBaseUrl}/tenant/service-catalog/categories`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  updateCategory(categoryId: string, request: CreateServiceCategoryRequest) {
+    return this.http
+      .patch<ApiResponse<ServiceCategory>>(`${environment.apiBaseUrl}/tenant/service-catalog/categories/${categoryId}`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  updateCategoryStatus(categoryId: string, request: UpdateServiceCategoryStatusRequest) {
+    return this.http
+      .patch<ApiResponse<ServiceCategory>>(`${environment.apiBaseUrl}/tenant/service-catalog/categories/${categoryId}/status`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  deleteCategory(categoryId: string) {
+    return this.http
+      .delete<ApiResponse<void>>(`${environment.apiBaseUrl}/tenant/service-catalog/categories/${categoryId}`)
       .pipe(map((response) => response.data));
   }
 

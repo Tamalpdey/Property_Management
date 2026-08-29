@@ -3,6 +3,7 @@ package com.lorne.platform.customer.internal.service;
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.customer.internal.dto.CreatePropertyOwnerRequest;
 import com.lorne.platform.customer.internal.dto.PropertyOwnerDto;
+import com.lorne.platform.shared.PublicCodeGenerator;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.util.List;
@@ -25,15 +26,16 @@ public class PropertyOwnerService {
     @Transactional(readOnly = true)
     public List<PropertyOwnerDto> list(UUID tenantId) {
         return jdbcTemplate.query("""
-                SELECT c.id, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active,
+                SELECT c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active,
                        count(p.id)::int AS property_count
                 FROM customers c
                 LEFT JOIN properties p ON p.customer_id = c.id AND p.tenant_id = c.tenant_id
                 WHERE c.tenant_id = ?
-                GROUP BY c.id, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active
+                GROUP BY c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active
                 ORDER BY c.active DESC, c.display_name
                 """, (rs, rowNum) -> new PropertyOwnerDto(
                 rs.getObject("id", UUID.class),
+                rs.getString("owner_code"),
                 rs.getString("display_name"),
                 rs.getString("email"),
                 rs.getString("phone"),
@@ -46,13 +48,15 @@ public class PropertyOwnerService {
 
     @Transactional
     public PropertyOwnerDto create(UUID tenantId, UUID actorUserId, CreatePropertyOwnerRequest request) {
-        var ownerId = jdbcTemplate.queryForObject("""
-                INSERT INTO customers (tenant_id, display_name, email, phone, billing_email, notes)
-                VALUES (?, ?, ?, ?, ?, ?)
-                RETURNING id
-                """, UUID.class, tenantId, request.displayName(), request.email(), request.phone(), request.billingEmail(), request.notes());
+        var ownerId = UUID.randomUUID();
+        var ownerCode = PublicCodeGenerator.ownerCode(ownerId);
+        jdbcTemplate.update("""
+                INSERT INTO customers (id, tenant_id, owner_code, display_name, email, phone, billing_email, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, ownerId, tenantId, ownerCode, request.displayName(), request.email(), request.phone(), request.billingEmail(), request.notes());
 
         auditWriter.record(tenantId, actorUserId, "PROPERTY_OWNER_CREATED", "PROPERTY_OWNER", ownerId, Map.of(
+                "ownerCode", ownerCode,
                 "displayName", request.displayName(),
                 "hasBillingEmail", request.billingEmail() != null && !request.billingEmail().isBlank()
         ));

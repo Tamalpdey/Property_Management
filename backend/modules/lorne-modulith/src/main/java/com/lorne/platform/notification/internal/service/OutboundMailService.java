@@ -31,6 +31,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import jakarta.mail.util.ByteArrayDataSource;
 
 @Service
 public class OutboundMailService implements OutboundMailOperations {
@@ -122,7 +123,13 @@ public class OutboundMailService implements OutboundMailOperations {
                 helper.setBcc(message.bccRecipients().toArray(String[]::new));
             }
             helper.setSubject(message.subject());
-            helper.setText(message.body(), false);
+            helper.setText(message.body(), isHtmlBody(message.body()));
+            for (var inlineImage : message.inlineImages()) {
+                helper.addInline(
+                        inlineImage.contentId(),
+                        new ByteArrayDataSource(inlineImage.content(), inlineImage.contentType())
+                );
+            }
             for (var attachment : message.attachments()) {
                 helper.addAttachment(attachment.filename(), new ByteArrayResource(attachment.content()), attachment.contentType());
             }
@@ -187,7 +194,7 @@ public class OutboundMailService implements OutboundMailOperations {
         var graphMessage = new LinkedHashMap<String, Object>();
         graphMessage.put("subject", message.subject());
         graphMessage.put("body", Map.of(
-                "contentType", "Text",
+                "contentType", isHtmlBody(message.body()) ? "HTML" : "Text",
                 "content", message.body()
         ));
         graphMessage.put("toRecipients", List.of(Map.of(
@@ -204,8 +211,18 @@ public class OutboundMailService implements OutboundMailOperations {
                     "emailAddress", Map.of("address", replyTo)
             )));
         }
-        if (message.attachments() != null && !message.attachments().isEmpty()) {
+        if (!message.attachments().isEmpty() || !message.inlineImages().isEmpty()) {
             var graphAttachments = new ArrayList<Map<String, Object>>();
+            for (var inlineImage : message.inlineImages()) {
+                graphAttachments.add(Map.of(
+                        "@odata.type", "#microsoft.graph.fileAttachment",
+                        "name", inlineImage.contentId(),
+                        "contentType", inlineImage.contentType(),
+                        "contentBytes", Base64.getEncoder().encodeToString(inlineImage.content()),
+                        "isInline", true,
+                        "contentId", inlineImage.contentId()
+                ));
+            }
             for (var attachment : message.attachments()) {
                 graphAttachments.add(Map.of(
                         "@odata.type", "#microsoft.graph.fileAttachment",
@@ -252,6 +269,20 @@ public class OutboundMailService implements OutboundMailOperations {
 
     private String value(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private boolean isHtmlBody(String body) {
+        if (body == null) {
+            return false;
+        }
+        var normalized = body.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("<html")
+                || normalized.contains("<body")
+                || normalized.contains("<div")
+                || normalized.contains("<table")
+                || normalized.contains("<p ")
+                || normalized.contains("<p>")
+                || normalized.contains("<br");
     }
 
     private String formBody(Map<String, String> values) {

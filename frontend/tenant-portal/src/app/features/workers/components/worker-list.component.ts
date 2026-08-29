@@ -27,6 +27,7 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
         (queryChange)="collection.setQuery($event)"
         (sortKeyChange)="collection.setSort($event)"
         (clearSelection)="collection.clearSelection()"
+        (bulkExport)="exportSelected()"
       />
 
       <div class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -137,6 +138,7 @@ export class WorkerListComponent {
   readonly markWorkerOnLeave = output<WorkerRecord>();
   readonly assignWorkOrder = output<WorkerRecord>();
   readonly assignEquipment = output<WorkerRecord>();
+  readonly messageWorker = output<WorkerRecord>();
   readonly deleteWorker = output<WorkerRecord>();
   protected readonly selectedWorker = signal<WorkerRecord | null>(null);
   protected readonly workerMenuItems = signal<MenuItem[]>([]);
@@ -198,6 +200,7 @@ export class WorkerListComponent {
         command: () => this.viewWorker.emit(worker)
       },
       { label: 'Assign work order', icon: 'pi pi-calendar-plus', command: () => this.assignWorkOrder.emit(worker) },
+      { label: 'Message worker', icon: 'pi pi-comments', command: () => this.messageWorker.emit(worker) },
       ...appLoginItems,
       { separator: true },
       { label: 'Update worker', icon: 'pi pi-pencil', command: () => this.editWorker.emit(worker) },
@@ -212,6 +215,41 @@ export class WorkerListComponent {
     ]);
     menu.toggle(event);
   }
+
+  protected exportSelected(): void {
+    const selectedIds = this.collection.selectedIds();
+    const selectedWorkers = this.workers().filter((worker) => selectedIds.has(worker.id));
+    if (!selectedWorkers.length) {
+      return;
+    }
+    const headers = [
+      'Employee #',
+      'Worker',
+      'Email',
+      'Phone',
+      'Status',
+      'Type',
+      'Hourly rate',
+      'Skills',
+      'Shifts',
+      'Emergency contact',
+      'Emergency phone'
+    ];
+    const rows = selectedWorkers.map((worker) => [
+      worker.employeeNumber,
+      worker.displayName,
+      worker.email,
+      worker.phone,
+      worker.status,
+      this.engagementLabel(worker.engagementType),
+      worker.hourlyRate ?? '',
+      worker.serviceSkills.map((skill) => skill.serviceName).join('; '),
+      worker.shifts.map((shift) => `${dayLabel(shift.dayOfWeek)} ${shift.startTime}-${shift.endTime}`).join('; '),
+      worker.emergencyContact?.contactName,
+      worker.emergencyContact?.phone
+    ]);
+    downloadCsv(`workers-${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);
+  }
 }
 
 function dateValue(value?: string): number {
@@ -220,4 +258,20 @@ function dateValue(value?: string): number {
 
 function dayLabel(day: number): string {
   return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day - 1] ?? String(day);
+}
+
+function downloadCsv(filename: string, rows: unknown[][]): void {
+  const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: unknown): string {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
 }

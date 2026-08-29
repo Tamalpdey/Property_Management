@@ -5,6 +5,7 @@ import com.lorne.platform.property.internal.dto.CreatePropertyRequest;
 import com.lorne.platform.property.internal.dto.PropertyDto;
 import com.lorne.platform.property.internal.dto.PropertyServiceAssignmentDto;
 import com.lorne.platform.property.internal.dto.UpdatePropertyServicesRequest;
+import com.lorne.platform.shared.PublicCodeGenerator;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.util.ArrayList;
@@ -30,7 +31,7 @@ public class PropertyManagementService {
     public List<PropertyDto> list(UUID tenantId) {
         var servicesByProperty = servicesByProperty(tenantId);
         return jdbcTemplate.query("""
-                SELECT p.id, p.customer_id, c.display_name AS owner_name, p.name, p.address_line1, p.address_line2,
+                SELECT p.id, p.property_code, p.customer_id, c.owner_code, c.display_name AS owner_name, p.name, p.address_line1, p.address_line2,
                        p.city, p.province_code, p.postal_code, p.country_code, p.service_notes, p.active
                 FROM properties p
                 JOIN customers c ON c.id = p.customer_id AND c.tenant_id = p.tenant_id
@@ -38,7 +39,9 @@ public class PropertyManagementService {
                 ORDER BY p.updated_at DESC, p.name
                 """, (rs, rowNum) -> new PropertyDto(
                 rs.getObject("id", UUID.class),
+                rs.getString("property_code"),
                 rs.getObject("customer_id", UUID.class),
+                rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getString("name"),
                 rs.getString("address_line1"),
@@ -56,15 +59,18 @@ public class PropertyManagementService {
     @Transactional
     public PropertyDto create(UUID tenantId, UUID actorUserId, CreatePropertyRequest request) {
         requireTenantOwner(tenantId, request.ownerId());
-        var propertyId = jdbcTemplate.queryForObject("""
+        var propertyId = UUID.randomUUID();
+        var propertyCode = PublicCodeGenerator.propertyCode(propertyId);
+        jdbcTemplate.update("""
                 INSERT INTO properties (
-                    tenant_id, customer_id, name, address_line1, address_line2, city,
+                    id, tenant_id, property_code, customer_id, name, address_line1, address_line2, city,
                     province_code, postal_code, country_code, service_notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'CA'), ?)
-                RETURNING id
-                """, UUID.class,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'CA'), ?)
+                """,
+                propertyId,
                 tenantId,
+                propertyCode,
                 request.ownerId(),
                 request.name(),
                 request.addressLine1(),
@@ -76,9 +82,9 @@ public class PropertyManagementService {
                 request.serviceNotes()
         );
 
-        var ownerName = jdbcTemplate.queryForObject(
-                "SELECT display_name FROM customers WHERE tenant_id = ? AND id = ?",
-                String.class,
+        var owner = jdbcTemplate.queryForObject(
+                "SELECT owner_code, display_name FROM customers WHERE tenant_id = ? AND id = ?",
+                (rs, rowNum) -> new OwnerRef(rs.getString("owner_code"), rs.getString("display_name")),
                 tenantId,
                 request.ownerId()
         );
@@ -86,13 +92,16 @@ public class PropertyManagementService {
         auditWriter.record(tenantId, actorUserId, "PROPERTY_CREATED", "PROPERTY", propertyId, Map.of(
                 "name", request.name(),
                 "ownerId", request.ownerId().toString(),
-                "ownerName", ownerName,
+                "ownerCode", owner.ownerCode(),
+                "ownerName", owner.ownerName(),
                 "city", request.city()
         ));
         return new PropertyDto(
                 propertyId,
+                propertyCode,
                 request.ownerId(),
-                ownerName,
+                owner.ownerCode(),
+                owner.ownerName(),
                 request.name(),
                 request.addressLine1(),
                 request.addressLine2(),
@@ -204,7 +213,7 @@ public class PropertyManagementService {
     private PropertyDto property(UUID tenantId, UUID propertyId) {
         var servicesByProperty = servicesByProperty(tenantId);
         return jdbcTemplate.query("""
-                SELECT p.id, p.customer_id, c.display_name AS owner_name, p.name, p.address_line1, p.address_line2,
+                SELECT p.id, p.property_code, p.customer_id, c.owner_code, c.display_name AS owner_name, p.name, p.address_line1, p.address_line2,
                        p.city, p.province_code, p.postal_code, p.country_code, p.service_notes, p.active
                 FROM properties p
                 JOIN customers c ON c.id = p.customer_id AND c.tenant_id = p.tenant_id
@@ -215,7 +224,9 @@ public class PropertyManagementService {
             }
             return new PropertyDto(
                     rs.getObject("id", UUID.class),
+                    rs.getString("property_code"),
                     rs.getObject("customer_id", UUID.class),
+                    rs.getString("owner_code"),
                     rs.getString("owner_name"),
                     rs.getString("name"),
                     rs.getString("address_line1"),
@@ -313,5 +324,8 @@ public class PropertyManagementService {
             ));
         }, tenantId);
         return grouped;
+    }
+
+    private record OwnerRef(String ownerCode, String ownerName) {
     }
 }

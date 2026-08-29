@@ -10,7 +10,7 @@ import com.lorne.platform.tenant.internal.dto.UpdateTenantSettingsRequest;
 import com.lorne.platform.tenant.internal.service.TenantSettingsService;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -58,9 +58,16 @@ class TenantSettingsController {
     }
 
     @GetMapping("/logo/{documentId}")
-    ResponseEntity<Void> logo(@PathVariable UUID documentId) {
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, documentStorageService.createTenantLogoReadUrl(documentId))
-                .build();
+    ResponseEntity<byte[]> logo(@PathVariable UUID documentId) {
+        var logo = documentStorageService.tenantLogo(documentId);
+        var contentType = logo.contentType() == null || logo.contentType().isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM
+                : MediaType.parseMediaType(logo.contentType());
+        return ResponseEntity.ok()
+                .contentType(contentType)
+                .contentLength(logo.bytes().length)
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .body(logo.bytes());
     }
 }

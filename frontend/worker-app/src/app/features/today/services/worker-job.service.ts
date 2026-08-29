@@ -7,6 +7,7 @@ import type {
   WorkerAssignedJob,
   WorkerActivityRequest,
   WorkerDailyLoadout,
+  WorkerClockEntryRecord,
   WorkerJobActionRequest,
   WorkerJobActionResponse,
   WorkerLoadoutToolActionRequest,
@@ -36,6 +37,12 @@ export class WorkerJobService {
   settings() {
     return this.http
       .get<ApiResponse<TenantSettingsRecord>>(`${environment.apiBaseUrl}/field-worker/settings`)
+      .pipe(map((response) => response.data));
+  }
+
+  clockEntries(from: string, to: string) {
+    return this.http
+      .get<ApiResponse<WorkerClockEntryRecord[]>>(`${environment.apiBaseUrl}/field-worker/clock-entries`, { params: { from, to } })
       .pipe(map((response) => response.data));
   }
 

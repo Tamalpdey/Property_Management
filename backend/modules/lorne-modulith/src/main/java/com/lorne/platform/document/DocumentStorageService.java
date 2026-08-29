@@ -64,6 +64,18 @@ public class DocumentStorageService {
         return createPresignedUpload(tenantId, actorUserId, "TENANT_LOGO", tenantId, objectKey, contentType, byteSize);
     }
 
+    @Transactional
+    public PresignedPhotoUpload createUserProfilePhotoUpload(UUID tenantId, UUID actorUserId, PhotoUploadRequest request) {
+        requireConfigured();
+        var contentType = logoContentType(request.contentType());
+        var byteSize = request.byteSize() == null ? 0 : request.byteSize();
+        if (byteSize <= 0 || byteSize > properties.maxImageBytes()) {
+            throw new BadRequestException("Profile photo file size is not valid.");
+        }
+        var objectKey = userProfilePhotoObjectKey(tenantId, actorUserId, request.fileName());
+        return createPresignedUpload(tenantId, actorUserId, "USER_PROFILE_PHOTO", actorUserId, objectKey, contentType, byteSize);
+    }
+
     public void requireWorkOrderDocument(UUID tenantId, UUID workOrderId, UUID documentId) {
         var exists = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
                 SELECT EXISTS (
@@ -108,6 +120,20 @@ public class DocumentStorageService {
         return createReadUrl(document.bucket(), document.objectKey());
     }
 
+    public String createUserProfilePhotoReadUrl(UUID documentId) {
+        var documents = jdbcTemplate.query("""
+                SELECT bucket, object_key
+                FROM documents
+                WHERE id = ? AND owner_type = 'USER_PROFILE_PHOTO'
+                """, (rs, rowNum) -> new StoredDocument(
+                rs.getString("bucket"),
+                rs.getString("object_key")
+        ), documentId);
+        var document = documents.stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Profile photo was not found."));
+        return createReadUrl(document.bucket(), document.objectKey());
+    }
+
     public StoredLogo tenantLogo(UUID tenantId, UUID documentId) {
         requireConfigured();
         var documents = jdbcTemplate.query("""
@@ -118,6 +144,20 @@ public class DocumentStorageService {
                 rs.getString("content_type"),
                 objectBytes(rs.getString("bucket"), rs.getString("object_key"))
         ), tenantId, documentId);
+        return documents.stream().findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant logo was not found."));
+    }
+
+    public StoredLogo tenantLogo(UUID documentId) {
+        requireConfigured();
+        var documents = jdbcTemplate.query("""
+                SELECT bucket, object_key, content_type
+                FROM documents
+                WHERE id = ? AND owner_type = 'TENANT_LOGO'
+                """, (rs, rowNum) -> new StoredLogo(
+                rs.getString("content_type"),
+                objectBytes(rs.getString("bucket"), rs.getString("object_key"))
+        ), documentId);
         return documents.stream().findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant logo was not found."));
     }
@@ -294,6 +334,19 @@ public class DocumentStorageService {
                 today.getDayOfMonth(),
                 UUID.randomUUID(),
                 safeFileName(fileName == null || fileName.isBlank() ? "logo.png" : fileName)
+        );
+    }
+
+    private String userProfilePhotoObjectKey(UUID tenantId, UUID userId, String fileName) {
+        var today = LocalDate.now();
+        return "tenants/%s/users/%s/profile-photos/%04d/%02d/%02d/%s-%s".formatted(
+                tenantId,
+                userId,
+                today.getYear(),
+                today.getMonthValue(),
+                today.getDayOfMonth(),
+                UUID.randomUUID(),
+                safeFileName(fileName == null || fileName.isBlank() ? "profile-photo.png" : fileName)
         );
     }
 

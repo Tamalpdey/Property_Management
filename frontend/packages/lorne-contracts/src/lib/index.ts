@@ -32,6 +32,7 @@ export interface CurrentUser {
   id: string;
   tenantId?: string;
   displayName: string;
+  profilePhotoUrl?: string;
   email: string;
   roles: LorneRole[];
   permissions: string[];
@@ -42,6 +43,7 @@ export type TenantAssignableRole = 'TENANT_ADMIN' | 'OPERATIONS' | 'FINANCE' | '
 export interface TenantUserRecord {
   id: string;
   displayName: string;
+  profilePhotoUrl?: string;
   email: string;
   phone?: string;
   status: 'INVITED' | 'ACTIVE' | 'DISABLED' | 'LOCKED' | string;
@@ -59,6 +61,7 @@ export interface TenantRoleOption {
 
 export interface CreateTenantUserRequest {
   displayName: string;
+  profilePhotoUrl?: string;
   email: string;
   phone?: string;
   temporaryPassword: string;
@@ -82,6 +85,59 @@ export interface ApiResponse<T> {
     }>;
   };
   timestamp: string;
+}
+
+export type CommunicationChannelType = 'WORK_ORDER' | 'WORKER_OPERATIONS' | 'WORKER_DIRECT' | 'ANNOUNCEMENT';
+
+export interface ConversationParticipant {
+  userId: string;
+  workerId?: string;
+  displayName: string;
+  email: string;
+  participantRole: string;
+  lastReadAt?: string;
+}
+
+export interface ConversationRecord {
+  id: string;
+  channelType: CommunicationChannelType;
+  workOrderId?: string;
+  workOrderNumber?: string;
+  title: string;
+  lastMessagePreview?: string;
+  lastMessageAt?: string;
+  unreadCount: number;
+  participants: ConversationParticipant[];
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  senderUserId: string;
+  senderWorkerId?: string;
+  senderName: string;
+  senderEmail: string;
+  senderRole: string;
+  body: string;
+  createdAt: string;
+  mine: boolean;
+}
+
+export interface ConversationThread {
+  conversation: ConversationRecord;
+  messages: ConversationMessage[];
+}
+
+export interface CreateConversationRequest {
+  channelType?: CommunicationChannelType;
+  workOrderId?: string;
+  participantUserIds?: string[];
+  title?: string;
+  initialMessage?: string;
+}
+
+export interface SendMessageRequest {
+  body: string;
 }
 
 export interface LoginRequest {
@@ -181,7 +237,9 @@ export interface WorkerAssignedJob {
   workOrderNumber: string;
   workOrderType: WorkOrderType;
   title: string;
+  propertyCode: string;
   propertyName: string;
+  ownerCode: string;
   ownerName: string;
   address: string;
   serviceName?: string;
@@ -471,6 +529,7 @@ export interface SuperAdminOverviewResponse {
 
 export interface PropertyOwner {
   id: string;
+  ownerCode: string;
   displayName: string;
   email?: string;
   phone?: string;
@@ -490,7 +549,9 @@ export interface CreatePropertyOwnerRequest {
 
 export interface PropertyRecord {
   id: string;
+  propertyCode: string;
   ownerId: string;
+  ownerCode: string;
   ownerName: string;
   name: string;
   addressLine1: string;
@@ -539,6 +600,7 @@ export interface ServiceCatalog {
 
 export interface CreateServiceCategoryRequest {
   name: string;
+  wsibRatePercent?: number | null;
 }
 
 export interface CreateServiceTypeRequest {
@@ -554,9 +616,14 @@ export interface UpdateServiceTypeStatusRequest {
   active: boolean;
 }
 
+export interface UpdateServiceCategoryStatusRequest {
+  active: boolean;
+}
+
 export interface ServiceCategory {
   id: string;
   name: string;
+  wsibRatePercent?: number | null;
   active: boolean;
 }
 
@@ -792,8 +859,10 @@ export interface WorkOrderRecord {
   workOrderNumber: string;
   workOrderType: WorkOrderType;
   ownerId: string;
+  ownerCode: string;
   ownerName: string;
   propertyId: string;
+  propertyCode: string;
   propertyName: string;
   propertyAddress: string;
   serviceTypeId?: string;
@@ -929,12 +998,14 @@ export interface InvoiceRecord {
   paidTotal: number;
   balanceDue: number;
   customerId: string;
+  ownerCode?: string;
   ownerName: string;
   ownerEmail?: string;
   ownerBillingEmail?: string;
   workOrderId?: string;
   workOrderNumber?: string;
   workOrderTitle?: string;
+  propertyCode?: string;
   propertyName?: string;
   propertyAddress?: string;
   createdAt: string;
@@ -949,6 +1020,7 @@ export interface InvoiceWorkOrderRecord {
   workOrderId: string;
   workOrderNumber: string;
   title: string;
+  propertyCode?: string;
   propertyName?: string;
   propertyAddress?: string;
   status?: string;

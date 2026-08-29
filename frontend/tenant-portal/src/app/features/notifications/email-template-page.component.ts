@@ -14,6 +14,11 @@ interface TemplateOption {
   label: string;
   description: string;
   eyebrow: string;
+  variableGroups: VariableGroup[];
+}
+
+interface VariableGroup {
+  label: string;
   variables: string[];
 }
 
@@ -84,15 +89,36 @@ interface TemplateOption {
             <textarea class="min-h-96 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="form.body"></textarea>
           </label>
 
-          <div class="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-500">
-            Variables:
-            @for (variable of selectedOption().variables; track variable) {
-              <span>{{ '{{' + variable + '}}' }}{{ !$last ? ', ' : '.' }}</span>
-            }
+          <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Available variables</p>
+                <p class="text-xs font-semibold text-slate-500">Use these exactly in the subject or body. HTML blocks render with tenant colors and logo.</p>
+              </div>
+              <span class="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600">{{ variableCount() }} variables</span>
+            </div>
+            <div class="mt-3 grid gap-3 lg:grid-cols-2">
+              @for (group of selectedOption().variableGroups; track group.label) {
+                <div class="rounded-lg border border-slate-200 bg-white p-3">
+                  <p class="text-xs font-black uppercase tracking-wide text-slate-500">{{ group.label }}</p>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    @for (variable of group.variables; track variable) {
+                      <button
+                        type="button"
+                        class="rounded-full border border-teal-100 bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800 transition hover:border-teal-300 hover:bg-teal-100"
+                        (click)="insertVariable(variable)"
+                      >
+                        {{ '{{' + variable + '}}' }}
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+          </div>
           </div>
 
           <div class="mt-3 flex justify-end gap-2">
-            <button pButton type="button" severity="secondary" label="Reset" (click)="reset()"></button>
+            <button pButton type="button" severity="secondary" label="Reset to latest default" [loading]="resetting()" (click)="reset()"></button>
             <button pButton type="submit" icon="pi pi-save" label="Save template" [loading]="saving()"></button>
           </div>
         </form>
@@ -108,19 +134,23 @@ export class EmailTemplatePageComponent {
       label: 'Owner invoice email',
       description: 'Sent with the generated invoice PDF from the finance screen.',
       eyebrow: 'Invoice',
-      variables: [
-        'invoiceNumber',
-        'ownerName',
-        'propertyName',
-        'propertyAddress',
-        'workOrderNumber',
-        'workOrderTitle',
-        'invoiceSubtotal',
-        'invoiceTax',
-        'invoiceTotal',
-        'issuedOn',
-        'dueOn',
-        'tenantName'
+      variableGroups: [
+        {
+          label: 'Tenant branding',
+          variables: ['tenantName', 'tenantLogoBlock', 'tenantLogoUrl', 'tenantPrimaryColor', 'tenantAccentColor']
+        },
+        {
+          label: 'Owner and property',
+          variables: ['ownerName', 'ownerCode', 'propertyName', 'propertyCode', 'propertyAddress']
+        },
+        {
+          label: 'Invoice',
+          variables: ['invoiceNumber', 'invoiceSubtotal', 'invoiceTax', 'invoiceTotal', 'issuedOn', 'dueOn']
+        },
+        {
+          label: 'Work order',
+          variables: ['workOrderNumber', 'workOrderTitle', 'serviceName']
+        }
       ]
     },
     {
@@ -128,16 +158,27 @@ export class EmailTemplatePageComponent {
       label: 'Owner work completed email',
       description: 'Sent after operations approves field work completion.',
       eyebrow: 'Completion',
-      variables: [
-        'workOrderNumber',
-        'ownerName',
-        'propertyName',
-        'propertyAddress',
-        'workOrderTitle',
-        'serviceName',
-        'completedAt',
-        'reviewNote',
-        'tenantName'
+      variableGroups: [
+        {
+          label: 'Tenant branding',
+          variables: ['tenantName', 'tenantLogoBlock', 'tenantLogoUrl', 'tenantPrimaryColor', 'tenantAccentColor']
+        },
+        {
+          label: 'Owner and property',
+          variables: ['ownerName', 'ownerCode', 'propertyName', 'propertyCode', 'propertyAddress']
+        },
+        {
+          label: 'Work order',
+          variables: ['workOrderNumber', 'workOrderTitle', 'serviceName', 'completedAt', 'reviewNote']
+        },
+        {
+          label: 'Field completion',
+          variables: ['onSiteWorkers', 'arrivedOnSiteAt', 'workCompletedAt', 'fieldCompletionBlock']
+        },
+        {
+          label: 'Maintenance record',
+          variables: ['maintenanceRecordBlock', 'maintenanceRecordSummary', 'maintenanceClientNote', 'serviceDetails', 'deliveriesSummary']
+        }
       ]
     }
   ];
@@ -148,6 +189,7 @@ export class EmailTemplatePageComponent {
   });
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
+  protected readonly resetting = signal(false);
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly form = { subject: '', body: '' };
@@ -197,10 +239,38 @@ export class EmailTemplatePageComponent {
     }
   }
 
-  protected reset(): void {
-    const template = this.template();
-    this.form.subject = template?.subject || '';
-    this.form.body = template?.body || '';
+  protected variableCount(): number {
+    return this.selectedOption().variableGroups.reduce((total, group) => total + group.variables.length, 0);
+  }
+
+  protected insertVariable(variable: string): void {
+    this.form.body = `${this.form.body}${this.form.body.endsWith('\n') || this.form.body.length === 0 ? '' : '\n'}{{${variable}}}`;
+  }
+
+  protected async reset(): Promise<void> {
+    if (this.resetting()) {
+      return;
+    }
+    if (!window.confirm('Reset this template to the latest default copy? This will replace the current subject and body.')) {
+      return;
+    }
+    this.resetting.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const template = await firstValueFrom(
+        this.activeTemplate() === 'invoice-owner'
+          ? this.emailTemplateService.resetInvoiceOwner()
+          : this.emailTemplateService.resetWorkOrderCompletedOwner()
+      );
+      this.templates.update((templates) => ({ ...templates, [this.activeTemplate()]: template }));
+      this.populate(template);
+      this.message.set('Email template reset to the latest default.');
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to reset email template.'));
+    } finally {
+      this.resetting.set(false);
+    }
   }
 
   protected async save(): Promise<void> {

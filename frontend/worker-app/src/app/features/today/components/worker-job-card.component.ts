@@ -14,7 +14,11 @@ import { workerFacingStatus } from '../worker-job-ui';
       <div class="bg-slate-950 p-5 text-white">
         <div class="grid gap-4 sm:grid-cols-[1fr_auto]">
           <div class="min-w-0">
-            <p class="text-xs font-black uppercase tracking-wide text-teal-200">{{ job().workOrderNumber }}</p>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <p class="text-xs font-black uppercase tracking-wide text-teal-200">{{ job().workOrderNumber }}</p>
+              <span class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-black uppercase text-slate-200">{{ job().propertyCode }}</span>
+              <span class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-black uppercase text-slate-200">{{ job().ownerCode }}</span>
+            </div>
             <h2 class="mt-2 text-3xl font-black leading-tight">{{ job().propertyName }}</h2>
             <p class="mt-2 text-base font-bold text-slate-200">{{ job().title }}</p>
           </div>
@@ -35,6 +39,7 @@ import { workerFacingStatus } from '../worker-job-ui';
             <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-sky-800">{{ workTypeLabel() }}</span>
             <span class="rounded-full bg-teal-50 px-3 py-1 text-xs font-black text-teal-800">{{ job().serviceName || 'General service' }}</span>
             <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ job().ownerName }}</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs font-black text-slate-700">{{ job().propertyCode }}</span>
           </div>
         </div>
         <a

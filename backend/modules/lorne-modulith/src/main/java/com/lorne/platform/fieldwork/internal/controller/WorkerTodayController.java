@@ -22,6 +22,7 @@ import com.lorne.platform.tenant.TenantPublicSettingsDto;
 import com.lorne.platform.tenant.TenantSettingsOperations;
 import com.lorne.platform.workorder.internal.dto.UpsertWorkOrderMaintenanceRecordRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderMaintenanceRecordDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
@@ -150,6 +151,16 @@ class WorkerTodayController {
     @PreAuthorize("hasRole('FIELD_WORKER')")
     ApiResponse<WorkerShiftClockDto> clock(@AuthenticationPrincipal JwtPrincipal principal) {
         return ApiResponse.ok(workerShiftClockService.state(principal.tenantId(), principal.userId(), principal.email()));
+    }
+
+    @GetMapping("/clock-entries")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<List<WorkerClockEntryDto>> clockEntries(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestParam(required = false) LocalDate from,
+            @RequestParam(required = false) LocalDate to
+    ) {
+        return ApiResponse.ok(workerShiftClockService.entries(principal.tenantId(), principal.userId(), principal.email(), from, to));
     }
 
     @PostMapping("/clock/in")

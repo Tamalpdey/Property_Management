@@ -8,11 +8,12 @@ import type { WorkerDailyLoadout, WorkerLoadoutTool, WorkerLoadoutToolActionRequ
 import { WorkerShiftClockService } from '../../core/services/worker-shift-clock.service';
 import { WorkerJobService } from '../today/services/worker-job.service';
 import { parseDateInput, toDateInput, workerErrorMessage } from '../today/worker-job-ui';
+import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.component';
 
 @Component({
   selector: 'lorne-worker-loadout',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule],
+  imports: [ButtonModule, DialogModule, FormsModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="mx-auto max-w-6xl space-y-3">
@@ -236,6 +237,15 @@ import { parseDateInput, toDateInput, workerErrorMessage } from '../today/worker
               [(ngModel)]="toolIssueForm.note"
             ></textarea>
           </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <lorne-voice-note-button
+              [text]="toolIssueForm.note"
+              label="Speak issue note"
+              [showUnsupported]="true"
+              (textChange)="toolIssueForm.note = $event"
+              (error)="error.set($event)"
+            />
+          </div>
 
           <div class="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
             <button pButton type="button" severity="secondary" icon="pi pi-times" label="Cancel" (click)="closeToolIssueDialog()"></button>

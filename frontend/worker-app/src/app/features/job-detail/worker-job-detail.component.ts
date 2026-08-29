@@ -33,6 +33,7 @@ import type {
 import { WorkerActionBarComponent } from '../today/components/worker-action-bar.component';
 import { WorkerChecklistComponent } from '../today/components/worker-checklist.component';
 import { WorkerStepperComponent } from '../today/components/worker-stepper.component';
+import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.component';
 import { WorkerShiftClockService } from '../../core/services/worker-shift-clock.service';
 import { WorkerActionDraftService } from '../today/services/worker-action-draft.service';
 import { WorkerJobService } from '../today/services/worker-job.service';
@@ -131,6 +132,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
     InputTextModule,
     NgTemplateOutlet,
     TagModule,
+    VoiceNoteButtonComponent,
     WorkerActionBarComponent,
     WorkerChecklistComponent,
     WorkerStepperComponent
@@ -149,6 +151,8 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                 <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                   <div class="flex min-w-0 flex-wrap items-center gap-1.5">
                     <span class="text-[0.7rem] font-black uppercase tracking-wide text-teal-200 sm:text-xs">{{ selectedJob.workOrderNumber }}</span>
+                    <span class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-black uppercase text-slate-200">{{ selectedJob.propertyCode }}</span>
+                    <span class="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-black uppercase text-slate-200">{{ selectedJob.ownerCode }}</span>
                     <span [class]="workTypeBadgeClass(selectedJob)">{{ workTypeLabel(selectedJob) }}</span>
                     <span [class]="priorityBadgeClass(selectedJob)">{{ priorityLabel(selectedJob) }}</span>
                     <span [class]="workerStatusBadgeClass(selectedJob)">{{ statusLabel(selectedJob) }}</span>
@@ -218,6 +222,8 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="rounded-full bg-teal-50 px-3 py-1 text-xs font-black text-teal-800">{{ selectedJob.serviceName || 'General service' }}</span>
                 <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ selectedJob.ownerName }}</span>
+                <span class="rounded-full bg-teal-50 px-3 py-1 font-mono text-xs font-black text-teal-800">{{ selectedJob.propertyCode }}</span>
+                <span class="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs font-black text-slate-700">{{ selectedJob.ownerCode }}</span>
                 <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ totalCompletedChecks(selectedJob) }}/{{ selectedJob.checklist.length }} checks</span>
               </div>
             </div>
@@ -748,6 +754,15 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">{{ maintenanceNoteLabel(selectedJob) }}</span>
               <textarea class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="maintenanceClientNote" rows="4" [(ngModel)]="maintenanceForm.clientNote"></textarea>
             </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button
+                [text]="maintenanceForm.clientNote"
+                label="Speak client note"
+                [showUnsupported]="true"
+                (textChange)="maintenanceForm.clientNote = $event"
+                (error)="error.set($event)"
+              />
+            </div>
 
             <div class="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t border-slate-200 bg-white/95 px-1 py-3 backdrop-blur">
               <button pButton type="button" severity="secondary" icon="pi pi-times" label="Cancel" (click)="closeMaintenanceRecord()"></button>
@@ -820,14 +835,26 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                 <option value="OTHER">Other</option>
               </select>
             </label>
-            <label class="grid touch-action place-items-center rounded-lg border border-dashed border-teal-300 bg-teal-50 px-3 py-8 text-center text-sm font-black text-teal-800">
-              <i class="pi pi-camera mb-2 text-2xl"></i>
-              Capture or choose photos
-              @if (job(); as selectedJob) {
-                <span class="mt-1 text-xs font-bold text-teal-700">{{ evidenceSlotsAvailable(selectedJob) }} of {{ maxEvidencePerGroup }} slots available for this photo type.</span>
-                <input class="hidden" type="file" accept="image/*" capture="environment" multiple [disabled]="evidenceLimitReached(selectedJob)" (change)="markPhotoSelected($event)" />
-              }
-            </label>
+            @if (job(); as selectedJob) {
+              <div class="rounded-lg border border-dashed border-teal-300 bg-teal-50 px-3 py-3">
+                <div class="mb-3 flex items-center gap-2 text-sm font-black text-teal-800">
+                  <i class="pi pi-camera text-lg"></i>
+                  <span>{{ evidenceSlotsAvailable(selectedJob) }} of {{ maxEvidencePerGroup }} slots available for this photo type.</span>
+                </div>
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <label class="grid touch-action cursor-pointer place-items-center rounded-lg bg-teal-600 px-3 py-3 text-center text-sm font-black text-white shadow-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+                    <i class="pi pi-camera mb-1 text-lg"></i>
+                    Take photo
+                    <input class="hidden" type="file" accept="image/*" capture="environment" [disabled]="evidenceLimitReached(selectedJob)" (change)="markPhotoSelected($event)" />
+                  </label>
+                  <label class="grid touch-action cursor-pointer place-items-center rounded-lg bg-white px-3 py-3 text-center text-sm font-black text-teal-800 shadow-sm ring-1 ring-teal-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+                    <i class="pi pi-folder-open mb-1 text-lg"></i>
+                    Choose from device
+                    <input class="hidden" type="file" accept="image/*" multiple [disabled]="evidenceLimitReached(selectedJob)" (change)="markPhotoSelected($event)" />
+                  </label>
+                </div>
+              </div>
+            }
             @if (job(); as selectedJob) {
               <ng-container *ngTemplateOutlet="uploadedEvidenceGrid; context: { job: selectedJob }" />
             }
@@ -847,14 +874,26 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                 <p-inputNumber name="receiptAmount" [(ngModel)]="actionForm.receiptAmount" (ngModelChange)="saveActionDraft()" [min]="0" [step]="0.01" mode="decimal" [minFractionDigits]="2" styleClass="w-full" />
               </label>
             </div>
-            <label class="grid touch-action place-items-center rounded-lg border border-dashed border-teal-300 bg-teal-50 px-3 py-8 text-center text-sm font-black text-teal-800">
-              <i class="pi pi-receipt mb-2 text-2xl"></i>
-              Upload receipts or invoices
-              @if (job(); as selectedJob) {
-                <span class="mt-1 text-xs font-bold text-teal-700">{{ evidenceSlotsAvailable(selectedJob) }} of {{ maxEvidencePerGroup }} slots available. Images and PDFs are supported.</span>
-                <input class="hidden" type="file" accept="image/*,application/pdf" multiple [disabled]="evidenceLimitReached(selectedJob)" (change)="markReceiptSelected($event)" />
-              }
-            </label>
+            @if (job(); as selectedJob) {
+              <div class="rounded-lg border border-dashed border-teal-300 bg-teal-50 px-3 py-3">
+                <div class="mb-3 flex items-center gap-2 text-sm font-black text-teal-800">
+                  <i class="pi pi-receipt text-lg"></i>
+                  <span>{{ evidenceSlotsAvailable(selectedJob) }} of {{ maxEvidencePerGroup }} slots available. Images and PDFs are supported.</span>
+                </div>
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <label class="grid touch-action cursor-pointer place-items-center rounded-lg bg-teal-600 px-3 py-3 text-center text-sm font-black text-white shadow-sm has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+                    <i class="pi pi-camera mb-1 text-lg"></i>
+                    Take receipt photo
+                    <input class="hidden" type="file" accept="image/*" capture="environment" [disabled]="evidenceLimitReached(selectedJob)" (change)="markReceiptSelected($event)" />
+                  </label>
+                  <label class="grid touch-action cursor-pointer place-items-center rounded-lg bg-white px-3 py-3 text-center text-sm font-black text-teal-800 shadow-sm ring-1 ring-teal-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+                    <i class="pi pi-folder-open mb-1 text-lg"></i>
+                    Choose receipt/PDF
+                    <input class="hidden" type="file" accept="image/*,application/pdf" multiple [disabled]="evidenceLimitReached(selectedJob)" (change)="markReceiptSelected($event)" />
+                  </label>
+                </div>
+              </div>
+            }
             @if (job(); as selectedJob) {
               <ng-container *ngTemplateOutlet="uploadedEvidenceGrid; context: { job: selectedJob }" />
             }
@@ -888,20 +927,15 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                 <span class="mt-1 block text-xs font-bold text-slate-500">Add a short caption so operations can understand this file later.</span>
               }
             </label>
-            @if (pendingAction() === 'ADD_NOTE' || pendingAction() === 'UPDATE_NOTE') {
-              <button
-                pButton
-                type="button"
-                severity="secondary"
-                icon="pi pi-microphone"
-                [label]="listening() ? 'Listening...' : 'Speak note'"
-                [disabled]="!speechSupported() || listening()"
-                (click)="startDictation()"
-              ></button>
-              @if (!speechSupported()) {
-                <p class="text-xs font-bold text-slate-500">Voice dictation is not supported by this browser.</p>
-              }
-            }
+            <div class="flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button
+                [text]="actionForm.note || ''"
+                [label]="pendingAction() === 'ADD_PHOTO' || pendingAction() === 'ADD_PURCHASE_RECEIPT' ? 'Speak caption' : 'Speak note'"
+                [showUnsupported]="pendingAction() === 'ADD_NOTE' || pendingAction() === 'UPDATE_NOTE'"
+                (textChange)="actionForm.note = $event; saveActionDraft()"
+                (error)="error.set($event)"
+              />
+            </div>
           }
 
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-3">
@@ -948,6 +982,14 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
               [(ngModel)]="activityConflictEndNote"
             ></textarea>
           </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <lorne-voice-note-button
+              [text]="activityConflictEndNote"
+              label="Speak end note"
+              (textChange)="activityConflictEndNote = $event"
+              (error)="activityConflictError.set($event)"
+            />
+          </div>
 
           @if (activityConflictError()) {
             <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{{ activityConflictError() }}</p>
@@ -1190,7 +1232,6 @@ export class WorkerJobDetailComponent implements OnDestroy {
   protected readonly message = signal('');
   protected readonly pendingAction = signal<WorkerJobAction | ''>('');
   protected readonly detailPanel = signal<WorkerDetailPanel | ''>('');
-  protected readonly listening = signal(false);
   protected readonly workerEvidencePreview = signal<WorkerJobEvidence | null>(null);
   protected readonly maintenanceRecordOpen = signal(false);
   protected readonly maintenanceRecord = signal<WorkOrderMaintenanceRecord | null>(null);
@@ -1215,7 +1256,6 @@ export class WorkerJobDetailComponent implements OnDestroy {
   protected maintenanceForm: MaintenanceRecordForm = emptyMaintenanceRecordForm();
   private readonly selectedPhotoFiles = signal<File[]>([]);
   private readonly timerHandle = window.setInterval(() => this.now.set(Date.now()), 30000);
-  private dictationBaseNote = '';
   private pendingActivityConflictRequest: WorkerJobActionRequest | null = null;
   private pendingActivityConflictJobId = '';
 
@@ -1721,6 +1761,11 @@ export class WorkerJobDetailComponent implements OnDestroy {
       this.openAction(action);
       return;
     }
+    if (action === 'COMPLETE_WORK' && this.maintenanceRecordRequired(job) && !this.maintenanceRecordFilled(job)) {
+      this.message.set(`${this.maintenanceRecordTitle(job)} must be filled before submitting this job.`);
+      this.openMaintenanceRecord(job);
+      return;
+    }
     if (action === 'COMPLETE_WORK' && !this.isPickupDelivery(job) && !this.hasAfterPhoto(job)) {
       this.message.set('Add an after photo before submitting this job.');
       this.openPhoto('AFTER');
@@ -1784,6 +1829,21 @@ export class WorkerJobDetailComponent implements OnDestroy {
 
   protected maintenanceRecordEnabled(job: WorkerAssignedJob): boolean {
     return this.maintenanceTemplate(job).enabled;
+  }
+
+  protected maintenanceRecordRequired(job: WorkerAssignedJob): boolean {
+    return this.maintenanceRecordEnabled(job);
+  }
+
+  protected maintenanceRecordFilled(job: WorkerAssignedJob): boolean {
+    if (!this.maintenanceRecordRequired(job)) {
+      return true;
+    }
+    const record = this.maintenanceRecord();
+    if (!record || record.workOrderId !== job.id) {
+      return false;
+    }
+    return maintenanceRecordHasFieldData(record.recordData);
   }
 
   protected maintenanceRecordTitle(job: WorkerAssignedJob): string {
@@ -1917,6 +1977,9 @@ export class WorkerJobDetailComponent implements OnDestroy {
     if (action === 'COMPLETE_WORK' && this.openRouteStops(job) > 0) {
       return true;
     }
+    if (action === 'COMPLETE_WORK' && this.maintenanceRecordRequired(job) && !this.maintenanceRecordFilled(job)) {
+      return true;
+    }
     return action === 'COMPLETE_WORK' && !this.isPickupDelivery(job) && this.requiredChecksRemaining(job, 'COMPLETION') > 0;
   }
 
@@ -1940,6 +2003,9 @@ export class WorkerJobDetailComponent implements OnDestroy {
       const openStops = this.openRouteStops(job);
       if (action === 'COMPLETE_WORK' && openStops > 0) {
         return `Complete or skip ${openStops} route stop${openStops === 1 ? '' : 's'} before submitting this work order.`;
+      }
+      if (action === 'COMPLETE_WORK' && this.maintenanceRecordRequired(job) && !this.maintenanceRecordFilled(job)) {
+        return `${this.maintenanceRecordTitle(job)} must be filled before submitting this work order.`;
       }
       if (action === 'COMPLETE_WORK' && !this.isPickupDelivery(job) && !this.hasAfterPhoto(job)) {
         return 'Add at least one after photo before submitting this work order.';
@@ -2011,7 +2077,6 @@ export class WorkerJobDetailComponent implements OnDestroy {
     this.pendingAction.set('');
     this.actionForm = { action: 'ADD_NOTE', photoType: 'OTHER', quantity: 1 };
     this.selectedPhotoFiles.set([]);
-    this.dictationBaseNote = '';
   }
 
   protected async submitAction(): Promise<void> {
@@ -2239,40 +2304,6 @@ export class WorkerJobDetailComponent implements OnDestroy {
     } catch {
       // View auditing should never block field navigation.
     }
-  }
-
-  protected speechSupported(): boolean {
-    const browserWindow = window as unknown as SpeechRecognitionWindow;
-    return Boolean(browserWindow.SpeechRecognition || browserWindow.webkitSpeechRecognition);
-  }
-
-  protected startDictation(): void {
-    const browserWindow = window as unknown as SpeechRecognitionWindow;
-    const SpeechRecognitionConstructor = browserWindow.SpeechRecognition || browserWindow.webkitSpeechRecognition;
-    if (!SpeechRecognitionConstructor || this.listening()) {
-      return;
-    }
-    const recognition = new SpeechRecognitionConstructor();
-    recognition.lang = navigator.language || 'en-US';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    this.dictationBaseNote = this.actionForm.note?.trim() ?? '';
-    recognition.onstart = () => this.listening.set(true);
-    recognition.onend = () => this.listening.set(false);
-    recognition.onerror = () => {
-      this.listening.set(false);
-      this.error.set('Voice dictation stopped. You can type the note manually.');
-    };
-    recognition.onresult = (event: SpeechRecognitionEventLike) => {
-      const transcript = finalTranscript(event);
-      if (!transcript) {
-        return;
-      }
-      this.actionForm.note = appendDictation(this.dictationBaseNote, transcript);
-      this.saveActionDraft();
-    };
-    recognition.start();
   }
 
   private async runAction(job: WorkerAssignedJob, request: WorkerJobActionRequest): Promise<boolean> {
@@ -2503,11 +2534,6 @@ export class WorkerJobDetailComponent implements OnDestroy {
   }
 }
 
-interface SpeechRecognitionWindow {
-  SpeechRecognition?: SpeechRecognitionConstructor;
-  webkitSpeechRecognition?: SpeechRecognitionConstructor;
-}
-
 interface MaintenanceRecordForm {
   callTypes: Record<string, boolean>;
   otherCallType: string;
@@ -2616,6 +2642,24 @@ function maintenanceRecordData(form: MaintenanceRecordForm): MaintenanceRecordDa
   };
 }
 
+function maintenanceRecordHasFieldData(record: MaintenanceRecordData | null | undefined): boolean {
+  if (!record) {
+    return false;
+  }
+  const hasChecked = (values: Record<string, boolean> | undefined): boolean => Object.values(values ?? {}).some(Boolean);
+  const hasText = (values: Record<string, string> | undefined): boolean =>
+    Object.values(values ?? {}).some((value) => String(value ?? '').trim().length > 0);
+  return hasChecked(record.callTypes)
+    || String(record.otherCallType ?? '').trim().length > 0
+    || hasChecked(record.serviceChecks)
+    || hasText(record.measurements)
+    || hasText(record.chemicalValues)
+    || hasChecked(record.adjusted)
+    || hasChecked(record.withinRange)
+    || hasText(record.deliveries)
+    || String(record.clientNote ?? '').trim().length > 0;
+}
+
 function deliveryForMaterial(material: WorkerJobMaterial, deliveries: MaintenanceTemplateDelivery[]): MaintenanceTemplateDelivery | null {
   const rawMaterialLabel = [material.itemName, material.description].filter(Boolean).join(' ');
   const materialLabel = normalizeText(rawMaterialLabel);
@@ -2698,54 +2742,6 @@ function maintenanceRecordNote(job: WorkerAssignedJob, template: MaintenanceReco
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-interface SpeechRecognitionConstructor {
-  new (): SpeechRecognitionLike;
-}
-
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  start(): void;
-}
-
-interface SpeechRecognitionEventLike {
-  resultIndex?: number;
-  results?: ArrayLike<SpeechRecognitionResultLike>;
-}
-
-interface SpeechRecognitionResultLike extends ArrayLike<{ transcript?: string }> {
-  isFinal?: boolean;
-}
-
-function finalTranscript(event: SpeechRecognitionEventLike): string {
-  const results = event.results;
-  if (!results?.length) {
-    return '';
-  }
-  const start = event.resultIndex ?? 0;
-  const transcripts: string[] = [];
-  for (let index = start; index < results.length; index++) {
-    const result = results[index];
-    if (result && result.isFinal !== false) {
-      const transcript = result[0]?.transcript?.trim();
-      if (transcript) {
-        transcripts.push(transcript);
-      }
-    }
-  }
-  return transcripts.join(' ').trim();
-}
-
-function appendDictation(baseNote: string, transcript: string): string {
-  return baseNote ? `${baseNote}\n${transcript}` : transcript;
 }
 
 function viewAction(panel: WorkerDetailPanel): WorkerJobAction {

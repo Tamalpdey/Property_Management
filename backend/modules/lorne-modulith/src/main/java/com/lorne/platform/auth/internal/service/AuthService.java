@@ -5,11 +5,13 @@ import com.lorne.platform.auth.internal.dto.LoginRequest;
 import com.lorne.platform.auth.internal.dto.LoginResponse;
 import com.lorne.platform.auth.internal.dto.LogoutRequest;
 import com.lorne.platform.auth.internal.dto.RefreshTokenRequest;
+import com.lorne.platform.auth.internal.dto.UpdateProfilePhotoRequest;
 import com.lorne.platform.auth.internal.entity.UserAccount;
 import com.lorne.platform.auth.internal.entity.UserStatus;
 import com.lorne.platform.auth.internal.repository.UserAccountRepository;
 import com.lorne.platform.auth.internal.repository.UserTenantRoleRepository;
 import com.lorne.platform.auth.internal.security.TokenProvider;
+import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.security.LorneRole;
 import com.lorne.platform.security.RolePermissionRegistry;
 import com.lorne.platform.shared.exception.ErrorCode;
@@ -25,6 +27,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -45,6 +48,7 @@ public class AuthService {
     private final TokenProvider tokenProvider;
     private final RolePermissionRegistry rolePermissionRegistry;
     private final JdbcTemplate jdbcTemplate;
+    private final AuditWriter auditWriter;
     private final SecureRandom secureRandom = new SecureRandom();
     private final Duration workerRefreshTokenExpiration;
     private final Duration tenantRefreshTokenExpiration;
@@ -57,6 +61,7 @@ public class AuthService {
             TokenProvider tokenProvider,
             RolePermissionRegistry rolePermissionRegistry,
             JdbcTemplate jdbcTemplate,
+            AuditWriter auditWriter,
             @Value("${lorne.jwt.refresh-token.worker-expiration-days:${LORNE_REFRESH_TOKEN_WORKER_EXPIRATION_DAYS:30}}") long workerRefreshTokenExpirationDays,
             @Value("${lorne.jwt.refresh-token.tenant-expiration-days:${LORNE_REFRESH_TOKEN_TENANT_EXPIRATION_DAYS:7}}") long tenantRefreshTokenExpirationDays,
             @Value("${lorne.jwt.refresh-token.admin-expiration-days:${LORNE_REFRESH_TOKEN_ADMIN_EXPIRATION_DAYS:1}}") long adminRefreshTokenExpirationDays
@@ -67,6 +72,7 @@ public class AuthService {
         this.tokenProvider = tokenProvider;
         this.rolePermissionRegistry = rolePermissionRegistry;
         this.jdbcTemplate = jdbcTemplate;
+        this.auditWriter = auditWriter;
         this.workerRefreshTokenExpiration = Duration.ofDays(workerRefreshTokenExpirationDays);
         this.tenantRefreshTokenExpiration = Duration.ofDays(tenantRefreshTokenExpirationDays);
         this.adminRefreshTokenExpiration = Duration.ofDays(adminRefreshTokenExpirationDays);
@@ -133,14 +139,31 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public CurrentUserResponse currentUser(JwtPrincipal principal) {
+        var user = userAccountRepository.findById(principal.userId())
+                .orElseThrow(this::invalidCredentials);
         return new CurrentUserResponse(
                 principal.userId(),
                 principal.tenantId(),
-                principal.displayName(),
-                principal.email(),
+                user.displayName(),
+                user.profilePhotoUrl(),
+                user.email(),
                 principal.roles(),
                 principal.permissions()
         );
+    }
+
+    @Transactional
+    public CurrentUserResponse updateProfilePhoto(JwtPrincipal principal, UpdateProfilePhotoRequest request) {
+        var profilePhotoUrl = text(request == null ? null : request.profilePhotoUrl());
+        jdbcTemplate.update("""
+                UPDATE app_users
+                SET profile_photo_url = ?, updated_at = now()
+                WHERE id = ?
+                """, profilePhotoUrl, principal.userId());
+        auditWriter.record(principal.tenantId(), principal.userId(), "USER_PROFILE_PHOTO_UPDATED", "USER", principal.userId(), Map.of(
+                "profilePhotoConfigured", profilePhotoUrl != null
+        ));
+        return currentUser(principal);
     }
 
     private CurrentUserResponse buildCurrentUser(UserAccount user, UUID requestedTenantId) {
@@ -181,7 +204,7 @@ public class AuthService {
                 .sorted(Comparator.naturalOrder())
                 .toList();
 
-        return new CurrentUserResponse(user.id(), tenantId, user.displayName(), user.email(), roles, permissions);
+        return new CurrentUserResponse(user.id(), tenantId, user.displayName(), user.profilePhotoUrl(), user.email(), roles, permissions);
     }
 
     private LoginResponse sessionResponse(CurrentUserResponse currentUser, IssuedRefreshToken refreshToken) {
@@ -280,6 +303,10 @@ public class AuthService {
             return null;
         }
         return source.length() > 80 ? source.substring(0, 80) : source;
+    }
+
+    private String text(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private LorneException invalidCredentials() {

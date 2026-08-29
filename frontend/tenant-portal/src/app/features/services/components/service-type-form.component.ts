@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
@@ -180,6 +180,7 @@ export class ServiceTypeFormComponent {
   readonly serviceType = input<ServiceType | null>(null);
   readonly saving = input(false);
   readonly createService = output<CreateServiceTypeRequest>();
+  private readonly cdr = inject(ChangeDetectorRef);
   protected form: CreateServiceTypeRequest = this.blankForm();
 
   submit(): void {
@@ -198,6 +199,8 @@ export class ServiceTypeFormComponent {
 
   reset(): void {
     this.form = this.blankForm();
+    this.maintenanceTemplatePreset = 'none';
+    this.cdr.detectChanges();
   }
 
   loadService(serviceType: ServiceType): void {
@@ -210,6 +213,7 @@ export class ServiceTypeFormComponent {
       maintenanceRecordTemplate: this.copyTemplate(serviceType.maintenanceRecordTemplate)
     };
     this.maintenanceTemplatePreset = this.presetForTemplate(serviceType.maintenanceRecordTemplate);
+    this.cdr.detectChanges();
   }
 
   private blankForm(): CreateServiceTypeRequest {

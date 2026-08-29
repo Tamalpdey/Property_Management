@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import type { TenantSettingsRecord, UpdateTenantSettingsRequest } from '@lorne/contracts';
+import { AuthService } from '../../core/services/auth.service';
 import { TenantSettingsService } from './services/tenant-settings.service';
 
 type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
@@ -286,6 +287,40 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
 
         <aside class="space-y-3">
           <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            <p class="text-xs font-black uppercase tracking-wide text-teal-700">Your profile</p>
+            <div class="mt-3 flex items-center gap-3">
+              <span class="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full border border-slate-200 bg-teal-50 text-lg font-black text-teal-800">
+                @if (userPhotoUrl()) {
+                  <img class="h-full w-full object-cover" [src]="userPhotoUrl()" [alt]="userDisplayName() + ' photo'" />
+                } @else {
+                  {{ userInitials() }}
+                }
+              </span>
+              <div class="min-w-0">
+                <p class="truncate text-base font-black text-slate-950">{{ userDisplayName() }}</p>
+                <p class="truncate text-xs font-semibold text-slate-500">{{ userEmail() }}</p>
+              </div>
+            </div>
+            <input
+              #profilePhotoInput
+              class="hidden"
+              type="file"
+              accept="image/*"
+              (change)="selectProfilePhoto($event)"
+            />
+            <button
+              pButton
+              type="button"
+              severity="secondary"
+              icon="pi pi-upload"
+              label="Upload user photo"
+              class="mt-3 w-full justify-center"
+              [loading]="uploadingProfilePhoto()"
+              (click)="profilePhotoInput.click()"
+            ></button>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <p class="text-xs font-black uppercase tracking-wide text-teal-700">Brand preview</p>
             <div class="mt-3 rounded-lg p-4 text-white" [style.background]="form.themePrimaryColor || '#0f766e'">
               <div class="flex items-start justify-between gap-3">
@@ -365,6 +400,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
   `]
 })
 export class TenantSettingsPageComponent {
+  private readonly auth = inject(AuthService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
   protected readonly tabs: Array<{ key: SettingsTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'pi pi-building' },
@@ -377,6 +413,7 @@ export class TenantSettingsPageComponent {
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
   protected readonly uploadingLogo = signal(false);
+  protected readonly uploadingProfilePhoto = signal(false);
   protected readonly testingEmail = signal(false);
   protected readonly error = signal('');
   protected readonly message = signal('');
@@ -387,6 +424,10 @@ export class TenantSettingsPageComponent {
     body: ''
   };
   protected readonly brandName = computed(() => this.form.organizationName || this.settings()?.tenantName || 'Tenant');
+  protected readonly userPhotoUrl = computed(() => this.auth.currentUser()?.profilePhotoUrl || '');
+  protected readonly userDisplayName = computed(() => this.displayName(this.auth.currentUser()));
+  protected readonly userEmail = computed(() => this.auth.currentUser()?.email || '');
+  protected readonly userInitials = computed(() => this.initials(this.userDisplayName()));
 
   constructor() {
     void this.load();
@@ -465,6 +506,41 @@ export class TenantSettingsPageComponent {
 
   protected clearLogo(): void {
     this.form.logoUrl = '';
+  }
+
+  protected async selectProfilePhoto(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || this.uploadingProfilePhoto()) {
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      this.error.set('Choose an image file for your profile photo.');
+      return;
+    }
+    if (file.size <= 0 || file.size > 10 * 1024 * 1024) {
+      this.error.set('Profile photo must be between 1 byte and 10 MB.');
+      return;
+    }
+
+    this.uploadingProfilePhoto.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const upload = await firstValueFrom(this.auth.profilePhotoUploadUrl({
+        fileName: file.name,
+        contentType: file.type,
+        byteSize: file.size
+      }));
+      await firstValueFrom(this.auth.uploadProfilePhoto(upload, file));
+      await this.auth.updateProfilePhoto(this.auth.profilePhotoUrl(upload.documentId));
+      this.message.set('User profile photo updated.');
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to upload user profile photo.'));
+    } finally {
+      this.uploadingProfilePhoto.set(false);
+    }
   }
 
   protected async sendTestEmail(): Promise<void> {
@@ -565,6 +641,35 @@ export class TenantSettingsPageComponent {
       return 'auto-send enabled';
     }
     return 'manual';
+  }
+
+  private initials(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'U';
+  }
+
+  private displayName(user: { displayName?: string; email?: string } | null): string {
+    if (!user) {
+      return 'User';
+    }
+    const name = user.displayName?.trim();
+    if (name) {
+      return name;
+    }
+    const emailName = user.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
+    return emailName ? this.titleCase(emailName) : 'User';
+  }
+
+  private titleCase(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
   }
 }
 

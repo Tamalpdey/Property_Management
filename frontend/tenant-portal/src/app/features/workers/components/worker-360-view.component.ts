@@ -6,13 +6,14 @@ import type { TenantAsset, WorkerActivityRecord, WorkerRecord, WorkOrderRecord }
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import { WorkerManagementService } from '../services/worker-management.service';
+import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
 
 type Worker360Tab = 'OVERVIEW' | 'WORK' | 'ACTIVITY' | 'SCHEDULE' | 'TOOLS' | 'SAFETY';
 
 @Component({
   selector: 'lorne-worker-360-view',
   standalone: true,
-  imports: [ButtonModule, DatePipe, FormsModule, TagModule],
+  imports: [ButtonModule, DatePipe, FormsModule, TagModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="flex h-full flex-col gap-3 overflow-auto pr-1">
@@ -364,6 +365,9 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'ACTIVITY' | 'SCHEDULE' | 'TOOLS' | 'S
                 Reason *
                 <textarea class="min-h-20 rounded-md border border-amber-200 px-2 py-2 text-sm font-semibold normal-case text-slate-800" placeholder="Example: corrected from phone call after worker missed activity close-out." [(ngModel)]="activityForm.reason"></textarea>
               </label>
+              <div class="flex flex-wrap items-center gap-2">
+                <lorne-voice-note-button [text]="activityForm.reason" label="Speak reason" [showUnsupported]="true" (textChange)="activityForm.reason = $event" />
+              </div>
               <label class="grid gap-1 text-xs font-black uppercase text-slate-600">
                 Type
                 <select class="h-10 rounded-md border border-slate-300 px-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.activityType" (ngModelChange)="syncActivityTitle()">
@@ -402,6 +406,9 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'ACTIVITY' | 'SCHEDULE' | 'TOOLS' | 'S
                 Notes
                 <textarea class="min-h-20 rounded-md border border-slate-300 px-2 py-2 text-sm font-semibold normal-case text-slate-800" [(ngModel)]="activityForm.notes"></textarea>
               </label>
+              <div class="flex flex-wrap items-center gap-2">
+                <lorne-voice-note-button [text]="activityForm.notes" label="Speak activity note" (textChange)="activityForm.notes = $event" />
+              </div>
               <button
                 pButton
                 type="button"

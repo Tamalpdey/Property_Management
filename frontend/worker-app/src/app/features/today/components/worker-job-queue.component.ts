@@ -78,6 +78,10 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
               </span>
               <span class="mt-2 block text-base font-black leading-tight text-slate-950">{{ job.title }}</span>
               <span class="mt-1 block truncate text-sm font-bold text-slate-700">{{ job.propertyName }}</span>
+              <span class="mt-1 flex flex-wrap items-center gap-1.5">
+                <span class="rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[0.65rem] font-black text-teal-700">{{ job.propertyCode }}</span>
+                <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.65rem] font-black text-slate-600">{{ job.ownerCode }}</span>
+              </span>
               <span class="mt-1 block truncate text-xs font-semibold text-slate-500">{{ job.ownerName }}{{ job.serviceName ? ' · ' + job.serviceName : '' }}</span>
             </button>
           } @empty {
@@ -106,6 +110,10 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
                 </span>
                 <span class="mt-1 block text-base font-black text-slate-950">{{ job.title }}</span>
                 <span class="mt-1 block truncate text-sm font-bold text-slate-700">{{ job.propertyName }}</span>
+                <span class="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span class="rounded bg-teal-100 px-1.5 py-0.5 font-mono text-[0.65rem] font-black text-teal-800">{{ job.propertyCode }}</span>
+                  <span class="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[0.65rem] font-black text-amber-800">{{ job.ownerCode }}</span>
+                </span>
               </button>
             }
           </div>
@@ -177,7 +185,7 @@ export class WorkerJobQueueComponent {
 
   private matches(job: WorkerAssignedJob): boolean {
     const query = this.search().trim().toLowerCase();
-    const matchesQuery = !query || [job.workOrderNumber, job.title, job.propertyName, job.ownerName, job.serviceName ?? ''].some((value) => value.toLowerCase().includes(query));
+    const matchesQuery = !query || [job.workOrderNumber, job.propertyCode, job.ownerCode, job.title, job.propertyName, job.ownerName, job.serviceName ?? ''].some((value) => value.toLowerCase().includes(query));
     return matchesQuery && this.matchesFilter(job);
   }
 

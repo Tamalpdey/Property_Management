@@ -7,6 +7,7 @@ import java.util.UUID;
 public record TenantUserDto(
         UUID id,
         String displayName,
+        String profilePhotoUrl,
         String email,
         String phone,
         String status,

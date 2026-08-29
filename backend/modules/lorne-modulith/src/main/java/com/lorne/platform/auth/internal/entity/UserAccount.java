@@ -23,6 +23,8 @@ public class UserAccount {
     @Column(nullable = false)
     private String displayName;
 
+    private String profilePhotoUrl;
+
     private String phone;
 
     private String passwordHash;
@@ -50,6 +52,10 @@ public class UserAccount {
 
     public String displayName() {
         return displayName;
+    }
+
+    public String profilePhotoUrl() {
+        return profilePhotoUrl;
     }
 
     public String passwordHash() {

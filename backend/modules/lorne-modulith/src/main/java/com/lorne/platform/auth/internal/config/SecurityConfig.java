@@ -14,6 +14,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -77,12 +78,21 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/tenant/settings/logo/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/maintenance-requests").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/profile-photo/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/tenant/settings/logo/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    WebSecurityCustomizer publicAssetSecurityCustomizer() {
+        return web -> web.ignoring()
+                .requestMatchers(HttpMethod.GET, "/api/v1/auth/profile-photo/**")
+                .requestMatchers(HttpMethod.GET, "/api/v1/tenant/settings/logo/**");
     }
 
     @Bean

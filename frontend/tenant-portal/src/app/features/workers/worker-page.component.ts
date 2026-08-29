@@ -28,13 +28,14 @@ import { WorkerListComponent } from './components/worker-list.component';
 import { WorkerOnboardingFormComponent } from './components/worker-onboarding-form.component';
 import { WorkerManagementService } from './services/worker-management.service';
 import { TenantAccessService } from '../../core/services/tenant-access.service';
+import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.component';
 
 type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'ALL';
 
 @Component({
   selector: 'lorne-worker-page',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, TagModule, TenantUserDialogComponent, Worker360ViewComponent, WorkerListComponent, WorkerOnboardingFormComponent],
+  imports: [ButtonModule, DialogModule, FormsModule, TagModule, TenantUserDialogComponent, VoiceNoteButtonComponent, Worker360ViewComponent, WorkerListComponent, WorkerOnboardingFormComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-3">
@@ -79,6 +80,7 @@ type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'A
           (editWorkerSection)="openEdit($event.worker, $event.tabIndex)"
           (assignWorkOrder)="openAssignWorkOrder($event)"
           (assignEquipment)="assignEquipment($event)"
+          (messageWorker)="openWorkerMessage($event)"
           (updateWorkerStatus)="updateStatus($event.worker, $event.status)"
           (markWorkerOnLeave)="openLeaveDialog($event)"
           (deleteWorker)="delete($event)"
@@ -223,6 +225,15 @@ type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'A
               <span class="mb-1 block text-sm font-bold text-slate-700">Reason</span>
               <textarea class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold" name="leaveReason" rows="3" [(ngModel)]="leaveForm.leaveReason"></textarea>
             </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <lorne-voice-note-button
+                [text]="leaveForm.leaveReason"
+                label="Speak leave reason"
+                [showUnsupported]="true"
+                (textChange)="leaveForm.leaveReason = $event"
+                (error)="leaveError.set($event)"
+              />
+            </div>
             @if (leaveError()) {
               <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ leaveError() }}</p>
             }
@@ -394,6 +405,19 @@ export class WorkerPageComponent {
     this.assignAsLead.set(false);
     this.assignError.set('');
     this.showAssignWorkOrder.set(true);
+  }
+
+  protected openWorkerMessage(worker: WorkerRecord): void {
+    if (!worker.email) {
+      this.error.set('Create an app login or add an email before starting a worker chat.');
+      return;
+    }
+    void this.router.navigate(['/messages'], {
+      queryParams: {
+        directWorkerEmail: worker.email,
+        directWorkerName: worker.displayName
+      }
+    });
   }
 
   protected onAssignWorkOrderVisible(visible: boolean): void {

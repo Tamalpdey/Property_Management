@@ -5,10 +5,13 @@ import com.lorne.platform.finance.internal.dto.InvoiceDto;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailRequest;
 import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
 import com.lorne.platform.notification.EmailTemplateOperations;
+import com.lorne.platform.notification.EmailLogoRenderer;
 import com.lorne.platform.notification.OutboundEmailAttachment;
+import com.lorne.platform.notification.OutboundEmailInlineImage;
 import com.lorne.platform.notification.OutboundEmailMessage;
 import com.lorne.platform.notification.OutboundMailOperations;
 import com.lorne.platform.tenant.TenantSettingsOperations;
+import com.lorne.platform.tenant.TenantSettingsView;
 import com.lorne.platform.shared.exception.BadRequestException;
 import java.sql.Timestamp;
 import java.util.LinkedHashMap;
@@ -27,6 +30,7 @@ public class InvoiceEmailService {
     private final InvoicePdfService invoicePdfService;
     private final OutboundMailOperations outboundMailOperations;
     private final TenantSettingsOperations tenantSettingsOperations;
+    private final EmailLogoRenderer emailLogoRenderer;
 
     public InvoiceEmailService(
             JdbcTemplate jdbcTemplate,
@@ -34,7 +38,8 @@ public class InvoiceEmailService {
             EmailTemplateOperations emailTemplateOperations,
             InvoicePdfService invoicePdfService,
             OutboundMailOperations outboundMailOperations,
-            TenantSettingsOperations tenantSettingsOperations
+            TenantSettingsOperations tenantSettingsOperations,
+            EmailLogoRenderer emailLogoRenderer
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
@@ -42,6 +47,7 @@ public class InvoiceEmailService {
         this.invoicePdfService = invoicePdfService;
         this.outboundMailOperations = outboundMailOperations;
         this.tenantSettingsOperations = tenantSettingsOperations;
+        this.emailLogoRenderer = emailLogoRenderer;
     }
 
     @Transactional
@@ -56,7 +62,8 @@ public class InvoiceEmailService {
             throw new BadRequestException("Owner billing email is required before sending an invoice.");
         }
         var settings = tenantSettingsOperations.settings(tenantId);
-        var values = templateValues(invoice, settings.invoiceBrandName());
+        var renderContext = templateValues(invoice, settings);
+        var values = renderContext.values();
         var subject = emailTemplateOperations.render(firstNonBlank(safeRequest.subject(), template.subject()), values);
         var body = emailTemplateOperations.render(firstNonBlank(safeRequest.body(), template.body()), values);
         var ccRecipients = emailList(safeRequest.ccEmails());
@@ -67,7 +74,8 @@ public class InvoiceEmailService {
                 body,
                 List.of(new OutboundEmailAttachment(safeFilename(invoice.invoiceNumber()) + ".pdf", invoicePdfService.generate(invoice, tenantId, settings), "application/pdf")),
                 ccRecipients,
-                bccRecipients
+                bccRecipients,
+                renderContext.inlineImages()
         ));
 
         var deliveryLogId = jdbcTemplate.queryForObject("""
@@ -114,10 +122,16 @@ public class InvoiceEmailService {
         return new SendInvoiceEmailResponse(deliveryLogId, delivery.status(), recipient, delivery.sentAt());
     }
 
-    private Map<String, String> templateValues(InvoiceDto invoice, String tenantName) {
+    private EmailRenderContext templateValues(InvoiceDto invoice, TenantSettingsView settings) {
+        var tenantName = settings.invoiceBrandName();
+        var primaryColor = firstNonBlank(settings.themePrimaryColor(), "#0f766e");
+        var accentColor = firstNonBlank(settings.themeAccentColor(), "#2563eb");
+        var logo = emailLogoRenderer.render(settings.logoUrl(), tenantName, primaryColor);
         var values = new LinkedHashMap<String, String>();
         values.put("invoiceNumber", invoice.invoiceNumber());
+        values.put("ownerCode", invoice.ownerCode());
         values.put("ownerName", invoice.ownerName());
+        values.put("propertyCode", invoice.propertyCode());
         values.put("propertyName", invoice.propertyName());
         values.put("propertyAddress", invoice.propertyAddress());
         values.put("workOrderNumber", invoice.workOrderNumber());
@@ -128,7 +142,23 @@ public class InvoiceEmailService {
         values.put("issuedOn", invoice.issuedOn() == null ? "" : invoice.issuedOn().toString());
         values.put("dueOn", invoice.dueOn() == null ? "" : invoice.dueOn().toString());
         values.put("tenantName", tenantName);
-        return values;
+        values.put("tenantPrimaryColor", primaryColor);
+        values.put("tenantAccentColor", accentColor);
+        values.put("tenantLogoUrl", logo.publicUrl());
+        values.put("tenantLogoBlock", logo.htmlBlock());
+        return new EmailRenderContext(values, logo.inlineImages());
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private String money(java.math.BigDecimal value) {
@@ -169,5 +199,11 @@ public class InvoiceEmailService {
             case "AUTO", "MANUAL", "RESEND", "TEST" -> normalized.toUpperCase(java.util.Locale.ROOT);
             default -> fallback;
         };
+    }
+
+    private record EmailRenderContext(
+            Map<String, String> values,
+            List<OutboundEmailInlineImage> inlineImages
+    ) {
     }
 }

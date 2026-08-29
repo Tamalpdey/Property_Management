@@ -18,6 +18,7 @@ import type {
   WorkOrderTask,
   WorkerActivityRecord
 } from '@lorne/contracts';
+import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
 
 type AssignmentOverrideRow = {
   workerId: string;
@@ -114,7 +115,8 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
     InputNumberModule,
     InputTextModule,
     SelectModule,
-    TextareaModule
+    TextareaModule,
+    VoiceNoteButtonComponent
   ],
   template: `
     @if (review(); as data) {
@@ -143,6 +145,14 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
           [(ngModel)]="reason"
           placeholder="Example: Worker forgot to end work before leaving site; corrected from phone call and GPS route."
         ></textarea>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <lorne-voice-note-button
+            [text]="reason"
+            label="Speak reason"
+            [showUnsupported]="true"
+            (textChange)="reason = $event"
+          />
+        </div>
       </section>
 
       <nav class="mt-3 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-1.5 md:grid-cols-4 xl:grid-cols-7">
@@ -216,6 +226,9 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                   Assignment notes
                   <input pInputText class="mt-1 w-full" [(ngModel)]="row.notes" />
                 </label>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <lorne-voice-note-button [text]="row.notes" label="Speak assignment note" (textChange)="row.notes = $event" />
+                </div>
               </article>
             } @empty {
               <div class="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm font-semibold text-slate-500">No assigned workers.</div>
@@ -343,6 +356,9 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                 Activity notes
                 <input pInputText class="mt-1 w-full" [(ngModel)]="row.notes" [disabled]="row.deleted" placeholder="Reason, reference, or correction note" />
               </label>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <lorne-voice-note-button [text]="row.notes" label="Speak activity note" [disabled]="row.deleted" (textChange)="row.notes = $event" />
+              </div>
             </article>
           } @empty {
             <div class="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm font-semibold text-slate-500">No worker activity rows for this work-order day.</div>
@@ -367,6 +383,9 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                   <p class="text-xs font-bold uppercase tracking-wide text-teal-700">{{ row.phase === 'PRE_START' ? 'Pre-start' : 'Completion' }}</p>
                   <p class="font-bold text-slate-950">{{ row.label }}</p>
                   <input pInputText class="mt-2 w-full" [(ngModel)]="row.notes" placeholder="Notes" />
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <lorne-voice-note-button [text]="row.notes" label="Speak checklist note" (textChange)="row.notes = $event" />
+                  </div>
                 </div>
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                   Status
@@ -456,6 +475,9 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
             <label class="block min-w-0">
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Caption <span class="text-red-600">*</span></span>
               <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" name="overrideEvidenceCaption" placeholder="Required evidence note" [(ngModel)]="evidenceCaption" />
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <lorne-voice-note-button [text]="evidenceCaption" label="Speak caption" (textChange)="evidenceCaption = $event" />
+              </div>
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Receipt vendor</span>
@@ -523,6 +545,9 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                 />
               </label>
               <textarea pTextarea rows="3" class="mt-3 w-full" [(ngModel)]="row.note" placeholder="Note"></textarea>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <lorne-voice-note-button [text]="row.note" label="Speak note" (textChange)="row.note = $event" />
+              </div>
             </article>
           } @empty {
             <div class="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm font-semibold text-slate-500">No field notes yet.</div>

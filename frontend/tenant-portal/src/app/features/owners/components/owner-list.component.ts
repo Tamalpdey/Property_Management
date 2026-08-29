@@ -16,7 +16,7 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
   template: `
     <div class="space-y-2">
       <lorne-dense-collection-toolbar
-        placeholder="Search owners by name, email, phone, notes..."
+        placeholder="Search owners by ID, name, email, phone, notes..."
         [query]="collection.query()"
         [totalCount]="owners().length"
         [filteredCount]="collection.filtered().length"
@@ -52,6 +52,7 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                       <div class="min-w-0">
                         <div class="flex items-center gap-2">
                           <p class="truncate font-bold text-slate-950">{{ owner.displayName }}</p>
+                          <span class="rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[0.68rem] font-black text-teal-700">{{ owner.ownerCode }}</span>
                           <p-tag [value]="owner.active ? 'ACTIVE' : 'INACTIVE'" [severity]="owner.active ? 'success' : 'secondary'" />
                         </div>
                         <p class="truncate text-xs text-slate-500">{{ owner.notes || 'No notes' }}</p>
@@ -111,6 +112,7 @@ export class OwnerListComponent {
     (owner) => owner.id,
     (owner) => [
       owner.displayName,
+      owner.ownerCode,
       owner.email,
       owner.phone,
       owner.billingEmail,

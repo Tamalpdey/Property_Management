@@ -78,7 +78,7 @@ public class WorkerJobService {
         var start = Timestamp.from((from == null ? LocalDate.now(zoneId).minusDays(30) : from).atStartOfDay(zoneId).toInstant());
         var end = Timestamp.from((to == null ? LocalDate.now(zoneId).plusDays(60) : to.plusDays(1)).atStartOfDay(zoneId).toInstant());
         var jobs = jdbcTemplate.query("""
-                SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.name AS property_name, c.display_name AS owner_name,
+                SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.property_code, p.name AS property_name, c.owner_code, c.display_name AS owner_name,
                        concat_ws(', ', p.address_line1, nullif(p.address_line2, ''), p.city, p.province_code, p.postal_code) AS address,
                        st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
@@ -94,14 +94,55 @@ public class WorkerJobService {
                 WHERE woa.tenant_id = ?
                   AND woa.worker_id = ?
                   AND wo.status <> 'CANCELLED'
-                  AND (wo.scheduled_start IS NULL OR (wo.scheduled_start >= ? AND wo.scheduled_start < ?))
+                  AND (
+                    wo.scheduled_start IS NULL
+                    OR (wo.scheduled_start >= ? AND wo.scheduled_start < ?)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM audit_logs al
+                        WHERE al.tenant_id = woa.tenant_id
+                          AND al.resource_type = 'WORK_ORDER'
+                          AND al.resource_id = wo.id
+                          AND al.created_at >= ?
+                          AND al.created_at < ?
+                          AND al.metadata ->> 'workerId' = ?
+                          AND al.action IN (
+                            'WORKER_START_TRAVEL',
+                            'WORKER_ARRIVE_ON_SITE',
+                            'WORKER_START_WORK',
+                            'WORKER_PAUSE_WORK',
+                            'WORKER_RESUME_WORK',
+                            'WORKER_COMPLETE_WORK',
+                            'WORKER_ROUTE_STOP_ARRIVED',
+                            'WORKER_ROUTE_STOP_COMPLETED',
+                            'WORKER_ROUTE_STOP_SKIPPED',
+                            'WORKER_NOTE_ADDED',
+                            'WORKER_NOTE_UPDATED',
+                            'WORKER_MATERIAL_USED',
+                            'WORKER_PHOTO_CAPTURED',
+                            'WORKER_PURCHASE_RECEIPT_UPLOADED',
+                            'WORKER_MAINTENANCE_RECORD_SAVED'
+                          )
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM work_order_time_entries wote
+                        WHERE wote.tenant_id = woa.tenant_id
+                          AND wote.work_order_id = wo.id
+                          AND wote.worker_id = woa.worker_id
+                          AND wote.started_at < ?
+                          AND COALESCE(wote.ended_at, wote.started_at) >= ?
+                    )
+                  )
                 ORDER BY wo.scheduled_start NULLS LAST, wo.priority DESC, wo.updated_at DESC
                 """, (rs, rowNum) -> new WorkerAssignedJobDto(
                 rs.getObject("id", UUID.class),
                 rs.getString("work_order_number"),
                 rs.getString("work_order_type"),
                 rs.getString("title"),
+                rs.getString("property_code"),
                 rs.getString("property_name"),
+                rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getString("address"),
                 rs.getString("service_name"),
@@ -126,7 +167,7 @@ public class WorkerJobService {
                 List.of(),
                 List.of(),
                 List.of()
-        ), tenantId, worker.id(), start, end);
+        ), tenantId, worker.id(), start, end, start, end, worker.id().toString(), end, start);
         return jobs.stream()
                 .map(job -> jobWithDetails(tenantId, worker.id(), worker.userId(), job))
                 .toList();
@@ -548,6 +589,7 @@ public class WorkerJobService {
         if (openRouteStops > 0) {
             throw new BadRequestException("Complete or skip all route stops before submitting this work order.");
         }
+        requireMaintenanceRecordFilled(tenantId, worker, workOrderId);
         if (!pickupDelivery) {
             var remainingRequiredChecks = remainingRequiredChecklistCount(tenantId, worker.id(), workOrderId, "COMPLETION");
             if (remainingRequiredChecks > 0) {
@@ -583,6 +625,65 @@ public class WorkerJobService {
                 "actionAt", actionAt.toString(),
                 "note", note == null ? "" : note
         ));
+    }
+
+    private void requireMaintenanceRecordFilled(UUID tenantId, WorkerRef worker, UUID workOrderId) {
+        var template = workOrderTemplate(tenantId, workOrderId);
+        if (!Boolean.TRUE.equals(template.get("enabled"))) {
+            return;
+        }
+        var filled = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM work_order_maintenance_records womr
+                    WHERE womr.tenant_id = ?
+                      AND womr.work_order_id = ?
+                      AND womr.worker_id = ?
+                      AND (
+                          nullif(trim(coalesce(womr.note, '')), '') IS NOT NULL
+                          OR nullif(trim(coalesce(womr.record_data ->> 'otherCallType', '')), '') IS NOT NULL
+                          OR nullif(trim(coalesce(womr.record_data ->> 'clientNote', '')), '') IS NOT NULL
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each(coalesce(womr.record_data -> 'callTypes', '{}'::jsonb)) item
+                              WHERE item.value = 'true'::jsonb
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each(coalesce(womr.record_data -> 'serviceChecks', '{}'::jsonb)) item
+                              WHERE item.value = 'true'::jsonb
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each(coalesce(womr.record_data -> 'adjusted', '{}'::jsonb)) item
+                              WHERE item.value = 'true'::jsonb
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each(coalesce(womr.record_data -> 'withinRange', '{}'::jsonb)) item
+                              WHERE item.value = 'true'::jsonb
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each_text(coalesce(womr.record_data -> 'measurements', '{}'::jsonb)) item
+                              WHERE nullif(trim(item.value), '') IS NOT NULL
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each_text(coalesce(womr.record_data -> 'chemicalValues', '{}'::jsonb)) item
+                              WHERE nullif(trim(item.value), '') IS NOT NULL
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM jsonb_each_text(coalesce(womr.record_data -> 'deliveries', '{}'::jsonb)) item
+                              WHERE nullif(trim(item.value), '') IS NOT NULL
+                          )
+                      )
+                )
+                """, Boolean.class, tenantId, workOrderId, worker.id()));
+        if (!filled) {
+            throw new BadRequestException("%s must be filled before submitting this work order.".formatted(stringOrDefault(template.get("title"), "Maintenance record")));
+        }
     }
 
     private void leaveEmergency(UUID tenantId, WorkerRef worker, UUID userId, UUID workOrderId, String note, Instant actionAt) {
@@ -918,7 +1019,7 @@ public class WorkerJobService {
 
     private WorkerAssignedJobDto job(UUID tenantId, WorkerRef worker, UUID workOrderId) {
         var jobs = jdbcTemplate.query("""
-                SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.name AS property_name, c.display_name AS owner_name,
+                SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.property_code, p.name AS property_name, c.owner_code, c.display_name AS owner_name,
                        concat_ws(', ', p.address_line1, nullif(p.address_line2, ''), p.city, p.province_code, p.postal_code) AS address,
                        st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
@@ -937,7 +1038,9 @@ public class WorkerJobService {
                 rs.getString("work_order_number"),
                 rs.getString("work_order_type"),
                 rs.getString("title"),
+                rs.getString("property_code"),
                 rs.getString("property_name"),
+                rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getString("address"),
                 rs.getString("service_name"),
@@ -974,7 +1077,9 @@ public class WorkerJobService {
                 job.workOrderNumber(),
                 job.workOrderType(),
                 job.title(),
+                job.propertyCode(),
                 job.propertyName(),
+                job.ownerCode(),
                 job.ownerName(),
                 job.address(),
                 job.serviceName(),

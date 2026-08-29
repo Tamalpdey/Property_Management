@@ -9,6 +9,7 @@ import com.lorne.platform.property.internal.dto.ServiceCatalogResponse;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.DuplicateResourceException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,17 +52,79 @@ public class ServiceCatalogService {
     public ServiceCatalogResponse.ServiceCategoryDto createCategory(UUID tenantId, UUID actorUserId, CreateServiceCategoryRequest request) {
         try {
             var id = jdbcTemplate.queryForObject("""
-                    INSERT INTO service_categories (tenant_id, name)
-                    VALUES (?, ?)
+                    INSERT INTO service_categories (tenant_id, name, wsib_rate_percent, created_by, updated_by)
+                    VALUES (?, ?, ?, ?, ?)
                     RETURNING id
-                    """, UUID.class, tenantId, request.name());
+                    """, UUID.class, tenantId, request.name(), request.wsibRatePercent(), actorUserId, actorUserId);
             auditWriter.record(tenantId, actorUserId, "SERVICE_CATEGORY_CREATED", "SERVICE_CATEGORY", id, Map.of(
-                    "name", request.name()
+                    "name", request.name(),
+                    "wsibRatePercent", wsibRateText(request.wsibRatePercent())
             ));
-            return new ServiceCatalogResponse.ServiceCategoryDto(id, request.name(), true);
+            return new ServiceCatalogResponse.ServiceCategoryDto(id, request.name(), request.wsibRatePercent(), true);
         } catch (DuplicateKeyException exception) {
             throw new DuplicateResourceException("Service category already exists.");
         }
+    }
+
+    @Transactional
+    public ServiceCatalogResponse.ServiceCategoryDto updateCategory(UUID tenantId, UUID actorUserId, UUID categoryId, CreateServiceCategoryRequest request) {
+        requireServiceCategory(tenantId, categoryId);
+        try {
+            var updated = jdbcTemplate.update("""
+                    UPDATE service_categories
+                    SET name = ?, wsib_rate_percent = ?, updated_at = now(), updated_by = ?
+                    WHERE tenant_id = ? AND id = ?
+                    """,
+                    request.name(),
+                    request.wsibRatePercent(),
+                    actorUserId,
+                    tenantId,
+                    categoryId
+            );
+            if (updated != 1) {
+                throw new ResourceNotFoundException("Service category not found.");
+            }
+            var category = serviceCategory(tenantId, categoryId);
+            auditWriter.record(tenantId, actorUserId, "SERVICE_CATEGORY_UPDATED", "SERVICE_CATEGORY", categoryId, Map.of(
+                    "name", category.name(),
+                    "wsibRatePercent", wsibRateText(category.wsibRatePercent())
+            ));
+            return category;
+        } catch (DuplicateKeyException exception) {
+            throw new DuplicateResourceException("Service category already exists.");
+        }
+    }
+
+    @Transactional
+    public void deleteCategory(UUID tenantId, UUID actorUserId, UUID categoryId) {
+        var category = serviceCategory(tenantId, categoryId);
+        if (hasCategoryHistory(tenantId, categoryId)) {
+            throw new BadRequestException("Service category has linked services. Deactivate the category instead, or move services to another category before deleting.");
+        }
+        jdbcTemplate.update("DELETE FROM service_categories WHERE tenant_id = ? AND id = ?", tenantId, categoryId);
+        auditWriter.record(tenantId, actorUserId, "SERVICE_CATEGORY_DELETED", "SERVICE_CATEGORY", categoryId, Map.of(
+                "name", category.name(),
+                "wsibRatePercent", wsibRateText(category.wsibRatePercent())
+        ));
+    }
+
+    @Transactional
+    public ServiceCatalogResponse.ServiceCategoryDto updateCategoryStatus(UUID tenantId, UUID actorUserId, UUID categoryId, boolean active) {
+        requireServiceCategory(tenantId, categoryId);
+        var updated = jdbcTemplate.update("""
+                UPDATE service_categories
+                SET active = ?, updated_at = now(), updated_by = ?
+                WHERE tenant_id = ? AND id = ?
+                """, active, actorUserId, tenantId, categoryId);
+        if (updated != 1) {
+            throw new ResourceNotFoundException("Service category not found.");
+        }
+        var category = serviceCategory(tenantId, categoryId);
+        auditWriter.record(tenantId, actorUserId, active ? "SERVICE_CATEGORY_ACTIVATED" : "SERVICE_CATEGORY_DEACTIVATED", "SERVICE_CATEGORY", categoryId, Map.of(
+                "name", category.name(),
+                "active", active
+        ));
+        return category;
     }
 
     @Transactional
@@ -175,15 +238,33 @@ public class ServiceCatalogService {
 
     private List<ServiceCatalogResponse.ServiceCategoryDto> categories(UUID tenantId) {
         return jdbcTemplate.query("""
-                SELECT id, name, active
+                SELECT id, name, wsib_rate_percent, active
                 FROM service_categories
                 WHERE tenant_id = ?
                 ORDER BY name
                 """, (rs, rowNum) -> new ServiceCatalogResponse.ServiceCategoryDto(
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
+                rs.getBigDecimal("wsib_rate_percent"),
                 rs.getBoolean("active")
         ), tenantId);
+    }
+
+    private ServiceCatalogResponse.ServiceCategoryDto serviceCategory(UUID tenantId, UUID categoryId) {
+        var result = jdbcTemplate.query("""
+                SELECT id, name, wsib_rate_percent, active
+                FROM service_categories
+                WHERE tenant_id = ? AND id = ?
+                """, (rs, rowNum) -> new ServiceCatalogResponse.ServiceCategoryDto(
+                rs.getObject("id", UUID.class),
+                rs.getString("name"),
+                rs.getBigDecimal("wsib_rate_percent"),
+                rs.getBoolean("active")
+        ), tenantId, categoryId);
+        if (result.isEmpty()) {
+            throw new ResourceNotFoundException("Service category not found.");
+        }
+        return result.getFirst();
     }
 
     private List<ServiceCatalogResponse.ServiceTypeDto> serviceTypes(UUID tenantId) {
@@ -264,6 +345,20 @@ public class ServiceCatalogService {
                 tenantId, serviceTypeId
         );
         return count != null && count > 0;
+    }
+
+    private boolean hasCategoryHistory(UUID tenantId, UUID categoryId) {
+        var count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM service_types WHERE tenant_id = ? AND category_id = ?",
+                Long.class,
+                tenantId,
+                categoryId
+        );
+        return count != null && count > 0;
+    }
+
+    private String wsibRateText(BigDecimal rate) {
+        return rate == null ? "" : rate.stripTrailingZeros().toPlainString();
     }
 
     private String templateJson(Map<String, Object> template) {

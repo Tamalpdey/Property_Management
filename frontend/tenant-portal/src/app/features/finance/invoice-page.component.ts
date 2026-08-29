@@ -71,10 +71,16 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                     </td>
                     <td class="px-3 py-3">
                       <p class="font-semibold text-slate-800">{{ invoice.ownerName }}</p>
+                      @if (invoice.ownerCode) {
+                        <p class="mt-1 inline-flex rounded-full bg-teal-50 px-2 py-0.5 font-mono text-[0.68rem] font-black uppercase tracking-wide text-teal-700">{{ invoice.ownerCode }}</p>
+                      }
                       <p class="text-xs text-slate-500">{{ invoice.ownerBillingEmail || invoice.ownerEmail || 'No billing email' }}</p>
                     </td>
                     <td class="px-3 py-3">
                       <p class="font-semibold text-teal-700">{{ invoicePropertySummary(invoice) }}</p>
+                      @if (invoice.propertyCode) {
+                        <p class="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[0.68rem] font-black uppercase tracking-wide text-slate-600">{{ invoice.propertyCode }}</p>
+                      }
                       <p class="line-clamp-1 text-xs text-slate-500">{{ invoiceWorkSummary(invoice) }}</p>
                     </td>
                     <td class="px-3 py-3"><p-tag [value]="statusText(invoice.status)" [severity]="statusSeverity(invoice.status)" /></td>
@@ -128,6 +134,9 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                       <div class="rounded-md bg-white px-2.5 py-2 text-xs">
                         <p class="font-black text-slate-950">{{ workOrder.workOrderNumber }} · {{ workOrder.title }}</p>
                         <p class="mt-0.5 font-semibold text-slate-500">{{ workOrder.propertyName || 'No property' }} @if (workOrder.serviceName) { · {{ workOrder.serviceName }} }</p>
+                        @if (workOrder.propertyCode) {
+                          <p class="mt-1 font-mono text-[0.68rem] font-black uppercase tracking-wide text-teal-700">{{ workOrder.propertyCode }}</p>
+                        }
                       </div>
                     }
                   </div>
@@ -404,10 +413,13 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                 @for (workOrder of batchCandidates(); track workOrder.id) {
                   <label class="mb-2 grid cursor-pointer gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 hover:border-teal-300 sm:grid-cols-[auto_1fr_auto] sm:items-start">
                     <input class="mt-1" type="checkbox" [checked]="batchForm.workOrderIds.includes(workOrder.id)" (change)="toggleBatchWorkOrder(workOrder.id, $event)" />
-                    <span>
-                      <span class="block text-sm font-black text-slate-950">{{ workOrder.workOrderNumber }} · {{ workOrder.title }}</span>
-                      <span class="mt-0.5 block text-xs font-semibold text-slate-500">{{ workOrder.propertyName }} · {{ workOrder.serviceName || 'General service' }}</span>
-                    </span>
+                      <span>
+                        <span class="block text-sm font-black text-slate-950">{{ workOrder.workOrderNumber }} · {{ workOrder.title }}</span>
+                        <span class="mt-0.5 block text-xs font-semibold text-slate-500">{{ workOrder.propertyName }} · {{ workOrder.serviceName || 'General service' }}</span>
+                        <span class="mt-1 block font-mono text-[0.68rem] font-black uppercase tracking-wide text-teal-700">
+                          {{ workOrder.propertyCode || 'No property ID' }}
+                        </span>
+                      </span>
                     <span class="rounded-full bg-teal-50 px-2 py-1 text-xs font-black text-teal-700">{{ statusText(workOrder.status) }}</span>
                   </label>
                 } @empty {
@@ -1041,7 +1053,9 @@ function render(template: string, invoice: InvoiceRecord, settings?: TenantSetti
   const brand = invoiceBrand(settings);
   const values: Record<string, string> = {
     invoiceNumber: invoice.invoiceNumber,
+    ownerCode: invoice.ownerCode || '',
     ownerName: invoice.ownerName,
+    propertyCode: invoice.propertyCode || '',
     propertyName: invoicePropertySummaryText(invoice),
     propertyAddress: invoice.propertyAddress || '',
     workOrderNumber: invoiceWorkSummaryText(invoice),
@@ -1114,8 +1128,10 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
         <section>
           <p class="label">Invoice to</p>
           <p>${escapeHtml(invoice.ownerName)}</p>
+          ${invoice.ownerCode ? `<p>Owner ID: ${escapeHtml(invoice.ownerCode)}</p>` : ''}
           <p>${escapeHtml(invoice.ownerBillingEmail || invoice.ownerEmail || '')}</p>
           <p>${escapeHtml(invoicePropertySummaryText(invoice))}</p>
+          ${invoice.propertyCode ? `<p>Property ID: ${escapeHtml(invoice.propertyCode)}</p>` : ''}
           <p>${escapeHtml(invoice.propertyAddress || '')}</p>
         </section>
         <section class="meta">
@@ -1130,6 +1146,7 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
         <p class="label">Property and work order</p>
         <strong>${escapeHtml(invoiceWorkSummaryText(invoice))}</strong>
         <p>${escapeHtml(invoicePropertySummaryText(invoice))}</p>
+        ${invoiceCodeSummaryText(invoice) ? `<p>${escapeHtml(invoiceCodeSummaryText(invoice))}</p>` : ''}
       </section>
       ${invoiceTable(invoice)}
       <div class="closing">
@@ -1203,6 +1220,12 @@ function invoicePropertySummaryText(invoice: InvoiceRecord): string {
     return propertyNames[0];
   }
   return `${propertyNames.length || workOrders.length} properties included`;
+}
+
+function invoiceCodeSummaryText(invoice: InvoiceRecord): string {
+  const ownerCode = invoice.ownerCode ? `Owner ID: ${invoice.ownerCode}` : '';
+  const propertyCode = invoice.propertyCode ? `Property ID: ${invoice.propertyCode}` : '';
+  return joinText(' · ', ownerCode, propertyCode);
 }
 
 function invoiceTable(invoice: InvoiceRecord): string {

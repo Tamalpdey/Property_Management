@@ -1,5 +1,6 @@
 package com.lorne.platform.auth.internal.bootstrap;
 
+import com.lorne.platform.shared.PublicCodeGenerator;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.boot.ApplicationArguments;
@@ -135,8 +136,8 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
 
     private void seedOwner(UUID ownerId, String displayName, String email, String phone, String billingEmail, String notes) {
         jdbcTemplate.update("""
-                INSERT INTO customers (id, tenant_id, display_name, email, phone, billing_email, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO customers (id, tenant_id, owner_code, display_name, email, phone, billing_email, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
                     email = EXCLUDED.email,
@@ -144,13 +145,13 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
                     billing_email = EXCLUDED.billing_email,
                     notes = EXCLUDED.notes,
                     updated_at = now()
-                """, ownerId, DEMO_TENANT_ID, displayName, email, phone, billingEmail, notes);
+                """, ownerId, DEMO_TENANT_ID, PublicCodeGenerator.ownerCode(ownerId), displayName, email, phone, billingEmail, notes);
     }
 
     private void seedProperty(UUID propertyId, UUID ownerId, String name, String addressLine1, String city, String provinceCode, String postalCode, String serviceNotes) {
         jdbcTemplate.update("""
-                INSERT INTO properties (id, tenant_id, customer_id, name, address_line1, city, province_code, postal_code, country_code, service_notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CA', ?)
+                INSERT INTO properties (id, tenant_id, property_code, customer_id, name, address_line1, city, province_code, postal_code, country_code, service_notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CA', ?)
                 ON CONFLICT (id) DO UPDATE SET
                     customer_id = EXCLUDED.customer_id,
                     name = EXCLUDED.name,
@@ -161,7 +162,7 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
                     service_notes = EXCLUDED.service_notes,
                     active = true,
                     updated_at = now()
-                """, propertyId, DEMO_TENANT_ID, ownerId, name, addressLine1, city, provinceCode, postalCode, serviceNotes);
+                """, propertyId, DEMO_TENANT_ID, PublicCodeGenerator.propertyCode(propertyId), ownerId, name, addressLine1, city, provinceCode, postalCode, serviceNotes);
     }
 
     private void seedCategory(UUID categoryId, String name) {

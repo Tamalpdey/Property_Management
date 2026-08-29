@@ -34,11 +34,18 @@ import { InventoryService } from './services/inventory.service';
               <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ assetData.assets.length }} equipment</span>
             }
           </div>
+          <div class="flex flex-wrap gap-2">
+            <button pButton type="button" icon="pi pi-upload" severity="secondary" label="Import" (click)="showImportNotice()"></button>
+            <button pButton type="button" icon="pi pi-refresh" severity="secondary" label="Refresh" (click)="load()"></button>
+          </div>
         </div>
       </div>
 
       @if (error()) {
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
+      }
+      @if (importNotice()) {
+        <p class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{{ importNotice() }}</p>
       }
 
       <div class="space-y-2">
@@ -117,6 +124,7 @@ export class InventoryPageComponent {
   protected readonly savingAsset = signal(false);
   protected readonly savingStockAdjustment = signal(false);
   protected readonly error = signal('');
+  protected readonly importNotice = signal('');
   protected readonly showCategoryDialog = signal(false);
   protected readonly showItemDialog = signal(false);
   protected readonly showAssetDialog = signal(false);
@@ -159,6 +167,11 @@ export class InventoryPageComponent {
     this.editingItem.set(null);
     this.itemForm?.reset();
     this.showItemDialog.set(true);
+  }
+
+  showImportNotice(): void {
+    this.error.set('');
+    this.importNotice.set('Inventory and equipment import is ready for the toolbar; CSV mapping and backend import processing will be wired as the next import slice.');
   }
 
   openEditItem(item: InventoryItem): void {

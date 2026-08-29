@@ -3,6 +3,7 @@ package com.lorne.platform.property.internal.controller;
 import com.lorne.platform.property.internal.dto.CreateServiceCategoryRequest;
 import com.lorne.platform.property.internal.dto.CreateServiceTypeRequest;
 import com.lorne.platform.property.internal.dto.ServiceCatalogResponse;
+import com.lorne.platform.property.internal.dto.UpdateServiceCategoryStatusRequest;
 import com.lorne.platform.property.internal.dto.UpdateServiceTypeStatusRequest;
 import com.lorne.platform.property.internal.service.ServiceCatalogService;
 import com.lorne.platform.shared.response.ApiResponse;
@@ -42,6 +43,36 @@ class ServiceCatalogController {
             @Valid @RequestBody CreateServiceCategoryRequest request
     ) {
         return ApiResponse.ok(serviceCatalogService.createCategory(principal.tenantId(), principal.userId(), request));
+    }
+
+    @PatchMapping("/categories/{categoryId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<ServiceCatalogResponse.ServiceCategoryDto> updateCategory(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID categoryId,
+            @Valid @RequestBody CreateServiceCategoryRequest request
+    ) {
+        return ApiResponse.ok(serviceCatalogService.updateCategory(principal.tenantId(), principal.userId(), categoryId, request));
+    }
+
+    @PatchMapping("/categories/{categoryId}/status")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<ServiceCatalogResponse.ServiceCategoryDto> updateCategoryStatus(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID categoryId,
+            @RequestBody UpdateServiceCategoryStatusRequest request
+    ) {
+        return ApiResponse.ok(serviceCatalogService.updateCategoryStatus(principal.tenantId(), principal.userId(), categoryId, request.active()));
+    }
+
+    @DeleteMapping("/categories/{categoryId}")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<Void> deleteCategory(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID categoryId
+    ) {
+        serviceCatalogService.deleteCategory(principal.tenantId(), principal.userId(), categoryId);
+        return ApiResponse.ok(null);
     }
 
     @PostMapping("/types")

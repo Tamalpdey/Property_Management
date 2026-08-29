@@ -24,6 +24,7 @@ import { DenseCollectionToolbarComponent } from '../../../shared/collection/dens
         [selectedCount]="collection.selectedCount()"
         [sortKey]="collection.sortKey()"
         [sortOptions]="collection.sortOptions"
+        [showExport]="false"
         (queryChange)="collection.setQuery($event)"
         (sortKeyChange)="collection.setSort($event)"
         (clearSelection)="collection.clearSelection()"
@@ -50,9 +51,20 @@ import { DenseCollectionToolbarComponent } from '../../../shared/collection/dens
                     <input type="checkbox" class="h-4 w-4" [checked]="collection.isSelected(user)" (change)="collection.toggle(user)" />
                   </td>
                   <td class="px-3 py-3">
-                    <p class="font-bold text-slate-950">{{ user.displayName }}</p>
-                    <p class="text-xs font-semibold text-slate-500">{{ user.email }}</p>
-                    <p class="text-xs text-slate-500">{{ user.phone || 'No phone' }}</p>
+                    <div class="flex items-center gap-3">
+                      <div class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-teal-700">
+                        @if (user.profilePhotoUrl) {
+                          <img class="h-full w-full object-cover" [src]="user.profilePhotoUrl" alt="" />
+                        } @else {
+                          {{ initials(user) }}
+                        }
+                      </div>
+                      <div class="min-w-0">
+                        <p class="font-bold text-slate-950">{{ user.displayName }}</p>
+                        <p class="text-xs font-semibold text-slate-500">{{ user.email }}</p>
+                        <p class="text-xs text-slate-500">{{ user.phone || 'No phone' }}</p>
+                      </div>
+                    </div>
                   </td>
                   <td class="px-3 py-3">
                     <div class="flex max-w-sm flex-wrap gap-1">
@@ -125,6 +137,15 @@ export class TenantUserListComponent {
 
   protected roleLabel(role: string): string {
     return role.toLowerCase().replaceAll('_', ' ');
+  }
+
+  protected initials(user: TenantUserRecord): string {
+    return (user.displayName || user.email || 'U')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'U';
   }
 
   protected openUserMenu(user: TenantUserRecord, event: Event, menu: { toggle: (event: Event) => void }): void {

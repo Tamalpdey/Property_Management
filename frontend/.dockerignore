@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.angular
+**/.cache
+**/coverage
+**/out-tsc
+**/.DS_Store
+**/*.log
+**/.env
+**/.env.*
+**/.git

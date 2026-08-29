@@ -1294,7 +1294,7 @@ public class WorkOrderManagementService {
 
     private List<WorkOrderDto> workOrders(UUID tenantId, UUID workOrderId, WorkOrderListFilters filters) {
         var sql = new StringBuilder("""
-                SELECT wo.id, wo.customer_id, c.display_name AS owner_name, wo.property_id, p.name AS property_name,
+                SELECT wo.id, wo.customer_id, c.owner_code, c.display_name AS owner_name, wo.property_id, p.property_code, p.name AS property_name,
                        p.address_line1 || ', ' || p.city AS property_address, wo.service_type_id, st.name AS service_name,
                        st.maintenance_record_template::text AS maintenance_record_template,
                        wo.work_order_number, wo.work_order_type, wo.title, wo.description, wo.status::text AS status, wo.source::text AS source, wo.priority::text AS priority,
@@ -1321,8 +1321,10 @@ public class WorkOrderManagementService {
                 rs.getString("work_order_number"),
                 rs.getString("work_order_type"),
                 rs.getObject("customer_id", UUID.class),
+                rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getObject("property_id", UUID.class),
+                rs.getString("property_code"),
                 rs.getString("property_name"),
                 rs.getString("property_address"),
                 rs.getObject("service_type_id", UUID.class),
@@ -1360,8 +1362,10 @@ public class WorkOrderManagementService {
                         row.workOrderNumber(),
                         row.workOrderType(),
                         row.ownerId(),
+                        row.ownerCode(),
                         row.ownerName(),
                         row.propertyId(),
+                        row.propertyCode(),
                         row.propertyName(),
                         row.propertyAddress(),
                         row.serviceTypeId(),
@@ -1403,8 +1407,8 @@ public class WorkOrderManagementService {
     ) {
         return jdbcTemplate.query("""
                 SELECT wo.id, wo.work_order_number, wo.title, c.id AS customer_id,
-                       c.display_name AS owner_name, c.email AS owner_email, c.billing_email AS owner_billing_email,
-                       p.name AS property_name,
+                       c.owner_code, c.display_name AS owner_name, c.email AS owner_email, c.billing_email AS owner_billing_email,
+                       p.property_code, p.name AS property_name,
                        trim(concat_ws(', ', p.address_line1, nullif(p.city, ''), nullif(p.province_code, ''), nullif(p.postal_code, ''))) AS property_address,
                        st.name AS service_name,
                        coalesce((
@@ -1424,25 +1428,164 @@ public class WorkOrderManagementService {
             if (!rs.next()) {
                 throw new ResourceNotFoundException("Work order not found.");
             }
+            var maintenanceEmailDetails = maintenanceEmailDetails(tenantId, workOrderId);
+            var workerSiteDetails = workerSiteDetails(tenantId, workOrderId);
             return new WorkOrderCompletionEmail(
                     rs.getObject("id", UUID.class),
                     rs.getString("work_order_number"),
                     rs.getString("title"),
                     rs.getObject("customer_id", UUID.class),
+                    rs.getString("owner_code"),
                     rs.getString("owner_name"),
                     rs.getString("owner_email"),
                     rs.getString("owner_billing_email"),
+                    rs.getString("property_code"),
                     rs.getString("property_name"),
                     rs.getString("property_address"),
                     rs.getString("service_name"),
                     instant("completed_at", rs),
+                    workerSiteDetails.onSiteWorkers(),
+                    workerSiteDetails.arrivedOnSiteAt(),
+                    workerSiteDetails.workCompletedAt(),
+                    maintenanceEmailDetails.serviceDetails(),
+                    maintenanceEmailDetails.deliveriesSummary(),
                     reviewNote,
+                    maintenanceEmailDetails.summary(),
+                    maintenanceEmailDetails.clientNote(),
                     recipientEmailOverride,
                     ccEmails,
                     bccEmails,
                     deliveryMode
             );
         }, tenantId, workOrderId);
+    }
+
+    private MaintenanceEmailDetails maintenanceEmailDetails(UUID tenantId, UUID workOrderId) {
+        var summaries = new ArrayList<String>();
+        var clientNotes = new ArrayList<String>();
+        var serviceDetails = new ArrayList<String>();
+        var deliveries = new ArrayList<String>();
+        jdbcTemplate.query("""
+                SELECT coalesce(w.display_name, au.display_name, 'Field worker') AS worker_name,
+                       womr.template_snapshot::text AS template_snapshot,
+                       womr.record_data::text AS record_data,
+                       womr.note
+                FROM work_order_maintenance_records womr
+                LEFT JOIN workers w ON w.id = womr.worker_id AND w.tenant_id = womr.tenant_id
+                LEFT JOIN app_users au ON au.id = womr.actor_user_id
+                WHERE womr.tenant_id = ? AND womr.work_order_id = ?
+                ORDER BY womr.updated_at
+                """, rs -> {
+            var workerName = blankToNull(rs.getString("worker_name"));
+            var note = blankToNull(rs.getString("note"));
+            var template = serviceTemplate(rs.getString("template_snapshot"));
+            var recordData = metadata(rs.getString("record_data"));
+            var workerLabel = workerName == null ? "Field worker" : workerName;
+            if (note != null) {
+                summaries.add(workerLabel + ":\n" + note);
+            }
+            var clientNote = blankToNull(stringValue(recordData.get("clientNote")));
+            if (clientNote != null) {
+                clientNotes.add(workerLabel + ": " + clientNote);
+            }
+            maintenanceRecordDetails(workerLabel, template, recordData, serviceDetails, deliveries);
+        }, tenantId, workOrderId);
+        return new MaintenanceEmailDetails(
+                String.join("\n\n", summaries),
+                String.join("\n", clientNotes),
+                String.join("\n", serviceDetails),
+                String.join("\n", deliveries)
+        );
+    }
+
+    private WorkerSiteDetails workerSiteDetails(UUID tenantId, UUID workOrderId) {
+        var assignments = assignmentsByWorkOrder(tenantId, Set.of(workOrderId)).getOrDefault(workOrderId, List.of());
+        var workerLabels = assignments.stream()
+                .map(assignment -> assignment.workerName() + (assignment.leadWorker() ? " (lead)" : ""))
+                .distinct()
+                .toList();
+        var arrivedAt = assignments.stream()
+                .map(WorkOrderDto.AssignmentDto::actualArrivedAt)
+                .filter(Objects::nonNull)
+                .min(Instant::compareTo)
+                .orElse(null);
+        var completedAt = assignments.stream()
+                .map(WorkOrderDto.AssignmentDto::actualFinishedAt)
+                .filter(Objects::nonNull)
+                .max(Instant::compareTo)
+                .orElse(null);
+        return new WorkerSiteDetails(String.join(", ", workerLabels), arrivedAt, completedAt);
+    }
+
+    private void maintenanceRecordDetails(
+            String workerLabel,
+            Map<String, Object> template,
+            Map<String, Object> recordData,
+            List<String> serviceDetails,
+            List<String> deliveries
+    ) {
+        var lines = new ArrayList<String>();
+        appendCheckedLabels(lines, "Call type", listOrEmpty(template.get("callTypes")), recordMap(recordData.get("callTypes")));
+        appendCheckedLabels(lines, "Completed check", listOrEmpty(template.get("checks")), recordMap(recordData.get("serviceChecks")));
+        appendTextValues(lines, "Reading", listOrEmpty(template.get("chemicals")), recordMap(recordData.get("chemicalValues")));
+        appendTextValues(lines, "Measurement", listOrEmpty(template.get("measurements")), recordMap(recordData.get("measurements")));
+        var otherCallType = blankToNull(stringValue(recordData.get("otherCallType")));
+        if (otherCallType != null) {
+            lines.add("Other: " + otherCallType);
+        }
+        if (!lines.isEmpty()) {
+            serviceDetails.add(workerLabel + ":\n" + String.join("\n", lines));
+        }
+
+        var deliveryLines = new ArrayList<String>();
+        appendTextValues(deliveryLines, "", listOrEmpty(template.get("deliveries")), recordMap(recordData.get("deliveries")));
+        if (!deliveryLines.isEmpty()) {
+            deliveries.add(workerLabel + ":\n" + String.join("\n", deliveryLines));
+        }
+    }
+
+    private void appendCheckedLabels(List<String> lines, String prefix, List<?> templateItems, Map<String, Object> values) {
+        for (var item : templateItems) {
+            var itemMap = recordMap(item);
+            var key = blankToNull(stringValue(itemMap.get("key")));
+            if (key != null && Boolean.TRUE.equals(values.get(key))) {
+                var label = stringOrDefault(itemMap.get("label"), key);
+                lines.add(prefix + ": " + label);
+            }
+        }
+    }
+
+    private void appendTextValues(List<String> lines, String prefix, List<?> templateItems, Map<String, Object> values) {
+        for (var item : templateItems) {
+            var itemMap = recordMap(item);
+            var key = blankToNull(stringValue(itemMap.get("key")));
+            if (key == null) {
+                continue;
+            }
+            var value = blankToNull(stringValue(values.get(key)));
+            if (value == null) {
+                continue;
+            }
+            var label = stringOrDefault(itemMap.get("label"), key);
+            var unit = blankToNull(stringValue(itemMap.get("unit")));
+            var text = value + (unit == null ? "" : " " + unit);
+            lines.add((prefix == null || prefix.isBlank() ? "" : prefix + ": ") + label + " - " + text);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> recordMap(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private record MaintenanceEmailDetails(String summary, String clientNote, String serviceDetails, String deliveriesSummary) {
+    }
+
+    private record WorkerSiteDetails(String onSiteWorkers, Instant arrivedOnSiteAt, Instant workCompletedAt) {
     }
 
     private boolean hasOwnerCompletionDelivery(UUID tenantId, UUID workOrderId) {
@@ -2722,8 +2865,10 @@ public class WorkOrderManagementService {
             String workOrderNumber,
             String workOrderType,
             UUID ownerId,
+            String ownerCode,
             String ownerName,
             UUID propertyId,
+            String propertyCode,
             String propertyName,
             String propertyAddress,
             UUID serviceTypeId,

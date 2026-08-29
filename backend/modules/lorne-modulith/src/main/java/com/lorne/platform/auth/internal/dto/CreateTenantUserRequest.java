@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public record CreateTenantUserRequest(
         @NotBlank String displayName,
+        String profilePhotoUrl,
         @Email @NotBlank String email,
         String phone,
         @NotBlank String temporaryPassword,

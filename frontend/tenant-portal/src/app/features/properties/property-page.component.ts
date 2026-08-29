@@ -25,7 +25,8 @@ import { PropertyService } from './services/property.service';
             <h1 class="text-xl font-bold text-slate-950 md:text-2xl">Managed properties</h1>
             <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{{ properties().length }} records</span>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
+            <button pButton type="button" icon="pi pi-upload" severity="secondary" label="Import" (click)="showImportNotice()"></button>
             <button pButton type="button" icon="pi pi-plus" label="Add property" (click)="openCreate()"></button>
             <button pButton type="button" icon="pi pi-refresh" severity="secondary" label="Refresh" (click)="load()"></button>
           </div>
@@ -34,6 +35,9 @@ import { PropertyService } from './services/property.service';
 
       @if (error()) {
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
+      }
+      @if (importNotice()) {
+        <p class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{{ importNotice() }}</p>
       }
 
       <lorne-property-list
@@ -120,6 +124,7 @@ export class PropertyPageComponent {
   protected readonly showCreate = signal(false);
   protected readonly editingProperty = signal<PropertyRecord | null>(null);
   protected readonly error = signal('');
+  protected readonly importNotice = signal('');
   protected form: CreatePropertyRequest = this.blankForm();
 
   constructor() {
@@ -171,6 +176,11 @@ export class PropertyPageComponent {
     this.showCreate.set(false);
     this.editingProperty.set(null);
     this.form = this.blankForm();
+  }
+
+  showImportNotice(): void {
+    this.error.set('');
+    this.importNotice.set('Property import is ready for the toolbar; CSV mapping and backend import processing will be wired as the next import slice.');
   }
 
   async save(): Promise<void> {

@@ -8,11 +8,12 @@ import type { WorkerActivity, WorkerDailyLoadout } from '@lorne/contracts';
 import { WorkerShiftClockService } from '../../core/services/worker-shift-clock.service';
 import { WorkerJobService } from '../today/services/worker-job.service';
 import { parseDateInput, toDateInput, workerErrorMessage } from '../today/worker-job-ui';
+import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.component';
 
 @Component({
   selector: 'lorne-worker-activity',
   standalone: true,
-  imports: [ButtonModule, DatePipe, DialogModule, FormsModule],
+  imports: [ButtonModule, DatePipe, DialogModule, FormsModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="mx-auto max-w-6xl space-y-3">
@@ -210,6 +211,15 @@ import { parseDateInput, toDateInput, workerErrorMessage } from '../today/worker
             {{ activityDialogMode === 'START' ? 'Start notes' : 'End notes' }}
             <textarea class="min-h-24 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800" name="activityNotes" placeholder="Optional notes for dispatch and Day Ticket" [(ngModel)]="activityForm.notes"></textarea>
           </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <lorne-voice-note-button
+              [text]="activityForm.notes"
+              [label]="activityDialogMode === 'START' ? 'Speak start note' : 'Speak end note'"
+              [showUnsupported]="true"
+              (textChange)="activityForm.notes = $event"
+              (error)="activityDialogError.set($event)"
+            />
+          </div>
 
           <div class="grid grid-cols-2 gap-2 border-t border-slate-200 pt-3">
             <button pButton type="button" severity="secondary" icon="pi pi-times" label="Cancel" (click)="closeActivityDialog()"></button>
