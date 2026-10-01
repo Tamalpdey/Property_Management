@@ -58,6 +58,7 @@ public class EmailDeliveryLogService {
                        i.invoice_number,
                        coalesce(edl.work_order_id, i.work_order_id) AS work_order_id,
                        wo.work_order_number,
+                       coalesce(st.name, wo.title) AS service_name,
                        c.display_name AS owner_name,
                        edl.recipient_email,
                        edl.cc_emails,
@@ -71,6 +72,7 @@ public class EmailDeliveryLogService {
                 FROM email_delivery_logs edl
                 LEFT JOIN invoices i ON i.id = edl.invoice_id AND i.tenant_id = edl.tenant_id
                 LEFT JOIN work_orders wo ON wo.id = coalesce(edl.work_order_id, i.work_order_id) AND wo.tenant_id = edl.tenant_id
+                LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
                 LEFT JOIN customers c ON c.id = coalesce(edl.customer_id, i.customer_id, wo.customer_id) AND c.tenant_id = edl.tenant_id
                 WHERE edl.tenant_id = ?
                 ORDER BY edl.created_at DESC
@@ -83,6 +85,7 @@ public class EmailDeliveryLogService {
                 rs.getString("invoice_number"),
                 rs.getObject("work_order_id", UUID.class),
                 rs.getString("work_order_number"),
+                rs.getString("service_name"),
                 rs.getString("owner_name"),
                 rs.getString("recipient_email"),
                 rs.getString("cc_emails"),
@@ -107,11 +110,13 @@ public class EmailDeliveryLogService {
         var bccRecipients = emailList(request == null ? source.bccEmails() : request.bccEmails());
         var ccEmails = joinedEmails(ccRecipients);
         var bccEmails = joinedEmails(bccRecipients);
-        var inlineImages = inlineImagesForResend(tenantId, source.body());
+        var subject = renderKnownPlaceholders(source.subject(), source);
+        var body = renderKnownPlaceholders(source.body(), source);
+        var inlineImages = inlineImagesForResend(tenantId, body);
         var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(
                 recipient,
-                source.subject(),
-                source.body(),
+                subject,
+                body,
                 List.of(),
                 ccRecipients,
                 bccRecipients,
@@ -133,8 +138,8 @@ public class EmailDeliveryLogService {
                 recipient,
                 ccEmails,
                 bccEmails,
-                source.subject(),
-                source.body(),
+                subject,
+                body,
                 delivery.status(),
                 delivery.providerMessage(),
                 delivery.sentAt() == null ? null : Timestamp.from(delivery.sentAt()),
@@ -157,10 +162,16 @@ public class EmailDeliveryLogService {
 
     private EmailLogRow load(UUID tenantId, UUID deliveryLogId) {
         var rows = jdbcTemplate.query("""
-                SELECT id, template_id, invoice_id, work_order_id, customer_id, recipient_email,
-                       cc_emails, bcc_emails, subject, body
-                FROM email_delivery_logs
-                WHERE tenant_id = ? AND id = ?
+                SELECT edl.id, edl.template_id, edl.invoice_id, edl.work_order_id, edl.customer_id, edl.recipient_email,
+                       edl.cc_emails, edl.bcc_emails, edl.subject, edl.body,
+                       coalesce(st.name, wo.title) AS service_name,
+                       wo.work_order_number, i.invoice_number, c.display_name AS owner_name
+                FROM email_delivery_logs edl
+                LEFT JOIN invoices i ON i.id = edl.invoice_id AND i.tenant_id = edl.tenant_id
+                LEFT JOIN work_orders wo ON wo.id = coalesce(edl.work_order_id, i.work_order_id) AND wo.tenant_id = edl.tenant_id
+                LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN customers c ON c.id = coalesce(edl.customer_id, i.customer_id, wo.customer_id) AND c.tenant_id = edl.tenant_id
+                WHERE edl.tenant_id = ? AND edl.id = ?
                 """, (rs, rowNum) -> new EmailLogRow(
                 rs.getObject("id", UUID.class),
                 rs.getObject("template_id", UUID.class),
@@ -171,7 +182,11 @@ public class EmailDeliveryLogService {
                 rs.getString("cc_emails"),
                 rs.getString("bcc_emails"),
                 rs.getString("subject"),
-                rs.getString("body")
+                rs.getString("body"),
+                rs.getString("service_name"),
+                rs.getString("work_order_number"),
+                rs.getString("invoice_number"),
+                rs.getString("owner_name")
         ), tenantId, deliveryLogId);
         if (rows.isEmpty()) {
             throw new ResourceNotFoundException("Email delivery log not found.");
@@ -223,6 +238,23 @@ public class EmailDeliveryLogService {
         return value == null ? "" : value;
     }
 
+    private String renderKnownPlaceholders(String template, EmailLogRow source) {
+        var rendered = safe(template);
+        var values = Map.of(
+                "serviceName", safe(source.serviceName()),
+                "workOrderNumber", safe(source.workOrderNumber()),
+                "invoiceNumber", safe(source.invoiceNumber()),
+                "ownerName", safe(source.ownerName())
+        );
+        for (var entry : values.entrySet()) {
+            rendered = rendered.replaceAll(
+                    "\\{\\{\\s*" + java.util.regex.Pattern.quote(entry.getKey()) + "\\s*}}",
+                    java.util.regex.Matcher.quoteReplacement(entry.getValue())
+            );
+        }
+        return rendered;
+    }
+
     private record EmailLogRow(
             UUID id,
             UUID templateId,
@@ -233,7 +265,11 @@ public class EmailDeliveryLogService {
             String ccEmails,
             String bccEmails,
             String subject,
-            String body
+            String body,
+            String serviceName,
+            String workOrderNumber,
+            String invoiceNumber,
+            String ownerName
     ) {
     }
 }

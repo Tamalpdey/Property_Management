@@ -15,6 +15,8 @@ public record TenantSettingsDto(
         String provinceCode,
         String postalCode,
         String invoicePrefix,
+        java.math.BigDecimal invoiceTaxRate,
+        String taxRegistrationNumber,
         String invoiceFooter,
         String paymentTerms,
         String logoUrl,
@@ -34,6 +36,7 @@ public record TenantSettingsDto(
         boolean graphClientSecretConfigured,
         String graphSenderUser,
         boolean autoSendWorkCompletedEmail,
-        boolean autoSendInvoiceEmail
+        boolean autoSendInvoiceEmail,
+        boolean liveWorkerTrackingEnabled
 ) {
 }

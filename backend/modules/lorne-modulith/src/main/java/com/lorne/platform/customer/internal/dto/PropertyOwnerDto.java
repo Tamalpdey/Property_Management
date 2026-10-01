@@ -9,6 +9,12 @@ public record PropertyOwnerDto(
         String email,
         String phone,
         String billingEmail,
+        String addressLine1,
+        String addressLine2,
+        String city,
+        String provinceCode,
+        String postalCode,
+        String countryCode,
         String notes,
         int propertyCount,
         boolean active

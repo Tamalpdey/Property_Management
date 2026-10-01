@@ -30,12 +30,15 @@ class InvoicePdfServiceTest {
                 BigDecimal.ZERO,
                 new BigDecimal("322.05"),
                 UUID.randomUUID(),
+                "OWN-TEST",
                 "Martin Lakeside Trust",
                 "hello@martintrust.example",
                 "billing@martintrust.example",
+                "55 Owner Lane, Toronto, ON, M1M 1M1, CA",
                 UUID.randomUUID(),
                 "WO-20260806-33A4B3",
                 "Fixture replacement",
+                "PROP-TEST",
                 "Bayview Pool Home",
                 "22 Bayview Ridge, Mississauga, ON, L5B 2C2",
                 java.time.Instant.parse("2026-08-11T10:00:00Z"),
@@ -43,14 +46,17 @@ class InvoicePdfServiceTest {
                         UUID.randomUUID(),
                         "WO-20260806-33A4B3",
                         "Fixture replacement",
+                        "PROP-TEST",
                         "Bayview Pool Home",
                         "22 Bayview Ridge, Mississauga, ON, L5B 2C2",
                         "COMPLETED",
-                        "Fixture replacement"
+                        "Fixture replacement",
+                        java.time.Instant.parse("2026-08-11T13:00:00Z"),
+                        java.time.Instant.parse("2026-08-11T14:00:00Z")
                 )),
                 List.of(
-                        new InvoiceDto.InvoiceLineDto(UUID.randomUUID(), "LABOR", "Fixture replacement", BigDecimal.ONE, new BigDecimal("225.00"), new BigDecimal("225.00"), true, new BigDecimal("0.13")),
-                        new InvoiceDto.InvoiceLineDto(UUID.randomUUID(), "MATERIAL", "Chlorine tablets 3 in", BigDecimal.ONE, new BigDecimal("60.00"), new BigDecimal("60.00"), true, new BigDecimal("0.13"))
+                        new InvoiceDto.InvoiceLineDto(UUID.randomUUID(), null, "LABOR", "Fixture replacement", BigDecimal.ONE, new BigDecimal("225.00"), new BigDecimal("225.00"), true, new BigDecimal("0.13")),
+                        new InvoiceDto.InvoiceLineDto(UUID.randomUUID(), null, "MATERIAL", "Chlorine tablets 3 in", BigDecimal.ONE, new BigDecimal("60.00"), new BigDecimal("60.00"), true, new BigDecimal("0.13"))
                 ),
                 List.of()
         );

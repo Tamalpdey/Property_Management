@@ -3,9 +3,14 @@ import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angu
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
+import type { WorkOrderRecord, WorkerClockedInTodayRecord } from '@lorne/contracts';
 import { CountBucket, TenantAnalytics, TenantAnalyticsService, TenantMetricSummary } from '../analytics/services/tenant-analytics.service';
+import { WorkerManagementService } from '../workers/services/worker-management.service';
 import { TenantMetricCardComponent } from './components/tenant-metric-card.component';
+
+type DashboardQueueMode = 'ATTENTION' | 'DRAFT' | 'TODAY' | 'REVIEW' | 'INVOICE';
 
 @Component({
   selector: 'queue-card',
@@ -315,7 +320,7 @@ export class FinanceBarComponent {
 @Component({
   selector: 'lorne-dashboard',
   standalone: true,
-  imports: [ButtonModule, ChartBarRowComponent, DashboardPanelComponent, DatePipe, FinanceBarComponent, QueueCardComponent, RouterLink, StatusDonutComponent, TagModule, TenantMetricCardComponent],
+  imports: [ButtonModule, ChartBarRowComponent, DashboardPanelComponent, DatePipe, DialogModule, FinanceBarComponent, RouterLink, StatusDonutComponent, TagModule, TenantMetricCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-2.5">
@@ -375,15 +380,42 @@ export class FinanceBarComponent {
           <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <div class="flex items-center justify-between gap-2">
               <div>
-                <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Operations queue</p>
-                <h2 class="text-lg font-black text-slate-950">Today and review work</h2>
+                <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Action queue</p>
+                <h2 class="text-lg font-black text-slate-950">Work needing attention</h2>
+            <p class="mt-0.5 text-xs font-semibold text-slate-500">Draft work, worker review, invoice-ready jobs, and today's scheduled work.</p>
               </div>
               <a pButton routerLink="/schedule" type="button" text icon="pi pi-calendar" label="Schedule" class="no-underline"></a>
             </div>
-            <div class="mt-2 grid gap-2 md:grid-cols-3">
-              <queue-card label="Today" [count]="data.todayWork.length" detail="Scheduled jobs" tone="teal" />
-              <queue-card label="Review" [count]="data.pendingReview.length" detail="Pending completion" tone="amber" />
-              <queue-card label="Invoice" [count]="data.readyToInvoice.length" detail="Approved, not invoiced" tone="blue" />
+            <div class="mt-2 grid gap-2 md:grid-cols-4">
+              <button type="button" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-slate-400 hover:bg-white" [class.border-slate-500]="queueMode() === 'DRAFT'" [class.bg-white]="queueMode() === 'DRAFT'" (click)="queueMode.set('DRAFT')">
+                <p class="text-[0.8rem] font-black uppercase tracking-wide text-slate-500">Draft</p>
+                <p class="mt-0.5 text-xl font-black text-slate-700">{{ draftWork(data).length }}</p>
+                <p class="text-[0.82rem] font-semibold text-slate-500">Needs scheduling or assignment</p>
+              </button>
+              <button type="button" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-teal-300 hover:bg-teal-50" [class.border-teal-400]="queueMode() === 'TODAY'" [class.bg-teal-50]="queueMode() === 'TODAY'" (click)="queueMode.set('TODAY')">
+                <p class="text-[0.8rem] font-black uppercase tracking-wide text-slate-500">Scheduled today</p>
+                <p class="mt-0.5 text-xl font-black text-teal-700">{{ data.todayWork.length }}</p>
+                <p class="text-[0.82rem] font-semibold text-slate-500">Jobs on today's calendar</p>
+              </button>
+              <button type="button" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-amber-300 hover:bg-amber-50" [class.border-amber-400]="queueMode() === 'REVIEW'" [class.bg-amber-50]="queueMode() === 'REVIEW'" (click)="queueMode.set('REVIEW')">
+                <p class="text-[0.8rem] font-black uppercase tracking-wide text-slate-500">Needs review</p>
+                <p class="mt-0.5 text-xl font-black text-amber-700">{{ data.pendingReview.length }}</p>
+                <p class="text-[0.82rem] font-semibold text-slate-500">Submitted by workers</p>
+              </button>
+              <button type="button" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-blue-300 hover:bg-blue-50" [class.border-blue-400]="queueMode() === 'INVOICE'" [class.bg-blue-50]="queueMode() === 'INVOICE'" (click)="queueMode.set('INVOICE')">
+                <p class="text-[0.8rem] font-black uppercase tracking-wide text-slate-500">Ready to invoice</p>
+                <p class="mt-0.5 text-xl font-black text-blue-700">{{ data.readyToInvoice.length }}</p>
+                <p class="text-[0.82rem] font-semibold text-slate-500">Approved, not invoiced</p>
+              </button>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p class="text-sm font-bold text-slate-700">{{ queueHeading() }} · showing {{ queuePreview(data).length }} of {{ queueWork(data).length }}</p>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="text-sm font-black text-teal-700 hover:text-teal-900" (click)="queueMode.set('ATTENTION')">Combined queue</button>
+                <a pButton routerLink="/work-orders" [queryParams]="workOrderQueueParams()" type="button" size="small" severity="secondary" icon="pi pi-list" label="Open full work order list" class="no-underline"></a>
+                <a pButton routerLink="/finance" type="button" size="small" severity="secondary" icon="pi pi-dollar" label="Invoices/payments" class="no-underline"></a>
+                <a pButton routerLink="/email-audit" type="button" size="small" severity="secondary" icon="pi pi-send" label="Email audit" class="no-underline"></a>
+              </div>
             </div>
             <div class="mt-2 overflow-hidden rounded-lg border border-slate-200">
               <table class="w-full min-w-[42rem] border-collapse text-sm">
@@ -391,7 +423,7 @@ export class FinanceBarComponent {
                   <tr><th class="px-3 py-2">Work order</th><th class="px-3 py-2">Property</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Schedule</th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                  @for (workOrder of priorityWork(data).slice(0, 7); track workOrder.id) {
+                  @for (workOrder of queuePreview(data); track workOrder.id) {
                     <tr>
                       <td class="px-3 py-2"><p class="font-black text-slate-950">{{ workOrder.workOrderNumber }}</p><p class="text-[0.82rem] text-slate-500">{{ workOrder.title }}</p></td>
                       <td class="px-3 py-2"><p class="font-semibold text-teal-700">{{ workOrder.propertyName }}</p><p class="text-[0.82rem] text-slate-500">{{ workOrder.ownerName }}</p></td>
@@ -399,7 +431,7 @@ export class FinanceBarComponent {
                       <td class="px-3 py-2 text-slate-600">{{ workOrder.scheduledStart ? (workOrder.scheduledStart | date:'MMM d, h:mm a') : 'Unscheduled' }}</td>
                     </tr>
                   } @empty {
-                    <tr><td colspan="4" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No urgent work waiting.</td></tr>
+                    <tr><td colspan="4" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No work orders in this queue.</td></tr>
                   }
                 </tbody>
               </table>
@@ -407,6 +439,36 @@ export class FinanceBarComponent {
           </div>
 
           <aside class="space-y-2.5">
+            <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Working today</p>
+                  <h2 class="mt-0.5 text-lg font-black text-slate-950">Clocked-in workers</h2>
+                </div>
+                <a pButton routerLink="/payroll" type="button" text icon="pi pi-clock" label="Timesheets" class="no-underline"></a>
+              </div>
+              <div class="mt-2 grid gap-1.5">
+                @for (worker of clockedInToday().slice(0, 5); track worker.workerId) {
+                  <button type="button" class="w-full rounded-lg bg-teal-50 px-2.5 py-1.5 text-left transition hover:bg-teal-100" (click)="selectedClockedInWorker.set(worker)">
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="truncate font-black text-slate-950">{{ worker.workerName }}</p>
+                      <p-tag [value]="worker.paused ? 'paused' : 'clocked in'" [severity]="worker.paused ? 'warn' : 'success'" />
+                    </div>
+                    <p class="mt-1 text-[0.82rem] font-semibold text-slate-500">
+                      Since {{ worker.startedAt | date:'MMM d, h:mm a' }} · net {{ minutesLabel(worker.netMinutes || 0) }}
+                    </p>
+                  </button>
+                } @empty {
+                  <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">No workers are currently clocked in.</p>
+                }
+                @if (clockedInToday().length > 5) {
+                  <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-black text-teal-700 hover:bg-slate-50" (click)="showAllClockedIn.set(true)">
+                    View all {{ clockedInToday().length }} active workers
+                  </button>
+                }
+              </div>
+            </div>
+
             <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
               <div class="flex items-center justify-between gap-2">
                 <div>
@@ -451,14 +513,77 @@ export class FinanceBarComponent {
       } @else if (!loading()) {
         <p class="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-10 text-center text-sm font-semibold text-slate-500">No dashboard data loaded.</p>
       }
+
+      <p-dialog
+        header="Clocked-in worker"
+        [modal]="true"
+        [visible]="!!selectedClockedInWorker()"
+        [style]="{ width: 'min(34rem, 94vw)' }"
+        (visibleChange)="!$event && selectedClockedInWorker.set(null)"
+      >
+        @if (selectedClockedInWorker(); as worker) {
+          <div class="space-y-3">
+            <div class="rounded-lg border border-teal-100 bg-teal-50 p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate text-lg font-black text-slate-950">{{ worker.workerName }}</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-600">{{ worker.employeeNumber || worker.email || 'Worker' }}</p>
+                </div>
+                <p-tag [value]="worker.paused ? 'paused' : 'clocked in'" [severity]="worker.paused ? 'warn' : 'success'" />
+              </div>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <p class="rounded-lg border border-slate-200 bg-white p-3 text-sm"><span class="block text-xs font-black uppercase text-slate-500">Clock in</span><strong>{{ worker.startedAt | date:'MMM d, h:mm a' }}</strong></p>
+              <p class="rounded-lg border border-slate-200 bg-white p-3 text-sm"><span class="block text-xs font-black uppercase text-slate-500">Gross</span><strong>{{ minutesLabel(worker.grossMinutes || 0) }}</strong></p>
+              <p class="rounded-lg border border-slate-200 bg-white p-3 text-sm"><span class="block text-xs font-black uppercase text-slate-500">Net</span><strong class="text-teal-700">{{ minutesLabel(worker.netMinutes || 0) }}</strong></p>
+            </div>
+            @if (worker.paused && worker.pausedAt) {
+              <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+                Paused since {{ worker.pausedAt | date:'MMM d, h:mm a' }} · break {{ minutesLabel(worker.pauseMinutes || 0) }}
+              </p>
+            }
+            <div class="flex justify-end gap-2 border-t border-slate-200 pt-3">
+              <button pButton type="button" severity="secondary" label="Close" (click)="selectedClockedInWorker.set(null)"></button>
+              <a pButton routerLink="/payroll" [queryParams]="{ workerId: worker.workerId, from: todayDate, to: todayDate }" icon="pi pi-clock" label="Open timesheet" class="no-underline"></a>
+            </div>
+          </div>
+        }
+      </p-dialog>
+
+      <p-dialog
+        header="Workers currently clocked in"
+        [modal]="true"
+        [visible]="showAllClockedIn()"
+        [style]="{ width: 'min(44rem, 94vw)', height: 'min(42rem, 90vh)' }"
+        [contentStyle]="{ height: 'calc(100% - 4rem)', overflow: 'auto' }"
+        (visibleChange)="showAllClockedIn.set($event)"
+      >
+        <div class="grid gap-2">
+          @for (worker of clockedInToday(); track worker.workerId) {
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left hover:bg-teal-50" (click)="selectedClockedInWorker.set(worker); showAllClockedIn.set(false)">
+              <div class="flex items-center justify-between gap-2">
+                <p class="font-black text-slate-950">{{ worker.workerName }}</p>
+                <p-tag [value]="worker.paused ? 'paused' : 'clocked in'" [severity]="worker.paused ? 'warn' : 'success'" />
+              </div>
+              <p class="mt-1 text-sm font-semibold text-slate-500">Since {{ worker.startedAt | date:'MMM d, h:mm a' }} · net {{ minutesLabel(worker.netMinutes || 0) }}</p>
+            </button>
+          }
+        </div>
+      </p-dialog>
     </section>
   `
 })
 export class DashboardComponent {
   private readonly analyticsService = inject(TenantAnalyticsService);
+  private readonly workerManagementService = inject(WorkerManagementService);
   protected readonly analytics = signal<TenantAnalytics | null>(null);
+  protected readonly clockedInToday = signal<WorkerClockedInTodayRecord[]>([]);
+  protected readonly selectedClockedInWorker = signal<WorkerClockedInTodayRecord | null>(null);
+  protected readonly showAllClockedIn = signal(false);
+  protected readonly queueMode = signal<DashboardQueueMode>('ATTENTION');
   protected readonly loading = signal(false);
   protected readonly error = signal('');
+  protected readonly todayDate = dateInput(new Date());
 
   constructor() {
     void this.load();
@@ -468,7 +593,12 @@ export class DashboardComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      this.analytics.set(await firstValueFrom(this.analyticsService.overview()));
+      const [analytics, clockedInToday] = await Promise.all([
+        firstValueFrom(this.analyticsService.overview()),
+        firstValueFrom(this.workerManagementService.clockedInToday())
+      ]);
+      this.analytics.set(analytics);
+      this.clockedInToday.set(clockedInToday);
     } catch {
       this.error.set('Unable to load dashboard data.');
     } finally {
@@ -477,9 +607,65 @@ export class DashboardComponent {
   }
 
   protected priorityWork(data: TenantAnalytics) {
-    return [...data.pendingReview, ...data.readyToInvoice, ...data.todayWork]
+    return [...this.draftWork(data), ...data.pendingReview, ...data.readyToInvoice, ...data.todayWork]
       .filter((workOrder, index, list) => list.findIndex((candidate) => candidate.id === workOrder.id) === index)
       .sort((left, right) => statusRank(left.status) - statusRank(right.status) || dateValue(left.scheduledStart) - dateValue(right.scheduledStart));
+  }
+
+  protected draftWork(data: TenantAnalytics): WorkOrderRecord[] {
+    return data.workOrders.filter((workOrder) => workOrder.status === 'DRAFT');
+  }
+
+  protected queueWork(data: TenantAnalytics): WorkOrderRecord[] {
+    if (this.queueMode() === 'DRAFT') {
+      return this.draftWork(data).sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart) || left.workOrderNumber.localeCompare(right.workOrderNumber));
+    }
+    if (this.queueMode() === 'TODAY') {
+      return [...data.todayWork].sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart));
+    }
+    if (this.queueMode() === 'REVIEW') {
+      return [...data.pendingReview].sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart));
+    }
+    if (this.queueMode() === 'INVOICE') {
+      return [...data.readyToInvoice].sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart));
+    }
+    return this.priorityWork(data);
+  }
+
+  protected queuePreview(data: TenantAnalytics): WorkOrderRecord[] {
+    return this.queueWork(data).slice(0, 12);
+  }
+
+  protected queueHeading(): string {
+    if (this.queueMode() === 'DRAFT') {
+      return 'Draft work';
+    }
+    if (this.queueMode() === 'TODAY') {
+      return 'Scheduled today';
+    }
+    if (this.queueMode() === 'REVIEW') {
+      return 'Needs review';
+    }
+    if (this.queueMode() === 'INVOICE') {
+      return 'Ready to invoice';
+    }
+    return 'Combined attention queue';
+  }
+
+  protected workOrderQueueParams(): Record<string, string> {
+    if (this.queueMode() === 'DRAFT') {
+      return { status: 'DRAFT', date: 'ALL' };
+    }
+    if (this.queueMode() === 'TODAY') {
+      return { status: 'ALL', date: 'TODAY' };
+    }
+    if (this.queueMode() === 'REVIEW') {
+      return { status: 'REVIEW', date: 'ALL' };
+    }
+    if (this.queueMode() === 'INVOICE') {
+      return { status: 'BILLING', date: 'ALL' };
+    }
+    return { status: 'OPEN', date: 'ALL' };
   }
 
   protected statusLabel(status: string): string {
@@ -510,12 +696,28 @@ export class DashboardComponent {
   protected workerLoadMax(data: TenantAnalytics): number {
     return Math.max(1, ...data.workerLoad.map((worker) => worker.activeJobs));
   }
+
+  protected minutesLabel(minutes: number): string {
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  }
 }
 
 function statusRank(status: string): number {
-  return { PENDING_COMPLETION: 1, APPROVED: 2, CUSTOMER_NOTIFIED: 3 }[status] ?? 9;
+  return { DRAFT: 0, PENDING_COMPLETION: 1, APPROVED: 2, CUSTOMER_NOTIFIED: 3 }[status] ?? 9;
 }
 
 function dateValue(value?: string): number {
   return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+}
+
+function dateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

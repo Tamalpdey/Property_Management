@@ -1,10 +1,11 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { EmailTemplateRecord, InvoiceLineRecord, InvoiceLineRequest, InvoiceRecord, InvoiceStatus, OwnerStatementRecord, PropertyOwner, PropertyRecord, TenantSettingsRecord, WorkOrderRecord } from '@lorne/contracts';
+import type { BulkInvoiceOwnerGroupRecord, BulkInvoicePreviewRecord, BulkInvoiceWorkOrderRecord, EmailTemplateRecord, InventoryItem, InvoiceLineRecord, InvoiceLineRequest, InvoiceRecord, InvoiceStatus, InvoiceWorkOrderRecord, OwnerStatementRecord, PropertyOwner, PropertyRecord, TenantSettingsRecord, WorkOrderRecord } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
+import { SelectModule } from 'primeng/select';
 import { TagModule } from 'primeng/tag';
 import { InvoiceService } from './services/invoice.service';
 import { EmailTemplateService } from '../notifications/services/email-template.service';
@@ -14,12 +15,12 @@ import { TenantAnalyticsService } from '../analytics/services/tenant-analytics.s
 
 type InvoiceLineType = 'LABOR' | 'MATERIAL' | 'CUSTOM' | 'DISCOUNT';
 type PaymentMethod = 'CASH' | 'CHEQUE' | 'E_TRANSFER' | 'CARD' | 'BANK_TRANSFER' | 'OTHER';
-type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number };
+type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number; inventoryItemId?: string };
 
 @Component({
   selector: 'lorne-invoice-page',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, TagModule],
+  imports: [ButtonModule, DialogModule, FormsModule, SelectModule, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-3">
@@ -33,7 +34,16 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
             <span class="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-700">{{ currency(paidTotal()) }} paid</span>
           </div>
           <div class="flex flex-wrap gap-2">
+            <label class="relative min-w-64 flex-1 sm:flex-none">
+              <span class="sr-only">Search invoices</span>
+              <i class="pi pi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input class="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-9 text-sm" type="search" placeholder="Invoice, owner, property, work order" [ngModel]="invoiceSearch()" (ngModelChange)="invoiceSearch.set($event)" />
+              @if (invoiceSearch()) {
+                <button type="button" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700" title="Clear search" aria-label="Clear search" (click)="invoiceSearch.set('')"><i class="pi pi-times"></i></button>
+              }
+            </label>
             <button pButton type="button" icon="pi pi-plus" label="Create invoice" [disabled]="!canManageBilling()" (click)="openBatchInvoice()"></button>
+            <button pButton type="button" severity="secondary" icon="pi pi-calendar-plus" label="Bulk by date" [disabled]="!canManageBilling()" (click)="openBulkInvoice()"></button>
             <button pButton type="button" severity="secondary" icon="pi pi-refresh" label="Refresh" [loading]="loading()" (click)="load()"></button>
           </div>
         </div>
@@ -63,7 +73,7 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
-                @for (invoice of invoices(); track invoice.id) {
+                @for (invoice of filteredInvoices(); track invoice.id) {
                   <tr class="cursor-pointer hover:bg-slate-50" [class.bg-teal-50]="selectedInvoice()?.id === invoice.id" (click)="select(invoice)">
                     <td class="px-3 py-3">
                       <p class="font-black text-slate-950">{{ invoice.invoiceNumber }}</p>
@@ -97,7 +107,7 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="8" class="px-3 py-10 text-center text-sm font-semibold text-slate-500">No invoices generated yet.</td>
+                    <td colspan="8" class="px-3 py-10 text-center text-sm font-semibold text-slate-500">{{ invoiceSearch() ? 'No invoices match this search.' : 'No invoices generated yet.' }}</td>
                   </tr>
                 }
               </tbody>
@@ -117,7 +127,7 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
             </div>
             <div class="mt-3 grid grid-cols-3 gap-2">
               <button pButton type="button" size="small" severity="secondary" icon="pi pi-list" label="Statement" (click)="openStatement(invoice)"></button>
-              <button pButton type="button" size="small" severity="secondary" icon="pi pi-send" label="Mark sent" [disabled]="!canManageBilling() || invoice.status !== 'DRAFT'" [loading]="savingStatus()" (click)="updateStatus(invoice, 'SENT')"></button>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-send" label="Send invoice" [disabled]="!canManageBilling() || invoice.status !== 'DRAFT' || !ownerEmail(invoice)" (click)="openSend(invoice)"></button>
               <button pButton type="button" size="small" severity="danger" icon="pi pi-ban" label="Void" [disabled]="!canManageBilling() || invoice.status === 'VOID' || invoice.status === 'PAID'" [loading]="savingStatus()" (click)="voidInvoice(invoice)"></button>
             </div>
             @if (!canManageBilling()) {
@@ -166,7 +176,7 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                         <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" min="0.01" step="0.01" name="editLineQuantity{{ line.id }}" [(ngModel)]="lineEditForm.quantity" />
                       </label>
                       <label class="block">
-                        <span class="mb-1 block text-xs font-bold text-slate-700">Unit price</span>
+                        <span class="mb-1 block text-xs font-bold text-slate-700">Billing cost</span>
                         <input class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" step="0.01" name="editLineUnitPrice{{ line.id }}" [(ngModel)]="lineEditForm.unitPrice" />
                       </label>
                       <label class="block">
@@ -220,13 +230,32 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                     <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="lineDescription" [(ngModel)]="lineForm.description" />
                   </label>
                 </div>
+                @if (lineForm.lineType === 'MATERIAL') {
+                  <label class="mt-2 block">
+                    <span class="mb-1 block text-xs font-bold text-slate-700">Inventory material</span>
+                    <p-select
+                      styleClass="w-full"
+                      name="lineInventoryItem"
+                      [options]="activeInventoryItems()"
+                      optionLabel="name"
+                      optionValue="id"
+                      [filter]="true"
+                      filterBy="name,categoryName,storageLocation,unit"
+                      [showClear]="true"
+                      appendTo="body"
+                      placeholder="Search inventory or keep ad-hoc description"
+                      [(ngModel)]="lineForm.inventoryItemId"
+                      (ngModelChange)="applyInventoryToLineForm()"
+                    />
+                  </label>
+                }
                 <div class="mt-2 grid grid-cols-3 gap-2">
                   <label class="block">
                     <span class="mb-1 block text-xs font-bold text-slate-700">Qty</span>
                     <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="number" min="0.01" step="0.01" name="lineQuantity" [(ngModel)]="lineForm.quantity" />
                   </label>
                   <label class="block">
-                    <span class="mb-1 block text-xs font-bold text-slate-700">Unit price</span>
+                    <span class="mb-1 block text-xs font-bold text-slate-700">Billing cost</span>
                     <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="number" step="0.01" name="lineUnitPrice" [(ngModel)]="lineForm.unitPrice" />
                   </label>
                   <label class="block">
@@ -295,10 +324,11 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
             <span class="mb-1 block text-sm font-bold text-slate-700">Subject</span>
             <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="sendForm.subject" />
           </label>
-          <label class="block">
+          <div class="block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Message</span>
-            <textarea class="min-h-64 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="sendForm.body"></textarea>
-          </label>
+            <div class="min-h-64 w-full overflow-auto rounded border border-slate-300 bg-white px-4 py-3 text-sm leading-6 text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" contenteditable="true" role="textbox" aria-multiline="true" [innerHTML]="sendForm.body" (input)="updateSendBody($event)"></div>
+            <span class="mt-1 block text-xs font-medium text-slate-500">The formatted message shown here is what the customer receives.</span>
+          </div>
           <div class="flex justify-end gap-2">
             <button pButton type="button" severity="secondary" label="Cancel" (click)="showSend.set(false)"></button>
             <button pButton type="submit" icon="pi pi-send" label="Send invoice" [disabled]="!canManageBilling()" [loading]="saving()"></button>
@@ -374,21 +404,57 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
           <section class="grid gap-3 lg:grid-cols-[1fr_1fr_10rem_10rem]">
             <label class="block">
               <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Owner *</span>
-              <select class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="batchOwnerId" [(ngModel)]="batchForm.ownerId" (ngModelChange)="batchForm.propertyId = ''; batchForm.workOrderIds = []">
-                <option value="">Select owner</option>
-                @for (owner of owners(); track owner.id) {
-                  <option [value]="owner.id">{{ owner.displayName }}</option>
-                }
-              </select>
+              <p-select
+                styleClass="w-full"
+                name="batchOwnerId"
+                [options]="owners()"
+                optionLabel="displayName"
+                optionValue="id"
+                filterBy="displayName,email,billingEmail,phone,ownerCode"
+                [filter]="true"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="Search owner"
+                [(ngModel)]="batchForm.ownerId"
+                (ngModelChange)="batchForm.propertyId = ''; batchForm.workOrderIds = []"
+              >
+                <ng-template pTemplate="item" let-owner>
+                  <div>
+                    <p class="font-bold text-slate-900">{{ owner.displayName }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ owner.ownerCode }} · {{ owner.billingEmail || owner.email || 'No email' }}</p>
+                  </div>
+                </ng-template>
+                <ng-template pTemplate="selectedItem" let-owner>
+                  <span>{{ owner?.displayName || 'Search owner' }}</span>
+                </ng-template>
+              </p-select>
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Property</span>
-              <select class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="batchPropertyId" [(ngModel)]="batchForm.propertyId" (ngModelChange)="batchForm.workOrderIds = []">
-                <option value="">All owner properties</option>
-                @for (property of filteredProperties(); track property.id) {
-                  <option [value]="property.id">{{ property.name }}</option>
-                }
-              </select>
+              <p-select
+                styleClass="w-full"
+                name="batchPropertyId"
+                [options]="filteredProperties()"
+                optionLabel="name"
+                optionValue="id"
+                filterBy="name,addressLine1,city,propertyCode,ownerName,ownerCode"
+                [filter]="true"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="All owner properties"
+                [(ngModel)]="batchForm.propertyId"
+                (ngModelChange)="batchForm.workOrderIds = []"
+              >
+                <ng-template pTemplate="item" let-property>
+                  <div>
+                    <p class="font-bold text-slate-900">{{ property.name }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ property.propertyCode }} · {{ property.addressLine1 }}</p>
+                  </div>
+                </ng-template>
+                <ng-template pTemplate="selectedItem" let-property>
+                  <span>{{ property?.name || 'All owner properties' }}</span>
+                </ng-template>
+              </p-select>
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Issued</span>
@@ -449,9 +515,25 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
                       <input class="rounded-lg border border-slate-300 px-2 py-2 text-sm" name="batchLineDescription{{ line.id }}" placeholder="Description" [(ngModel)]="line.description" />
                       <button pButton type="button" severity="danger" text rounded icon="pi pi-trash" (click)="removeBatchLine(line.id)"></button>
                     </div>
+                    @if (line.lineType === 'MATERIAL') {
+                      <p-select
+                        styleClass="mt-2 w-full"
+                        [options]="activeInventoryItems()"
+                        optionLabel="name"
+                        optionValue="id"
+                        [filter]="true"
+                        filterBy="name,categoryName,storageLocation,unit"
+                        [showClear]="true"
+                        appendTo="body"
+                        placeholder="Search inventory or keep ad-hoc description"
+                        [(ngModel)]="line.inventoryItemId"
+                        [ngModelOptions]="{ standalone: true }"
+                        (ngModelChange)="applyInventoryToBatchLine(line)"
+                      />
+                    }
                     <div class="mt-2 grid grid-cols-4 gap-2">
                       <input class="rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" min="0.01" step="0.01" name="batchLineQty{{ line.id }}" placeholder="Qty" [(ngModel)]="line.quantity" />
-                      <input class="rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" step="0.01" name="batchLineUnit{{ line.id }}" placeholder="Unit" [(ngModel)]="line.unitPrice" />
+                      <input class="rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" step="0.01" name="batchLineUnit{{ line.id }}" placeholder="Billing cost" [(ngModel)]="line.unitPrice" />
                       <input class="rounded-lg border border-slate-300 px-2 py-2 text-sm" type="number" min="0" max="100" step="0.01" name="batchLineTax{{ line.id }}" placeholder="Tax %" [(ngModel)]="line.taxRatePercent" />
                       <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-600">
                         <input type="checkbox" name="batchLineTaxable{{ line.id }}" [(ngModel)]="line.taxable" />
@@ -476,6 +558,122 @@ type BatchLineDraft = InvoiceLineRequest & { id: string; taxRatePercent?: number
         </form>
       </p-dialog>
 
+      <p-dialog header="Bulk invoice by date range" [modal]="true" [visible]="showBulkInvoice()" [style]="{ width: 'min(82rem, 96vw)', height: 'min(56rem, 94vh)' }" [contentStyle]="{ height: 'calc(100% - 3.75rem)', overflow: 'hidden' }" (visibleChange)="showBulkInvoice.set($event)">
+        <form class="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-3 overflow-hidden" (ngSubmit)="createBulkInvoices()">
+          <section class="grid gap-3 lg:grid-cols-[10rem_10rem_10rem_1fr_auto] lg:items-end">
+            <label class="block">
+              <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">From</span>
+              <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="date" name="bulkFromDate" [(ngModel)]="bulkForm.fromDate" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">To</span>
+              <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="date" name="bulkToDate" [(ngModel)]="bulkForm.toDate" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Issued</span>
+              <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" type="date" name="bulkIssuedOn" [(ngModel)]="bulkForm.issuedOn" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600">Search preview</span>
+              <input class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="bulkSearch" placeholder="Owner, property, work order, service" [(ngModel)]="bulkSearch" />
+            </label>
+            <button pButton type="button" severity="secondary" icon="pi pi-search" label="Preview" [loading]="loadingBulkPreview()" (click)="previewBulkInvoices()"></button>
+          </section>
+
+          <section class="grid gap-3 sm:grid-cols-4">
+            <p class="rounded-lg bg-slate-50 px-3 py-2 text-sm"><span class="block text-xs font-black uppercase tracking-wide text-slate-500">Owners</span><strong>{{ bulkPreview()?.ownerCount || 0 }}</strong></p>
+            <p class="rounded-lg bg-slate-50 px-3 py-2 text-sm"><span class="block text-xs font-black uppercase tracking-wide text-slate-500">Eligible work orders</span><strong>{{ bulkPreview()?.workOrderCount || 0 }}</strong></p>
+            <p class="rounded-lg bg-teal-50 px-3 py-2 text-sm text-teal-800"><span class="block text-xs font-black uppercase tracking-wide">Selected</span><strong>{{ bulkForm.workOrderIds.length }} work orders</strong></p>
+            <p class="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800"><span class="block text-xs font-black uppercase tracking-wide">Selected subtotal</span><strong>{{ currency(bulkSelectedSubtotal()) }}</strong></p>
+          </section>
+          <section class="grid gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-900 md:grid-cols-3">
+            <p><strong class="block text-blue-700">Owner row</strong>Select the owner checkbox to include every visible work order under that owner.</p>
+            <p><strong class="block text-blue-700">Expand work orders</strong>Use the chevron to show jobs; use Remove to hide a job from this preview.</p>
+            <p><strong class="block text-blue-700">Duplicate guard</strong>Already invoiced work orders are hidden here and rechecked when invoices are created.</p>
+          </section>
+
+          <section class="min-h-0 overflow-auto rounded-lg border border-slate-200 bg-white">
+            <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+              <p class="text-xs font-bold text-slate-600">Only approved/customer-notified work orders not already on a non-void invoice are shown.</p>
+              <div class="flex gap-2">
+                <button pButton type="button" size="small" severity="secondary" label="Select all visible" [disabled]="filteredBulkOwners().length === 0" (click)="selectAllBulkVisible()"></button>
+                <button pButton type="button" size="small" severity="secondary" label="Clear" [disabled]="bulkForm.workOrderIds.length === 0" (click)="clearBulkSelection()"></button>
+              </div>
+            </div>
+            <div class="grid gap-3 p-3">
+              @if (loadingBulkPreview()) {
+                <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-12 text-center text-sm font-semibold text-slate-500">Loading eligible work orders...</p>
+              } @else {
+                @for (owner of filteredBulkOwners(); track owner.ownerId) {
+                  <article class="overflow-hidden rounded-lg border border-slate-200">
+                    <div class="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                      <label class="flex min-w-0 cursor-pointer items-start gap-3">
+                        <input class="mt-1" type="checkbox" [checked]="bulkOwnerSelected(owner)" (change)="toggleBulkOwner(owner, $event)" />
+                        <span class="min-w-0">
+                          <span class="block font-black text-slate-950">{{ owner.ownerName }}</span>
+                          <span class="block text-xs font-semibold text-slate-500">{{ owner.ownerCode || 'No owner ID' }} · {{ owner.ownerBillingEmail || owner.ownerEmail || 'No billing email' }}</span>
+                        </span>
+                      </label>
+                      <span class="flex flex-wrap items-center gap-2 text-xs font-black">
+                        <span class="rounded-full bg-white px-2 py-1 text-slate-600">{{ bulkOwnerSelectedCount(owner) }} / {{ owner.workOrderCount }} selected</span>
+                        <span class="rounded-full bg-white px-2 py-1 text-slate-600">{{ owner.workOrderCount }} work orders</span>
+                        <span class="rounded-full bg-teal-50 px-2 py-1 text-teal-700">{{ currency(owner.estimatedSubtotal) }}</span>
+                        <button
+                          pButton
+                          type="button"
+                          size="small"
+                          severity="secondary"
+                          [text]="true"
+                          [icon]="bulkOwnerExpanded(owner) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                          [label]="bulkOwnerExpanded(owner) ? 'Hide work orders' : 'Show work orders'"
+                          [attr.aria-expanded]="bulkOwnerExpanded(owner)"
+                          (click)="toggleBulkOwnerExpanded(owner.ownerId)"
+                        ></button>
+                      </span>
+                    </div>
+                    @if (bulkOwnerExpanded(owner)) {
+                      <div class="divide-y divide-slate-100">
+                        @for (workOrder of owner.workOrders; track workOrder.workOrderId) {
+                          <div class="grid gap-2 px-3 py-2 hover:bg-slate-50 sm:grid-cols-[auto_1fr_auto] sm:items-start">
+                            <input class="mt-1" type="checkbox" aria-label="Select work order" [checked]="bulkForm.workOrderIds.includes(workOrder.workOrderId)" (change)="toggleBulkWorkOrder(workOrder.workOrderId, $event)" />
+                            <span class="min-w-0">
+                              <span class="block text-sm font-black text-slate-950">{{ workOrder.workOrderNumber }} · {{ workOrder.title }}</span>
+                              <span class="mt-0.5 block text-xs font-semibold text-slate-500">{{ workOrder.propertyName }} · {{ workOrder.propertyCode || 'No property ID' }} · {{ workOrder.serviceName || 'General service' }}</span>
+                              @if (workOrder.propertyAddress) {
+                                <span class="mt-0.5 block text-xs text-slate-500">{{ workOrder.propertyAddress }}</span>
+                              }
+                              <span class="mt-0.5 block text-xs text-slate-500">{{ serviceWindowText(workOrder) }}</span>
+                            </span>
+                            <span class="flex items-center justify-end gap-2">
+                              <span class="text-right text-sm font-black text-slate-900">{{ currency(workOrder.estimatedSubtotal) }}</span>
+                              <button pButton type="button" size="small" severity="secondary" text rounded icon="pi pi-times" label="Remove" title="Remove from preview" aria-label="Remove from preview" (click)="removeBulkWorkOrder(workOrder.workOrderId)"></button>
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    } @else {
+                      <p class="border-t border-slate-100 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                        Work orders hidden. Click <strong>Show work orders</strong> to review and select individual jobs.
+                      </p>
+                    }
+                  </article>
+                } @empty {
+                  <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-12 text-center text-sm font-semibold text-slate-500">No eligible work orders found for this range.</p>
+                }
+              }
+            </div>
+          </section>
+
+          <div class="flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
+            <p class="text-sm font-bold text-slate-600">Creates one draft invoice per owner. Work orders already invoiced are skipped by the server.</p>
+            <div class="flex gap-2">
+              <button pButton type="button" severity="secondary" label="Cancel" (click)="showBulkInvoice.set(false)"></button>
+              <button pButton type="submit" icon="pi pi-save" label="Create selected invoices" [disabled]="!canManageBilling() || bulkForm.workOrderIds.length === 0" [loading]="savingBulkInvoices()"></button>
+            </div>
+          </div>
+        </form>
+      </p-dialog>
+
     </section>
   `
 })
@@ -488,6 +686,7 @@ export class InvoicePageComponent {
   protected readonly canManageBilling = this.access.canManageBilling;
   protected readonly billingDeniedMessage = this.access.billingDeniedMessage;
   protected readonly invoices = signal<InvoiceRecord[]>([]);
+  protected readonly invoiceSearch = signal('');
   protected readonly selectedInvoice = signal<InvoiceRecord | null>(null);
   protected readonly template = signal<EmailTemplateRecord | null>(null);
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
@@ -503,13 +702,20 @@ export class InvoicePageComponent {
   protected readonly showPayment = signal(false);
   protected readonly showStatement = signal(false);
   protected readonly showBatchInvoice = signal(false);
+  protected readonly showBulkInvoice = signal(false);
   protected readonly savingBatch = signal(false);
+  protected readonly loadingBulkPreview = signal(false);
+  protected readonly savingBulkInvoices = signal(false);
+  protected readonly bulkPreview = signal<BulkInvoicePreviewRecord | null>(null);
+  protected readonly expandedBulkOwnerIds = signal<string[]>([]);
+  protected readonly hiddenBulkWorkOrderIds = signal<string[]>([]);
   protected readonly sendTarget = signal<InvoiceRecord | null>(null);
   protected readonly paymentTarget = signal<InvoiceRecord | null>(null);
   protected readonly statement = signal<OwnerStatementRecord | null>(null);
   protected readonly owners = signal<PropertyOwner[]>([]);
   protected readonly properties = signal<PropertyRecord[]>([]);
   protected readonly workOrders = signal<WorkOrderRecord[]>([]);
+  protected readonly inventoryItems = signal<InventoryItem[]>([]);
   protected readonly batchForm: {
     ownerId: string;
     propertyId: string;
@@ -525,9 +731,24 @@ export class InvoicePageComponent {
     dueOn: addDaysInput(30),
     additionalLines: []
   };
+  protected readonly bulkForm: {
+    fromDate: string;
+    toDate: string;
+    issuedOn: string;
+    dueOn: string;
+    workOrderIds: string[];
+  } = {
+    fromDate: monthStartInput(),
+    toDate: todayInput(),
+    issuedOn: todayInput(),
+    dueOn: addDaysInput(30),
+    workOrderIds: []
+  };
+  protected bulkSearch = '';
   protected readonly sendForm = { recipientEmail: '', ccEmails: '', bccEmails: '', subject: '', body: '' };
-  protected readonly lineForm: { lineType: InvoiceLineType; description: string; quantity: number; unitPrice: number; taxable: boolean; taxRatePercent: number } = {
+  protected readonly lineForm: { lineType: InvoiceLineType; inventoryItemId: string; description: string; quantity: number; unitPrice: number; taxable: boolean; taxRatePercent: number } = {
     lineType: 'CUSTOM',
+    inventoryItemId: '',
     description: '',
     quantity: 1,
     unitPrice: 0,
@@ -552,6 +773,26 @@ export class InvoicePageComponent {
   protected readonly receivables = computed(() => this.invoices().filter((invoice) => !['PAID', 'VOID'].includes(invoice.status)).reduce((total, invoice) => total + Number(invoice.balanceDue || 0), 0));
   protected readonly paidTotal = computed(() => this.invoices().reduce((total, invoice) => total + Number(invoice.paidTotal || 0), 0));
 
+  protected filteredInvoices(): InvoiceRecord[] {
+    const query = this.invoiceSearch().trim().toLowerCase();
+    if (!query) {
+      return this.invoices();
+    }
+    return this.invoices().filter((invoice) => [
+      invoice.invoiceNumber,
+      invoice.ownerName,
+      invoice.ownerCode,
+      invoice.ownerEmail,
+      invoice.ownerBillingEmail,
+      invoice.propertyName,
+      invoice.propertyCode,
+      invoice.status,
+      invoice.issuedOn,
+      invoice.dueOn,
+      ...(invoice.workOrders || []).flatMap((workOrder) => [workOrder.workOrderNumber, workOrder.title, workOrder.serviceName, workOrder.propertyName, workOrder.propertyCode])
+    ].some((value) => String(value || '').toLowerCase().includes(query)));
+  }
+
   protected filteredProperties(): PropertyRecord[] {
     const ownerId = this.batchForm.ownerId;
     return this.properties()
@@ -562,7 +803,7 @@ export class InvoicePageComponent {
   protected batchCandidates(): WorkOrderRecord[] {
     const ownerId = this.batchForm.ownerId;
     const propertyId = this.batchForm.propertyId;
-    const alreadyInvoiced = new Set(this.invoices().flatMap((invoice) => [
+    const alreadyInvoiced = new Set(this.invoices().filter((invoice) => invoice.status !== 'VOID').flatMap((invoice) => [
       invoice.workOrderId,
       ...(invoice.workOrders || []).map((workOrder) => workOrder.workOrderId)
     ]).filter(Boolean) as string[]);
@@ -602,6 +843,7 @@ export class InvoicePageComponent {
       this.owners.set(analytics.owners);
       this.properties.set(analytics.properties);
       this.workOrders.set(analytics.workOrders);
+      this.inventoryItems.set(analytics.inventoryItems);
       this.selectedInvoice.set(invoices[0] ?? null);
     } catch (exception) {
       this.error.set(apiErrorMessage(exception, 'Unable to load invoices.'));
@@ -654,8 +896,199 @@ export class InvoicePageComponent {
     ];
   }
 
+  protected activeInventoryItems(): InventoryItem[] {
+    return this.inventoryItems().filter((item) => item.active);
+  }
+
+  protected applyInventoryToLineForm(): void {
+    const item = this.inventoryItems().find((candidate) => candidate.id === this.lineForm.inventoryItemId);
+    if (!item) {
+      return;
+    }
+    this.lineForm.description = item.name;
+    this.lineForm.unitPrice = Number(item.billingCost ?? 0);
+  }
+
+  protected applyInventoryToBatchLine(line: BatchLineDraft): void {
+    const item = this.inventoryItems().find((candidate) => candidate.id === line.inventoryItemId);
+    if (!item) {
+      return;
+    }
+    line.description = item.name;
+    line.unitPrice = Number(item.billingCost ?? 0);
+  }
+
   protected removeBatchLine(lineId: string): void {
     this.batchForm.additionalLines = this.batchForm.additionalLines.filter((line) => line.id !== lineId);
+  }
+
+  protected openBulkInvoice(): void {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
+    this.bulkForm.fromDate = monthStartInput();
+    this.bulkForm.toDate = todayInput();
+    this.bulkForm.issuedOn = todayInput();
+    this.bulkForm.dueOn = addDaysInput(30);
+    this.bulkForm.workOrderIds = [];
+    this.bulkSearch = '';
+    this.bulkPreview.set(null);
+    this.expandedBulkOwnerIds.set([]);
+    this.hiddenBulkWorkOrderIds.set([]);
+    this.showBulkInvoice.set(true);
+    void this.previewBulkInvoices();
+  }
+
+  protected async previewBulkInvoices(): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
+    if (!this.bulkForm.fromDate || !this.bulkForm.toDate) {
+      this.error.set('From and to dates are required.');
+      return;
+    }
+    this.loadingBulkPreview.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const preview = await firstValueFrom(this.invoiceService.previewBulk({
+        fromDate: this.bulkForm.fromDate,
+        toDate: this.bulkForm.toDate
+      }));
+      const eligibleIds = new Set(preview.owners.flatMap((owner) => owner.workOrders.map((workOrder) => workOrder.workOrderId)));
+      this.bulkForm.workOrderIds = this.bulkForm.workOrderIds.filter((id) => eligibleIds.has(id));
+      this.expandedBulkOwnerIds.set(preview.owners.length <= 5 ? preview.owners.map((owner) => owner.ownerId) : []);
+      this.hiddenBulkWorkOrderIds.set([]);
+      this.bulkPreview.set(preview);
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to preview bulk invoices.'));
+    } finally {
+      this.loadingBulkPreview.set(false);
+    }
+  }
+
+  protected filteredBulkOwners(): BulkInvoiceOwnerGroupRecord[] {
+    const preview = this.bulkPreview();
+    if (!preview) {
+      return [];
+    }
+    const search = this.bulkSearch.trim().toLowerCase();
+    const hidden = new Set(this.hiddenBulkWorkOrderIds());
+    return preview.owners
+      .map((owner) => ({
+        ...owner,
+        workOrders: owner.workOrders
+          .filter((workOrder) => !hidden.has(workOrder.workOrderId))
+          .filter((workOrder) => !search || bulkWorkOrderMatches(owner, workOrder, search))
+      }))
+      .map((owner) => ({
+        ...owner,
+        workOrderCount: owner.workOrders.length,
+        estimatedSubtotal: owner.workOrders.reduce((total, workOrder) => total + Number(workOrder.estimatedSubtotal || 0), 0)
+      }))
+      .filter((owner) => owner.workOrders.length > 0);
+  }
+
+  protected bulkOwnerSelected(owner: BulkInvoiceOwnerGroupRecord): boolean {
+    return owner.workOrders.length > 0 && owner.workOrders.every((workOrder) => this.bulkForm.workOrderIds.includes(workOrder.workOrderId));
+  }
+
+  protected bulkOwnerSelectedCount(owner: BulkInvoiceOwnerGroupRecord): number {
+    return owner.workOrders.filter((workOrder) => this.bulkForm.workOrderIds.includes(workOrder.workOrderId)).length;
+  }
+
+  protected bulkOwnerExpanded(owner: BulkInvoiceOwnerGroupRecord): boolean {
+    return this.expandedBulkOwnerIds().includes(owner.ownerId);
+  }
+
+  protected toggleBulkOwnerExpanded(ownerId: string): void {
+    this.expandedBulkOwnerIds.update((ownerIds) => ownerIds.includes(ownerId)
+      ? ownerIds.filter((id) => id !== ownerId)
+      : [...ownerIds, ownerId]
+    );
+  }
+
+  protected toggleBulkOwner(owner: BulkInvoiceOwnerGroupRecord, event: Event): void {
+    const checked = event.target instanceof HTMLInputElement && event.target.checked;
+    const ownerWorkOrderIds = owner.workOrders.map((workOrder) => workOrder.workOrderId);
+    this.bulkForm.workOrderIds = checked
+      ? Array.from(new Set([...this.bulkForm.workOrderIds, ...ownerWorkOrderIds]))
+      : this.bulkForm.workOrderIds.filter((id) => !ownerWorkOrderIds.includes(id));
+  }
+
+  protected toggleBulkWorkOrder(workOrderId: string, event: Event): void {
+    const checked = event.target instanceof HTMLInputElement && event.target.checked;
+    this.bulkForm.workOrderIds = checked
+      ? Array.from(new Set([...this.bulkForm.workOrderIds, workOrderId]))
+      : this.bulkForm.workOrderIds.filter((id) => id !== workOrderId);
+  }
+
+  protected selectAllBulkVisible(): void {
+    this.bulkForm.workOrderIds = Array.from(new Set([
+      ...this.bulkForm.workOrderIds,
+      ...this.filteredBulkOwners().flatMap((owner) => owner.workOrders.map((workOrder) => workOrder.workOrderId))
+    ]));
+  }
+
+  protected clearBulkSelection(): void {
+    this.bulkForm.workOrderIds = [];
+  }
+
+  protected removeBulkWorkOrder(workOrderId: string): void {
+    this.hiddenBulkWorkOrderIds.update((ids) => ids.includes(workOrderId) ? ids : [...ids, workOrderId]);
+    this.bulkForm.workOrderIds = this.bulkForm.workOrderIds.filter((id) => id !== workOrderId);
+  }
+
+  protected bulkSelectedSubtotal(): number {
+    const selected = new Set(this.bulkForm.workOrderIds);
+    return (this.bulkPreview()?.owners || [])
+      .flatMap((owner) => owner.workOrders)
+      .filter((workOrder) => selected.has(workOrder.workOrderId))
+      .reduce((total, workOrder) => total + Number(workOrder.estimatedSubtotal || 0), 0);
+  }
+
+  protected serviceWindowText(workOrder: BulkInvoiceWorkOrderRecord): string {
+    if (!workOrder.scheduledStart) {
+      return 'No service date';
+    }
+    if (!workOrder.scheduledEnd) {
+      return this.dateTime(workOrder.scheduledStart);
+    }
+    return `${this.dateTime(workOrder.scheduledStart)} - ${this.dateTime(workOrder.scheduledEnd)}`;
+  }
+
+  protected async createBulkInvoices(): Promise<void> {
+    if (!this.ensureCanManageBilling()) {
+      return;
+    }
+    if (this.bulkForm.workOrderIds.length === 0) {
+      this.error.set('Select at least one work order.');
+      return;
+    }
+    this.savingBulkInvoices.set(true);
+    this.error.set('');
+    this.message.set('');
+    try {
+      const result = await firstValueFrom(this.invoiceService.createBulk({
+        fromDate: this.bulkForm.fromDate || undefined,
+        toDate: this.bulkForm.toDate || undefined,
+        workOrderIds: this.bulkForm.workOrderIds,
+        issuedOn: this.bulkForm.issuedOn || undefined,
+        dueOn: this.bulkForm.dueOn || undefined
+      }));
+      this.showBulkInvoice.set(false);
+      await this.load();
+      const firstCreated = result.invoices[0];
+      if (firstCreated) {
+        this.selectedInvoice.set(this.invoices().find((invoice) => invoice.id === firstCreated.id) || firstCreated);
+      }
+      const skipped = result.skippedWorkOrderCount > 0 ? ` ${result.skippedWorkOrderCount} work orders were skipped because they were no longer eligible.` : '';
+      this.message.set(`${result.invoices.length} draft invoice${result.invoices.length === 1 ? '' : 's'} created from ${this.bulkForm.fromDate} to ${this.bulkForm.toDate}.${skipped}`);
+    } catch (exception) {
+      this.error.set(apiErrorMessage(exception, 'Unable to create bulk invoices.'));
+    } finally {
+      this.savingBulkInvoices.set(false);
+    }
   }
 
   protected async createBatchInvoice(): Promise<void> {
@@ -820,6 +1253,7 @@ export class InvoicePageComponent {
 
   private resetLineForm(): void {
     this.lineForm.lineType = 'CUSTOM';
+    this.lineForm.inventoryItemId = '';
     this.lineForm.description = '';
     this.lineForm.quantity = 1;
     this.lineForm.unitPrice = 0;
@@ -927,6 +1361,12 @@ export class InvoicePageComponent {
     this.sendForm.subject = render(template?.subject || 'Invoice {{invoiceNumber}}', invoice, this.settings());
     this.sendForm.body = render(template?.body || '', invoice, this.settings());
     this.showSend.set(true);
+  }
+
+  protected updateSendBody(event: Event): void {
+    if (event.target instanceof HTMLElement) {
+      this.sendForm.body = event.target.innerHTML;
+    }
   }
 
   protected async sendInvoiceEmail(): Promise<void> {
@@ -1057,7 +1497,7 @@ function render(template: string, invoice: InvoiceRecord, settings?: TenantSetti
     ownerName: invoice.ownerName,
     propertyCode: invoice.propertyCode || '',
     propertyName: invoicePropertySummaryText(invoice),
-    propertyAddress: invoice.propertyAddress || '',
+    propertyAddress: '',
     workOrderNumber: invoiceWorkSummaryText(invoice),
     workOrderTitle: invoice.workOrderTitle || '',
     invoiceSubtotal: currencyText(invoice.subtotal),
@@ -1080,36 +1520,55 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
     .brand-bar { position: absolute; left: 0; right: 0; height: 22pt; background: ${escapeHtml(brand.primary)}; }
     .brand-bar.top { top: 0; }
     .brand-bar.bottom { bottom: 0; height: 14pt; }
-    .invoice-title { margin: 42pt 0 26pt; text-align: center; font-size: 24pt; font-weight: 800; letter-spacing: 0.01em; }
-    .brand-name { margin: 0 0 26pt; color: ${escapeHtml(brand.primary)}; font-size: 15pt; font-weight: 800; }
-    .logo { position: absolute; top: 45pt; right: 54pt; display: grid; width: 58pt; height: 58pt; place-items: center; background: #fff; border: 1px solid #cbd5e1; color: ${escapeHtml(brand.primary)}; font-size: 8pt; font-weight: 800; padding: 4pt; }
+    .invoice-title { margin: 42pt 0 26pt; text-align: right; font-size: 24pt; font-weight: 800; letter-spacing: 0.01em; }
+    .brand-name { position: absolute; top: 68pt; left: 124pt; max-width: 250pt; margin: 0; color: ${escapeHtml(brand.primary)}; font-size: 15pt; font-weight: 800; }
+    .logo { position: absolute; top: 45pt; left: 54pt; display: grid; width: 58pt; height: 58pt; place-items: center; background: #fff; border: 1px solid #cbd5e1; color: ${escapeHtml(brand.primary)}; font-size: 8pt; font-weight: 800; padding: 4pt; }
     .logo img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
     .columns { display: grid; grid-template-columns: 1fr 1.15fr 0.88fr; gap: 24pt; min-height: 88pt; }
     .label { margin: 0 0 4pt; color: ${escapeHtml(brand.primary)}; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
     .meta { text-align: right; }
-    .meta-block { margin-bottom: 9pt; }
+    .meta-block { margin-bottom: 4pt; line-height: 1; }
+    .meta-block:last-child { margin-bottom: 0; }
     .meta-block p { margin: 0; }
     p { margin: 1.5pt 0; }
-    .rule { border-top: 1px solid #cbd5e1; margin: 14pt 0; }
-    .work { margin-bottom: 18pt; }
-    .work strong { display: block; margin-top: 5pt; font-size: 9.5pt; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.5pt; }
-    th, td { border: 1px solid #d8e0ea; padding: 6pt 8pt; text-align: left; vertical-align: top; }
-    th { background: #0f766e; color: white; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
-    tbody tr.blank td { height: 20pt; background: #fff; }
+    .rule { border-top: 1px solid #cbd5e1; margin: 10pt 0 14pt; }
+    .work-summary { display: grid; grid-template-columns: 1fr auto; gap: 14pt; align-items: start; margin-bottom: 18pt; border: 1px solid #d8e0ea; border-left: 4pt solid ${escapeHtml(brand.primary)}; background: #f7fbfa; padding: 11pt 12pt; }
+    .work-summary .label { margin-bottom: 6pt; }
+    .work-title { display: block; color: #020617; font-size: 11pt; font-weight: 800; }
+    .work-numbers { margin-top: 4pt; color: #334155; font-size: 8.5pt; font-weight: 700; }
+    .work-property { margin-top: 3pt; color: #64748b; font-size: 8.3pt; }
+    .work-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6pt; max-width: 310pt; }
+    .code-chip { min-width: 92pt; border: 1px solid #d8e0ea; background: #fff; padding: 5pt 7pt; }
+    .property-code-chip { max-width: 310pt; min-width: 190pt; }
+    .code-chip span { display: block; color: #64748b; font-size: 6.5pt; font-weight: 800; text-transform: uppercase; }
+    .code-chip strong { display: block; margin-top: 2pt; color: ${escapeHtml(brand.primary)}; font-size: 7.8pt; overflow-wrap: anywhere; }
+    .invoice-lines { width: 100%; border: 1px solid #cbd5e1; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 8.5pt; }
+    .invoice-lines th, .invoice-lines td { border: 0; border-right: 1px solid #d8e0ea; border-bottom: 1px solid #d8e0ea; padding: 7pt 8pt; text-align: left; vertical-align: top; }
+    .invoice-lines th:last-child, .invoice-lines td:last-child { border-right: 0; }
+    .invoice-lines tbody tr:last-child td { border-bottom: 0; }
+    .invoice-lines th { background: ${escapeHtml(brand.primary)}; color: white; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
+    .group td { background: #eef7f5; border-top: 2pt solid ${escapeHtml(brand.primary)}; padding: 8pt 10pt; }
+    .group:first-child td { border-top: 0; }
+    .group-title { display: block; color: ${escapeHtml(brand.primary)}; font-weight: 800; }
+    .group-subtitle { display: block; margin-top: 2pt; color: #475569; font-size: 7.5pt; }
+    .invoice-line td { background: #fff; }
+    .invoice-line.material td { background: #fbfdff; }
+    .invoice-line td.desc { border-left: 4pt solid ${escapeHtml(brand.primary)}; padding-left: 7pt; }
+    .invoice-line.material td.desc { border-left-color: ${escapeHtml(brand.accent)}; }
+    .line-detail { display: block; margin-top: 2pt; }
     .desc { width: 61%; }
     .qty { width: 10%; text-align: center; }
     .unit { width: 15%; text-align: right; }
     .amount { width: 14%; text-align: right; }
-    .line-type { display: block; color: #64748b; font-size: 7.5pt; }
-    .closing { display: grid; grid-template-columns: 1fr 210pt; gap: 22pt; margin-top: 16pt; align-items: start; }
-    .notes { min-height: 118pt; border: 1px solid #d8e0ea; padding: 12pt; }
+    .line-type { display: block; color: #475569; font-size: 7.5pt; font-weight: 700; }
+    .closing { display: grid; grid-template-columns: 1fr 210pt; gap: 22pt; margin-top: 16pt; align-items: stretch; }
+    .notes { min-height: 118pt; height: 100%; border: 1px solid #d8e0ea; padding: 12pt; }
     .terms { margin-top: 24pt; }
-    .totals { border: 1px solid #d8e0ea; background: #f8fafc; padding: 12pt 12pt 0; }
+    .totals { height: 100%; border: 1px solid #d8e0ea; background: #f8fafc; padding: 12pt 12pt 10pt; }
     .total-row { display: flex; justify-content: space-between; gap: 14pt; margin-bottom: 8pt; }
     .total-row.total { border-top: 1px solid #cbd5e1; margin-top: 4pt; padding-top: 10pt; font-size: 11pt; font-weight: 800; }
     .balance { display: flex; justify-content: space-between; margin: 10pt -2pt 0; padding: 8pt 10pt; background: #e7f8ef; font-weight: 800; }
-    footer { position: absolute; left: 0.52in; right: 0.52in; bottom: 24pt; display: flex; justify-content: space-between; border-top: 1px solid #d8e0ea; padding-top: 8pt; color: #64748b; font-size: 7.5pt; }
+    footer { display: flex; justify-content: space-between; margin-top: 18pt; border-top: 1px solid #d8e0ea; padding: 8pt 0 18pt; color: #64748b; font-size: 7.5pt; }
     .right { text-align: right; }
   </style></head><body>
     <div class="page">
@@ -1128,25 +1587,29 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
         <section>
           <p class="label">Invoice to</p>
           <p>${escapeHtml(invoice.ownerName)}</p>
-          ${invoice.ownerCode ? `<p>Owner ID: ${escapeHtml(invoice.ownerCode)}</p>` : ''}
           <p>${escapeHtml(invoice.ownerBillingEmail || invoice.ownerEmail || '')}</p>
-          <p>${escapeHtml(invoicePropertySummaryText(invoice))}</p>
-          ${invoice.propertyCode ? `<p>Property ID: ${escapeHtml(invoice.propertyCode)}</p>` : ''}
-          <p>${escapeHtml(invoice.propertyAddress || '')}</p>
+          ${invoice.ownerAddress ? `<p>${escapeHtml(invoice.ownerAddress)}</p>` : ''}
+          ${invoice.workOrders.length > 1 ? `<p>${escapeHtml(invoicePropertySummaryText(invoice))}</p>` : ''}
         </section>
         <section class="meta">
           <div class="meta-block"><p class="label">Invoice number</p><p><strong>${escapeHtml(invoice.invoiceNumber)}</strong></p></div>
           <div class="meta-block"><p class="label">Date of invoice</p><p><strong>${escapeHtml(invoice.issuedOn || '-')}</strong></p></div>
           <div class="meta-block"><p class="label">Due date</p><p><strong>${escapeHtml(invoice.dueOn || '-')}</strong></p></div>
-          <div class="meta-block"><p class="label">Status</p><p><strong>${escapeHtml(statusLabel(invoice.status))}</strong></p></div>
+          ${brand.taxRegistrationNumber ? `<div class="meta-block"><p class="label">GST/HST number</p><p><strong>${escapeHtml(brand.taxRegistrationNumber)}</strong></p></div>` : ''}
         </section>
       </div>
       <div class="rule"></div>
-      <section class="work">
-        <p class="label">Property and work order</p>
-        <strong>${escapeHtml(invoiceWorkSummaryText(invoice))}</strong>
-        <p>${escapeHtml(invoicePropertySummaryText(invoice))}</p>
-        ${invoiceCodeSummaryText(invoice) ? `<p>${escapeHtml(invoiceCodeSummaryText(invoice))}</p>` : ''}
+      <section class="work-summary">
+        <div>
+          <p class="label">Property and work order</p>
+          <strong class="work-title">${escapeHtml(invoiceWorkSummaryTitle(invoice))}</strong>
+          <p class="work-numbers">${escapeHtml(invoiceWorkNumbersText(invoice))}</p>
+          <p class="work-property">${escapeHtml(invoicePropertySummaryText(invoice))}</p>
+        </div>
+        <div class="work-chips">
+          ${invoice.ownerCode ? `<p class="code-chip"><span>Owner ID</span><strong>${escapeHtml(invoice.ownerCode)}</strong></p>` : ''}
+          ${invoicePropertyCodeSummary(invoice) ? `<p class="code-chip property-code-chip"><span>${escapeHtml(invoicePropertyCodeLabel(invoice))}</span><strong>${escapeHtml(invoicePropertyCodeSummary(invoice))}</strong></p>` : ''}
+        </div>
       </section>
       ${invoiceTable(invoice)}
       <div class="closing">
@@ -1160,7 +1623,7 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
         </section>
         <section class="totals">
           <p class="total-row"><span>Subtotal</span><strong>${escapeHtml(currencyText(invoice.subtotal))}</strong></p>
-          <p class="total-row"><span>Tax</span><strong>${escapeHtml(currencyText(invoice.taxTotal))}</strong></p>
+          <p class="total-row"><span>${escapeHtml(invoiceTaxLabel(brand))}</span><strong>${escapeHtml(currencyText(invoice.taxTotal))}</strong></p>
           <p class="total-row total"><span>Total</span><strong>${escapeHtml(currencyText(invoice.total))}</strong></p>
           <p class="total-row"><span>Paid</span><strong>${escapeHtml(currencyText(invoice.paidTotal))}</strong></p>
           <p class="balance"><span>Balance due</span><span>${escapeHtml(currencyText(invoice.balanceDue))}</span></p>
@@ -1177,9 +1640,13 @@ function invoiceBrand(settings?: TenantSettingsRecord | null): {
   address: string;
   contact: string;
   website: string;
+  taxRegistrationNumber: string;
+  invoiceTaxRate: number;
+  provinceCode: string;
   footer: string;
   paymentTerms: string;
   primary: string;
+  accent: string;
   logoUrl: string;
 } {
   const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
@@ -1190,30 +1657,54 @@ function invoiceBrand(settings?: TenantSettingsRecord | null): {
     address: joinText(', ', settings?.addressLine1 || '', settings?.city || '', settings?.provinceCode || '', settings?.postalCode || '', settings?.countryCode || ''),
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     website: firstNonBlank(settings?.websiteUrl),
+    taxRegistrationNumber: firstNonBlank(settings?.taxRegistrationNumber),
+    invoiceTaxRate: Number(settings?.invoiceTaxRate || 0),
+    provinceCode: firstNonBlank(settings?.provinceCode),
     footer: firstNonBlank(settings?.invoiceFooter, 'Thank you for your business.'),
     paymentTerms: firstNonBlank(settings?.paymentTerms, 'Payment due by the invoice due date.'),
     primary: /^#[0-9A-Fa-f]{6}$/.test(settings?.themePrimaryColor || '') ? settings?.themePrimaryColor || '#0f766e' : '#0f766e',
+    accent: /^#[0-9A-Fa-f]{6}$/.test(settings?.themeAccentColor || '') ? settings?.themeAccentColor || '#2563eb' : '#2563eb',
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
   };
 }
 
+function invoiceTaxLabel(brand: ReturnType<typeof invoiceBrand>): string {
+  if (brand.invoiceTaxRate <= 0) {
+    return 'Tax';
+  }
+  const region = brand.provinceCode ? ` (${brand.provinceCode})` : '';
+  return `HST${region} on sales ${(brand.invoiceTaxRate * 100).toFixed(2)}%`;
+}
+
 function invoiceWorkSummaryText(invoice: InvoiceRecord): string {
+  return joinText(' · ', invoiceWorkSummaryTitle(invoice), invoiceWorkNumbersText(invoice)) || 'Single work order';
+}
+
+function invoiceWorkSummaryTitle(invoice: InvoiceRecord): string {
   const workOrders = invoice.workOrders || [];
   if (workOrders.length <= 1) {
-    return joinText(' · ', invoice.workOrderNumber || '', invoice.workOrderTitle || '') || 'Single work order';
+    return invoice.workOrderTitle || 'Single work order';
+  }
+  return `${workOrders.length} work orders included`;
+}
+
+function invoiceWorkNumbersText(invoice: InvoiceRecord): string {
+  const workOrders = invoice.workOrders || [];
+  if (workOrders.length <= 1) {
+    return invoice.workOrderNumber || '';
   }
   const numbers = workOrders
     .map((workOrder) => workOrder.workOrderNumber)
     .filter((value) => value?.trim())
     .slice(0, 3);
   const suffix = workOrders.length > 3 ? ` +${workOrders.length - 3} more` : '';
-  return `${workOrders.length} work orders${numbers.length ? ` · ${numbers.join(', ')}${suffix}` : ''}`;
+  return numbers.length ? `${numbers.join(', ')}${suffix}` : '';
 }
 
 function invoicePropertySummaryText(invoice: InvoiceRecord): string {
   const workOrders = invoice.workOrders || [];
   if (workOrders.length <= 1) {
-    return joinText(' · ', invoice.propertyName || '', invoice.propertyAddress || '') || 'No property';
+    return invoice.propertyCode ? `Property ID: ${invoice.propertyCode}` : invoice.propertyName || 'No property';
   }
   const propertyNames = Array.from(new Set(workOrders.map((workOrder) => workOrder.propertyName || '').filter(Boolean)));
   if (propertyNames.length === 1) {
@@ -1224,16 +1715,91 @@ function invoicePropertySummaryText(invoice: InvoiceRecord): string {
 
 function invoiceCodeSummaryText(invoice: InvoiceRecord): string {
   const ownerCode = invoice.ownerCode ? `Owner ID: ${invoice.ownerCode}` : '';
-  const propertyCode = invoice.propertyCode ? `Property ID: ${invoice.propertyCode}` : '';
+  const propertyCode = invoicePropertyCodeSummary(invoice) ? `${invoicePropertyCodeLabel(invoice)}: ${invoicePropertyCodeSummary(invoice)}` : '';
   return joinText(' · ', ownerCode, propertyCode);
 }
 
+function invoicePropertyCodeLabel(invoice: InvoiceRecord): string {
+  return invoicePropertyCodes(invoice).length > 1 ? 'Property IDs' : 'Property ID';
+}
+
+function invoicePropertyCodeSummary(invoice: InvoiceRecord): string {
+  const codes = invoicePropertyCodes(invoice);
+  if (codes.length === 0) {
+    return invoice.propertyCode || '';
+  }
+  return codes.join(', ');
+}
+
+function invoicePropertyCodes(invoice: InvoiceRecord): string[] {
+  const codes = Array.from(new Set((invoice.workOrders || []).map((workOrder) => workOrder.propertyCode || '').filter(Boolean)));
+  if (codes.length === 0 && invoice.propertyCode) {
+    return [invoice.propertyCode];
+  }
+  return codes;
+}
+
 function invoiceTable(invoice: InvoiceRecord): string {
+  const groupedRows = invoiceLineGroups(invoice)
+    .map((group) => `<tr class="group"><td colspan="4"><span class="group-title">${escapeHtml(group.title)}</span><span class="group-subtitle">${escapeHtml(group.subtitle)}</span></td></tr>${group.lines.map((line) => invoiceLineRow(line, group.serviceName)).join('')}`)
+    .join('');
   const rows = invoice.lines.length === 0
     ? '<tr><td colspan="4">No line items have been added.</td></tr>'
-    : invoice.lines.map((line) => `<tr><td class="desc">${escapeHtml(line.description)}<span class="line-type">${escapeHtml(statusLabel(line.lineType))}${line.taxable ? ' · taxable' : ''}</span></td><td class="qty">${escapeHtml(line.quantity)}</td><td class="unit">${escapeHtml(currencyText(line.unitPrice))}</td><td class="amount">${escapeHtml(currencyText(line.lineTotal))}</td></tr>`).join('');
-  const blanks = Array.from({ length: Math.max(0, 6 - Math.max(invoice.lines.length, 1)) }, () => '<tr class="blank"><td class="desc"></td><td class="qty"></td><td class="unit"></td><td class="amount"></td></tr>').join('');
-  return `<table><thead><tr><th class="desc">Description</th><th class="qty">Qty</th><th class="unit">Unit price</th><th class="amount">Line total</th></tr></thead><tbody>${rows}${blanks}</tbody></table>`;
+    : groupedRows;
+  return `<table class="invoice-lines"><thead><tr><th class="qty">QTY</th><th class="desc">DESCRIPTION</th><th class="unit">RATE</th><th class="amount">AMOUNT</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function invoiceLineGroups(invoice: InvoiceRecord): Array<{ title: string; subtitle: string; serviceName: string; lines: InvoiceLineRecord[] }> {
+  const workOrders = invoice.workOrders || [];
+  const byWorkOrder = new Map(workOrders.map((workOrder) => [workOrder.workOrderId, { workOrder, lines: [] as InvoiceLineRecord[] }]));
+  const additional: InvoiceLineRecord[] = [];
+  for (const line of invoice.lines) {
+    if (line.workOrderId && byWorkOrder.has(line.workOrderId)) {
+      byWorkOrder.get(line.workOrderId)?.lines.push(line);
+    } else {
+      additional.push(line);
+    }
+  }
+  const groups = Array.from(byWorkOrder.values())
+    .filter((group) => group.lines.length > 0)
+    .map(({ workOrder, lines }) => ({
+      title: joinText(' · ', workOrder.workOrderNumber, workOrder.serviceName || workOrder.title),
+      subtitle: joinText(' · ', workOrder.propertyCode ? `Property ID: ${workOrder.propertyCode}` : '', invoiceServiceWindow(workOrder)),
+      serviceName: workOrder.serviceName || workOrder.title,
+      lines
+    }));
+  if (additional.length) {
+    groups.push({ title: 'Additional charges', subtitle: 'Manual invoice lines not tied to a work order.', serviceName: '', lines: additional });
+  }
+  return groups.length ? groups : [{ title: invoiceWorkSummaryText(invoice), subtitle: invoicePropertySummaryText(invoice), serviceName: invoice.workOrderTitle || invoice.propertyName || '', lines: invoice.lines }];
+}
+
+function invoiceLineRow(line: InvoiceLineRecord, serviceName = ''): string {
+  const lineType = invoiceLineTypeLabel(line, serviceName);
+  const typeClass = line.lineType?.toLowerCase() === 'material' ? 'material' : line.lineType?.toLowerCase() === 'labor' ? 'labor' : 'custom';
+  return `<tr class="invoice-line ${typeClass}"><td class="qty">${escapeHtml(line.quantity)}</td><td class="desc"><span class="line-type">${escapeHtml(lineType)}</span><span class="line-detail">${escapeHtml(line.description)}</span></td><td class="unit">${escapeHtml(currencyText(line.unitPrice))}</td><td class="amount">${escapeHtml(currencyText(line.lineTotal))}</td></tr>`;
+}
+
+function invoiceLineTypeLabel(line: InvoiceLineRecord, serviceName = ''): string {
+  if (line.lineType === 'LABOR' && serviceName.trim()) {
+    return `Labor - ${serviceName.trim()}`;
+  }
+  return statusLabel(line.lineType);
+}
+
+function invoiceServiceWindow(workOrder: InvoiceWorkOrderRecord): string {
+  if (!workOrder.scheduledStart) {
+    return '';
+  }
+  const start = invoiceDateTime(workOrder.scheduledStart);
+  if (!workOrder.scheduledEnd) {
+    return `Service: ${start}`;
+  }
+  return `Service: ${start} - ${invoiceDateTime(workOrder.scheduledEnd)}`;
+}
+
+function invoiceDateTime(value: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
 }
 
 function statementPrintHtml(statement: OwnerStatementRecord): string {
@@ -1279,6 +1845,12 @@ function todayInput(): string {
 function addDaysInput(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() + days);
+  return dateInput(date);
+}
+
+function monthStartInput(): string {
+  const date = new Date();
+  date.setDate(1);
   return dateInput(date);
 }
 
@@ -1328,6 +1900,21 @@ function absoluteAssetUrl(value: string): string {
   } catch {
     return value;
   }
+}
+
+function bulkWorkOrderMatches(owner: BulkInvoiceOwnerGroupRecord, workOrder: BulkInvoiceWorkOrderRecord, search: string): boolean {
+  return [
+    owner.ownerName,
+    owner.ownerCode || '',
+    owner.ownerBillingEmail || '',
+    owner.ownerEmail || '',
+    workOrder.workOrderNumber,
+    workOrder.title,
+    workOrder.propertyCode || '',
+    workOrder.propertyName,
+    workOrder.propertyAddress || '',
+    workOrder.serviceName || ''
+  ].some((value) => value.toLowerCase().includes(search));
 }
 
 function initials(value: string): string {

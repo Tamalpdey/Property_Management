@@ -6,7 +6,9 @@ import type {
   UpdateWorkerStatusRequest,
   WorkerActivityOverrideRequest,
   WorkerActivityRecord,
+  WorkerClockEntryOverrideRequest,
   WorkerClockEntryRecord,
+  WorkerClockedInTodayRecord,
   WorkerRecord
 } from '@lorne/contracts';
 import { map } from 'rxjs';
@@ -27,6 +29,18 @@ export class WorkerManagementService {
       .get<ApiResponse<WorkerClockEntryRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/clock-entries`, {
         params: { from, to }
       })
+      .pipe(map((response) => response.data));
+  }
+
+  clockedInToday() {
+    return this.http
+      .get<ApiResponse<WorkerClockedInTodayRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/clocked-in-today`)
+      .pipe(map((response) => response.data));
+  }
+
+  overrideClockEntry(workerId: string, entryId: string, request: WorkerClockEntryOverrideRequest) {
+    return this.http
+      .post<ApiResponse<WorkerClockEntryRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/clock-entries/${entryId}/override`, request)
       .pipe(map((response) => response.data));
   }
 

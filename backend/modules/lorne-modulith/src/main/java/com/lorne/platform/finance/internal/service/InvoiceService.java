@@ -1,7 +1,11 @@
 package com.lorne.platform.finance.internal.service;
 
 import com.lorne.platform.audit.AuditWriter;
+import com.lorne.platform.finance.internal.dto.BulkInvoicePreviewDto;
+import com.lorne.platform.finance.internal.dto.BulkInvoicePreviewRequest;
 import com.lorne.platform.finance.internal.dto.CreateBatchInvoiceRequest;
+import com.lorne.platform.finance.internal.dto.CreateBulkInvoicesRequest;
+import com.lorne.platform.finance.internal.dto.CreateBulkInvoicesResponse;
 import com.lorne.platform.finance.internal.dto.InvoiceDto;
 import com.lorne.platform.finance.internal.dto.InvoiceLineRequest;
 import com.lorne.platform.finance.internal.dto.OwnerStatementDto;
@@ -11,6 +15,7 @@ import com.lorne.platform.finance.internal.dto.SendInvoiceEmailResponse;
 import com.lorne.platform.finance.internal.dto.UpdateInvoiceStatusRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import com.lorne.platform.shared.DailyInvoiceNumberGenerator;
 import com.lorne.platform.tenant.TenantSettingsOperations;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -19,9 +24,11 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -36,19 +43,22 @@ public class InvoiceService {
     private final InvoicePdfService invoicePdfService;
     private final AuditWriter auditWriter;
     private final TenantSettingsOperations tenantSettingsOperations;
+    private final DailyInvoiceNumberGenerator invoiceNumberGenerator;
 
     public InvoiceService(
             JdbcTemplate jdbcTemplate,
             InvoiceEmailService invoiceEmailService,
             InvoicePdfService invoicePdfService,
             AuditWriter auditWriter,
-            TenantSettingsOperations tenantSettingsOperations
+            TenantSettingsOperations tenantSettingsOperations,
+            DailyInvoiceNumberGenerator invoiceNumberGenerator
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.invoiceEmailService = invoiceEmailService;
         this.invoicePdfService = invoicePdfService;
         this.auditWriter = auditWriter;
         this.tenantSettingsOperations = tenantSettingsOperations;
+        this.invoiceNumberGenerator = invoiceNumberGenerator;
     }
 
     @Transactional(readOnly = true)
@@ -117,6 +127,55 @@ public class InvoiceService {
         return invoiceEmailService.sendInvoice(tenantId, actorUserId, get(tenantId, invoiceId), request);
     }
 
+    @Transactional(readOnly = true)
+    public BulkInvoicePreviewDto bulkPreview(UUID tenantId, BulkInvoicePreviewRequest request) {
+        var window = bulkInvoiceWindow(request == null ? null : request.fromDate(), request == null ? null : request.toDate());
+        var ownerIds = distinctIds(request == null ? null : request.ownerIds());
+        var candidates = bulkInvoiceCandidates(tenantId, window.fromDate(), window.toDate(), ownerIds, List.of());
+        return bulkPreviewDto(window.fromDate(), window.toDate(), candidates);
+    }
+
+    @Transactional
+    public CreateBulkInvoicesResponse createBulk(UUID tenantId, UUID actorUserId, CreateBulkInvoicesRequest request) {
+        var safeRequest = request == null ? new CreateBulkInvoicesRequest(null, null, List.of(), List.of(), null, null) : request;
+        var workOrderIds = distinctIds(safeRequest.workOrderIds());
+        if (workOrderIds.isEmpty()) {
+            throw new BadRequestException("Select at least one work order.");
+        }
+        var window = bulkInvoiceWindow(safeRequest.fromDate(), safeRequest.toDate());
+        var ownerIds = distinctIds(safeRequest.ownerIds());
+        var candidates = bulkInvoiceCandidates(tenantId, window.fromDate(), window.toDate(), ownerIds, workOrderIds);
+        var candidateIds = candidates.stream().map(BulkInvoiceCandidate::workOrderId).collect(java.util.stream.Collectors.toSet());
+        var skipped = (int) workOrderIds.stream().filter(id -> !candidateIds.contains(id)).count();
+        if (candidates.isEmpty()) {
+            throw new BadRequestException("No eligible uninvoiced work orders were found for this date range.");
+        }
+        var byOwner = new LinkedHashMap<UUID, List<BulkInvoiceCandidate>>();
+        for (var candidate : candidates) {
+            byOwner.computeIfAbsent(candidate.ownerId(), ignored -> new ArrayList<>()).add(candidate);
+        }
+        var invoices = new ArrayList<InvoiceDto>();
+        for (var entry : byOwner.entrySet()) {
+            var invoice = createBatch(tenantId, actorUserId, new CreateBatchInvoiceRequest(
+                    entry.getKey(),
+                    null,
+                    entry.getValue().stream().map(BulkInvoiceCandidate::workOrderId).toList(),
+                    List.of(),
+                    safeRequest.issuedOn(),
+                    safeRequest.dueOn()
+            ));
+            invoices.add(invoice);
+        }
+        auditWriter.record(tenantId, actorUserId, "BULK_INVOICES_CREATED", "INVOICE", invoices.getFirst().id(), Map.of(
+                "invoiceCount", invoices.size(),
+                "workOrderCount", candidates.size(),
+                "skippedWorkOrderCount", skipped,
+                "fromDate", window.fromDate().toString(),
+                "toDate", window.toDate().toString()
+        ));
+        return new CreateBulkInvoicesResponse(invoices, skipped);
+    }
+
     @Transactional
     public InvoiceDto createBatch(UUID tenantId, UUID actorUserId, CreateBatchInvoiceRequest request) {
         var safeRequest = request == null ? new CreateBatchInvoiceRequest(null, null, List.of(), List.of(), null, null) : request;
@@ -158,14 +217,16 @@ public class InvoiceService {
             throw new BadRequestException("One or more selected work orders already belong to an invoice.");
         }
 
-        var issuedOn = safeRequest.issuedOn() == null ? LocalDate.now() : safeRequest.issuedOn();
+        var issuedOn = safeRequest.issuedOn() == null
+                ? LocalDate.now(zoneId(tenantSettingsOperations.settings(tenantId).timezone()))
+                : safeRequest.issuedOn();
         var dueOn = safeRequest.dueOn() == null ? issuedOn.plusDays(30) : safeRequest.dueOn();
         if (dueOn.isBefore(issuedOn)) {
             throw new BadRequestException("Due date must be on or after invoice date.");
         }
 
         var invoiceId = UUID.randomUUID();
-        var invoiceNumber = invoiceNumber();
+        var invoiceNumber = invoiceNumberGenerator.next(tenantId, issuedOn);
         var primaryWorkOrder = workOrders.getFirst();
         jdbcTemplate.update("""
                 INSERT INTO invoices (
@@ -175,13 +236,15 @@ public class InvoiceService {
                 VALUES (?, ?, ?, ?, ?, 'DRAFT'::invoice_status, ?, ?, 0, 0, 0, ?, ?)
                 """, invoiceId, tenantId, safeRequest.ownerId(), primaryWorkOrder.id(), invoiceNumber, issuedOn, dueOn, actorUserId, actorUserId);
 
+        var generatedTaxRate = generatedTaxRate(tenantId);
+        var generatedTaxable = generatedTaxRate.signum() > 0;
         for (var workOrder : workOrders) {
             jdbcTemplate.update("""
                     INSERT INTO invoice_work_orders (tenant_id, invoice_id, work_order_id, created_by)
                     VALUES (?, ?, ?, ?)
                     """, tenantId, invoiceId, workOrder.id(), actorUserId);
             for (var line : invoiceLines(tenantId, workOrder)) {
-                insertLine(tenantId, actorUserId, invoiceId, invoiceLineType(line.sourceType()), line.description(), line.quantity(), line.unitPrice(), false, BigDecimal.ZERO);
+                insertLine(tenantId, actorUserId, invoiceId, invoiceLineType(line.sourceType()), line.description(), line.quantity(), line.unitPrice(), generatedTaxable, generatedTaxRate, workOrder.id());
             }
             jdbcTemplate.update("""
                     UPDATE work_orders
@@ -210,7 +273,8 @@ public class InvoiceService {
                     positiveMoney(line.quantity(), "Quantity must be greater than zero."),
                     unitPrice,
                     Boolean.TRUE.equals(line.taxable()),
-                    rate(line.taxRate())
+                    rate(line.taxRate()),
+                    null
             );
             addedManualLines++;
         }
@@ -228,6 +292,7 @@ public class InvoiceService {
 
     @Transactional
     public byte[] pdf(UUID tenantId, UUID actorUserId, UUID invoiceId) {
+        repairDraftGeneratedInvoiceLines(tenantId, invoiceId, actorUserId);
         var invoice = get(tenantId, invoiceId);
         auditWriter.record(tenantId, actorUserId, "INVOICE_PDF_DOWNLOADED", "INVOICE", invoice.id(), Map.of(
                 "invoiceNumber", invoice.invoiceNumber(),
@@ -441,6 +506,7 @@ public class InvoiceService {
                        coalesce(payments.paid_total, 0) AS paid_total,
                        greatest(i.total - coalesce(payments.paid_total, 0), 0) AS balance_due,
                        c.owner_code, c.display_name AS owner_name, c.email AS owner_email, c.billing_email AS owner_billing_email,
+                       trim(concat_ws(', ', c.address_line1, nullif(c.address_line2, ''), nullif(c.city, ''), nullif(c.province_code, ''), nullif(c.postal_code, ''), nullif(c.country_code, ''))) AS owner_address,
                        wo.id AS work_order_id, wo.work_order_number, wo.title AS work_order_title,
                        p.property_code, p.name AS property_name,
                        trim(concat_ws(', ', p.address_line1, nullif(p.city, ''), nullif(p.province_code, ''), nullif(p.postal_code, ''))) AS property_address,
@@ -475,6 +541,7 @@ public class InvoiceService {
                        coalesce(payments.paid_total, 0) AS paid_total,
                        greatest(i.total - coalesce(payments.paid_total, 0), 0) AS balance_due,
                        c.owner_code, c.display_name AS owner_name, c.email AS owner_email, c.billing_email AS owner_billing_email,
+                       trim(concat_ws(', ', c.address_line1, nullif(c.address_line2, ''), nullif(c.city, ''), nullif(c.province_code, ''), nullif(c.postal_code, ''), nullif(c.country_code, ''))) AS owner_address,
                        wo.id AS work_order_id, wo.work_order_number, wo.title AS work_order_title,
                        p.property_code, p.name AS property_name,
                        trim(concat_ws(', ', p.address_line1, nullif(p.city, ''), nullif(p.province_code, ''), nullif(p.postal_code, ''))) AS property_address,
@@ -503,13 +570,14 @@ public class InvoiceService {
             return;
         }
         for (var invoiceId : invoices.keySet()) {
-            var lines = jdbcTemplate.query("""
-                    SELECT id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate
+            var rawLines = jdbcTemplate.query("""
+                    SELECT id, work_order_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate
                     FROM invoice_lines
                     WHERE tenant_id = ? AND invoice_id = ?
                     ORDER BY created_at, description
                     """, (rs, rowNum) -> new InvoiceDto.InvoiceLineDto(
                     rs.getObject("id", UUID.class),
+                    rs.getObject("work_order_id", UUID.class),
                     rs.getString("line_type"),
                     rs.getString("description"),
                     rs.getBigDecimal("quantity"),
@@ -534,6 +602,7 @@ public class InvoiceService {
                     instant("created_at", rs)
             ), tenantId, invoiceId);
             var invoice = invoices.get(invoiceId);
+            var lines = inferredLineWorkOrders(invoice, rawLines);
             invoices.put(invoiceId, new InvoiceDto(
                     invoice.id(),
                     invoice.invoiceNumber(),
@@ -550,6 +619,7 @@ public class InvoiceService {
                     invoice.ownerName(),
                     invoice.ownerEmail(),
                     invoice.ownerBillingEmail(),
+                    invoice.ownerAddress(),
                     invoice.workOrderId(),
                     invoice.workOrderNumber(),
                     invoice.workOrderTitle(),
@@ -572,6 +642,7 @@ public class InvoiceService {
             var linked = jdbcTemplate.query("""
                     SELECT wo.id AS work_order_id, wo.work_order_number, wo.title, wo.status::text AS status,
                            coalesce(st.name, wo.title) AS service_name,
+                           wo.scheduled_start, wo.scheduled_end,
                            p.property_code, p.name AS property_name,
                            trim(concat_ws(', ', p.address_line1, nullif(p.city, ''), nullif(p.province_code, ''), nullif(p.postal_code, ''))) AS property_address
                     FROM invoice_work_orders iwo
@@ -588,7 +659,9 @@ public class InvoiceService {
                     rs.getString("property_name"),
                     rs.getString("property_address"),
                     rs.getString("status"),
-                    rs.getString("service_name")
+                    rs.getString("service_name"),
+                    instant("scheduled_start", rs),
+                    instant("scheduled_end", rs)
             ), tenantId, invoiceId);
             var invoice = invoices.get(invoiceId);
             if (linked.isEmpty() && invoice.workOrderId() != null) {
@@ -600,7 +673,9 @@ public class InvoiceService {
                         invoice.propertyName(),
                         invoice.propertyAddress(),
                         "",
-                        invoice.workOrderTitle()
+                        invoice.workOrderTitle(),
+                        null,
+                        null
                 ));
             }
             invoices.put(invoiceId, new InvoiceDto(
@@ -619,6 +694,7 @@ public class InvoiceService {
                     invoice.ownerName(),
                     invoice.ownerEmail(),
                     invoice.ownerBillingEmail(),
+                    invoice.ownerAddress(),
                     invoice.workOrderId(),
                     invoice.workOrderNumber(),
                     invoice.workOrderTitle(),
@@ -650,6 +726,7 @@ public class InvoiceService {
                 rs.getString("owner_name"),
                 rs.getString("owner_email"),
                 rs.getString("owner_billing_email"),
+                rs.getString("owner_address"),
                 rs.getObject("work_order_id", UUID.class),
                 rs.getString("work_order_number"),
                 rs.getString("work_order_title"),
@@ -687,6 +764,45 @@ public class InvoiceService {
             throw new ResourceNotFoundException("Invoice line not found.");
         }
         return line;
+    }
+
+    private List<InvoiceDto.InvoiceLineDto> inferredLineWorkOrders(InvoiceDto invoice, List<InvoiceDto.InvoiceLineDto> lines) {
+        var workOrders = invoice.workOrders() == null ? List.<InvoiceDto.InvoiceWorkOrderDto>of() : invoice.workOrders();
+        if (workOrders.isEmpty()) {
+            return lines;
+        }
+        return lines.stream()
+                .map(line -> {
+                    var inferredWorkOrderId = inferredLineWorkOrderId(line, workOrders);
+                    if (inferredWorkOrderId == null || inferredWorkOrderId.equals(line.workOrderId())) {
+                        return line;
+                    }
+                    return new InvoiceDto.InvoiceLineDto(
+                            line.id(),
+                            inferredWorkOrderId,
+                            line.lineType(),
+                            line.description(),
+                            line.quantity(),
+                            line.unitPrice(),
+                            line.lineTotal(),
+                            line.taxable(),
+                            line.taxRate()
+                    );
+                })
+                .toList();
+    }
+
+    private UUID inferredLineWorkOrderId(InvoiceDto.InvoiceLineDto line, List<InvoiceDto.InvoiceWorkOrderDto> workOrders) {
+        if (workOrders.size() == 1) {
+            return workOrders.getFirst().workOrderId();
+        }
+        var description = line.description() == null ? "" : line.description().toUpperCase(Locale.ROOT);
+        return workOrders.stream()
+                .filter(workOrder -> workOrder.workOrderNumber() != null && !workOrder.workOrderNumber().isBlank())
+                .filter(workOrder -> description.contains(workOrder.workOrderNumber().toUpperCase(Locale.ROOT)))
+                .map(InvoiceDto.InvoiceWorkOrderDto::workOrderId)
+                .findFirst()
+                .orElse(null);
     }
 
     private List<String> changedLineFields(
@@ -732,6 +848,82 @@ public class InvoiceService {
         if (!"DRAFT".equals(status)) {
             throw new BadRequestException("Only draft invoices can be edited.");
         }
+    }
+
+    private void repairDraftGeneratedInvoiceLines(UUID tenantId, UUID invoiceId, UUID actorUserId) {
+        var invoiceStatus = jdbcTemplate.query("""
+                SELECT status::text
+                FROM invoices
+                WHERE tenant_id = ? AND id = ?
+                """, rs -> rs.next() ? rs.getString("status") : null, tenantId, invoiceId);
+        if (invoiceStatus == null) {
+            throw new ResourceNotFoundException("Invoice not found.");
+        }
+        var taxRate = generatedTaxRate(tenantId);
+        jdbcTemplate.update("""
+                UPDATE invoice_lines il
+                SET work_order_id = single_work_order.work_order_id,
+                    updated_by = ?,
+                    updated_at = now()
+                FROM (
+                    SELECT tenant_id,
+                           invoice_id,
+                           (array_agg(work_order_id ORDER BY work_order_id::text))[1] AS work_order_id
+                    FROM invoice_work_orders
+                    WHERE tenant_id = ? AND invoice_id = ?
+                    GROUP BY tenant_id, invoice_id
+                    HAVING count(*) = 1
+                ) single_work_order
+                WHERE il.tenant_id = single_work_order.tenant_id
+                  AND il.invoice_id = single_work_order.invoice_id
+                  AND il.work_order_id IS NULL
+                """, actorUserId, tenantId, invoiceId);
+        jdbcTemplate.update("""
+                UPDATE invoice_lines il
+                SET work_order_id = wo.id,
+                    updated_by = ?,
+                    updated_at = now()
+                FROM invoice_work_orders iwo
+                JOIN work_orders wo ON wo.tenant_id = iwo.tenant_id AND wo.id = iwo.work_order_id
+                WHERE il.tenant_id = ?
+                  AND il.invoice_id = ?
+                  AND il.tenant_id = iwo.tenant_id
+                  AND il.invoice_id = iwo.invoice_id
+                  AND il.description ILIKE '%' || wo.work_order_number || '%'
+                """, actorUserId, tenantId, invoiceId);
+        var canRepairTotals = Set.of("DRAFT", "SENT", "OVERDUE").contains(invoiceStatus)
+                && !hasReceivedPayments(tenantId, invoiceId);
+        if (!canRepairTotals) {
+            return;
+        }
+        jdbcTemplate.update("""
+                UPDATE invoice_lines il
+                SET taxable = true,
+                    tax_rate = ?,
+                    updated_by = ?,
+                    updated_at = now()
+                FROM invoices i
+                WHERE i.tenant_id = il.tenant_id
+                  AND i.id = il.invoice_id
+                  AND i.tenant_id = ?
+                  AND i.id = ?
+                  AND i.status IN ('DRAFT', 'SENT', 'OVERDUE')
+                  AND il.line_type IN ('LABOR', 'MATERIAL')
+                  AND il.line_total > 0
+                  AND (il.taxable = false OR il.tax_rate = 0)
+                  AND ? > 0
+                """, taxRate, actorUserId, tenantId, invoiceId, taxRate);
+        recalculateTotals(tenantId, invoiceId, actorUserId);
+    }
+
+    private boolean hasReceivedPayments(UUID tenantId, UUID invoiceId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM payments
+                    WHERE tenant_id = ? AND invoice_id = ? AND status = 'RECEIVED'
+                )
+                """, Boolean.class, tenantId, invoiceId));
     }
 
     private void recalculateTotals(UUID tenantId, UUID invoiceId, UUID actorUserId) {
@@ -781,6 +973,10 @@ public class InvoiceService {
         return rate;
     }
 
+    private BigDecimal generatedTaxRate(UUID tenantId) {
+        return rate(tenantSettingsOperations.settings(tenantId).invoiceTaxRate());
+    }
+
     private String normalizeStatus(String value) {
         var status = value == null ? "" : value.trim().toUpperCase().replace('-', '_').replace(' ', '_');
         if (!Set.of("DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "VOID").contains(status)) {
@@ -820,6 +1016,37 @@ public class InvoiceService {
         if (workOrderIds.isEmpty()) {
             return;
         }
+        if ("VOID".equals(invoiceStatus)) {
+            for (var workOrderId : workOrderIds) {
+                var hasAnotherActiveInvoice = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM invoices i
+                            WHERE i.tenant_id = ?
+                              AND i.id <> ?
+                              AND i.status <> 'VOID'
+                              AND (
+                                i.work_order_id = ?
+                                OR EXISTS (
+                                    SELECT 1
+                                    FROM invoice_work_orders iwo
+                                    WHERE iwo.tenant_id = i.tenant_id
+                                      AND iwo.invoice_id = i.id
+                                      AND iwo.work_order_id = ?
+                                )
+                              )
+                        )
+                        """, Boolean.class, tenantId, invoiceId, workOrderId, workOrderId));
+                if (!hasAnotherActiveInvoice) {
+                    jdbcTemplate.update("""
+                            UPDATE work_orders
+                            SET status = 'APPROVED'::work_order_status, updated_by = ?, updated_at = now()
+                            WHERE tenant_id = ? AND id = ? AND status = 'INVOICED'::work_order_status
+                            """, actorUserId, tenantId, workOrderId);
+                }
+            }
+            return;
+        }
         var sqlArgs = args(actorUserId, tenantId, workOrderIds);
         if ("PAID".equals(invoiceStatus)) {
             jdbcTemplate.update("""
@@ -845,17 +1072,203 @@ public class InvoiceService {
             BigDecimal quantity,
             BigDecimal unitPrice,
             boolean taxable,
-            BigDecimal taxRate
+            BigDecimal taxRate,
+            UUID workOrderId
     ) {
         var lineId = UUID.randomUUID();
         var lineTotal = quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP);
         jdbcTemplate.update("""
                 INSERT INTO invoice_lines (
-                    id, tenant_id, invoice_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate, created_by, updated_by
+                    id, tenant_id, invoice_id, work_order_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, lineId, tenantId, invoiceId, lineType, description, quantity, unitPrice, lineTotal, taxable, taxRate, actorUserId, actorUserId);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, lineId, tenantId, invoiceId, workOrderId, lineType, description, quantity, unitPrice, lineTotal, taxable, taxRate, actorUserId, actorUserId);
         return lineId;
+    }
+
+    private UUID insertLine(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID invoiceId,
+            String lineType,
+            String description,
+            BigDecimal quantity,
+            BigDecimal unitPrice,
+            boolean taxable,
+            BigDecimal taxRate
+    ) {
+        return insertLine(tenantId, actorUserId, invoiceId, lineType, description, quantity, unitPrice, taxable, taxRate, null);
+    }
+
+    private BulkInvoicePreviewDto bulkPreviewDto(LocalDate fromDate, LocalDate toDate, List<BulkInvoiceCandidate> candidates) {
+        var groups = new LinkedHashMap<UUID, BulkInvoiceOwnerGroup>();
+        for (var candidate : candidates) {
+            var owner = groups.computeIfAbsent(candidate.ownerId(), ignored -> new BulkInvoiceOwnerGroup(
+                    candidate.ownerId(),
+                    candidate.ownerCode(),
+                    candidate.ownerName(),
+                    candidate.ownerEmail(),
+                    candidate.ownerBillingEmail()
+            ));
+            owner.add(new BulkInvoicePreviewDto.WorkOrderDto(
+                    candidate.workOrderId(),
+                    candidate.workOrderNumber(),
+                    candidate.title(),
+                    candidate.status(),
+                    candidate.propertyId(),
+                    candidate.propertyCode(),
+                    candidate.propertyName(),
+                    candidate.propertyAddress(),
+                    candidate.serviceName(),
+                    candidate.scheduledStart(),
+                    candidate.scheduledEnd(),
+                    candidate.estimatedSubtotal()
+            ));
+        }
+        var ownerGroups = groups.values().stream()
+                .map(BulkInvoiceOwnerGroup::toDto)
+                .toList();
+        var estimatedSubtotal = ownerGroups.stream()
+                .map(BulkInvoicePreviewDto.OwnerGroupDto::estimatedSubtotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        var workOrderCount = ownerGroups.stream()
+                .mapToInt(BulkInvoicePreviewDto.OwnerGroupDto::workOrderCount)
+                .sum();
+        return new BulkInvoicePreviewDto(fromDate, toDate, ownerGroups.size(), workOrderCount, estimatedSubtotal, ownerGroups);
+    }
+
+    private List<BulkInvoiceCandidate> bulkInvoiceCandidates(
+            UUID tenantId,
+            LocalDate fromDate,
+            LocalDate toDate,
+            List<UUID> ownerIds,
+            List<UUID> workOrderIds
+    ) {
+        var zone = zoneId(tenantSettingsOperations.settings(tenantId).timezone());
+        var fromInstant = fromDate.atStartOfDay(zone).toInstant();
+        var toExclusiveInstant = toDate.plusDays(1).atStartOfDay(zone).toInstant();
+        var sql = new StringBuilder("""
+                WITH work_minutes AS (
+                    SELECT tenant_id, work_order_id, worker_id,
+                           floor(sum(extract(epoch from (coalesce(ended_at, now()) - started_at))) / 60)::bigint AS actual_work_minutes
+                    FROM work_order_time_entries
+                    WHERE tenant_id = ?
+                      AND entry_type = 'WORK'
+                    GROUP BY tenant_id, work_order_id, worker_id
+                ),
+                labor_totals AS (
+                    SELECT woa.tenant_id, woa.work_order_id,
+                           coalesce(sum(coalesce(wao.actual_work_minutes, wm.actual_work_minutes, 0)), 0)::numeric AS work_minutes
+                    FROM work_order_assignments woa
+                    LEFT JOIN work_minutes wm
+                        ON wm.tenant_id = woa.tenant_id
+                       AND wm.work_order_id = woa.work_order_id
+                       AND wm.worker_id = woa.worker_id
+                    LEFT JOIN work_order_assignment_overrides wao
+                        ON wao.tenant_id = woa.tenant_id
+                       AND wao.work_order_id = woa.work_order_id
+                       AND wao.worker_id = woa.worker_id
+                    WHERE woa.tenant_id = ?
+                    GROUP BY woa.tenant_id, woa.work_order_id
+                ),
+                material_totals AS (
+                    SELECT tenant_id, work_order_id,
+                           coalesce(sum(coalesce(quantity, 0) * coalesce(unit_cost, 0)), 0)::numeric(12, 2) AS material_total
+                    FROM work_order_materials
+                    WHERE tenant_id = ?
+                      AND used = true
+                    GROUP BY tenant_id, work_order_id
+                )
+                SELECT wo.tenant_id, wo.id AS work_order_id, wo.work_order_number, wo.title,
+                       wo.status::text AS status, wo.customer_id AS owner_id, c.owner_code,
+                       c.display_name AS owner_name, c.email AS owner_email, c.billing_email AS owner_billing_email,
+                       wo.property_id, p.property_code, p.name AS property_name,
+                       trim(concat_ws(', ', p.address_line1, nullif(p.address_line2, ''), nullif(p.city, ''), nullif(p.province_code, ''), nullif(p.postal_code, ''))) AS property_address,
+                       wo.service_type_id, coalesce(st.name, wo.title) AS service_name, coalesce(st.base_price, 0) AS base_price,
+                       wo.scheduled_start, wo.scheduled_end,
+                       ((coalesce(st.base_price, 0) * coalesce(labor.work_minutes, 0) / 60.0) + coalesce(material.material_total, 0))::numeric(12, 2) AS estimated_subtotal
+                FROM work_orders wo
+                JOIN customers c ON c.id = wo.customer_id AND c.tenant_id = wo.tenant_id
+                JOIN properties p ON p.id = wo.property_id AND p.tenant_id = wo.tenant_id
+                LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN labor_totals labor ON labor.tenant_id = wo.tenant_id AND labor.work_order_id = wo.id
+                LEFT JOIN material_totals material ON material.tenant_id = wo.tenant_id AND material.work_order_id = wo.id
+                WHERE wo.tenant_id = ?
+                  AND wo.status IN ('APPROVED'::work_order_status, 'CUSTOMER_NOTIFIED'::work_order_status)
+                  AND coalesce(wo.scheduled_start, wo.approved_at, wo.created_at) >= ?
+                  AND coalesce(wo.scheduled_start, wo.approved_at, wo.created_at) < ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM invoice_work_orders iwo
+                      JOIN invoices i ON i.id = iwo.invoice_id AND i.tenant_id = iwo.tenant_id
+                      WHERE iwo.tenant_id = wo.tenant_id
+                        AND iwo.work_order_id = wo.id
+                        AND i.status <> 'VOID'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM invoices i
+                      WHERE i.tenant_id = wo.tenant_id
+                        AND i.work_order_id = wo.id
+                        AND i.status <> 'VOID'
+                  )
+                """);
+        var params = new ArrayList<Object>();
+        params.add(tenantId);
+        params.add(tenantId);
+        params.add(tenantId);
+        params.add(tenantId);
+        params.add(Timestamp.from(fromInstant));
+        params.add(Timestamp.from(toExclusiveInstant));
+        if (!ownerIds.isEmpty()) {
+            sql.append(" AND wo.customer_id IN (").append(placeholders(ownerIds)).append(")\n");
+            params.addAll(ownerIds);
+        }
+        if (!workOrderIds.isEmpty()) {
+            sql.append(" AND wo.id IN (").append(placeholders(workOrderIds)).append(")\n");
+            params.addAll(workOrderIds);
+        }
+        sql.append(" ORDER BY c.display_name, coalesce(wo.scheduled_start, wo.approved_at, wo.created_at), wo.work_order_number");
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> new BulkInvoiceCandidate(
+                rs.getObject("tenant_id", UUID.class),
+                rs.getObject("work_order_id", UUID.class),
+                rs.getString("work_order_number"),
+                rs.getString("title"),
+                rs.getString("status"),
+                rs.getObject("owner_id", UUID.class),
+                rs.getString("owner_code"),
+                rs.getString("owner_name"),
+                rs.getString("owner_email"),
+                rs.getString("owner_billing_email"),
+                rs.getObject("property_id", UUID.class),
+                rs.getString("property_code"),
+                rs.getString("property_name"),
+                rs.getString("property_address"),
+                rs.getObject("service_type_id", UUID.class),
+                rs.getString("service_name"),
+                money(rs.getBigDecimal("base_price")),
+                instant("scheduled_start", rs),
+                instant("scheduled_end", rs),
+                money(rs.getBigDecimal("estimated_subtotal"))
+        ), params.toArray());
+    }
+
+    private BulkInvoiceWindow bulkInvoiceWindow(LocalDate fromDate, LocalDate toDate) {
+        var today = LocalDate.now();
+        var from = fromDate == null ? today.withDayOfMonth(1) : fromDate;
+        var to = toDate == null ? today : toDate;
+        if (to.isBefore(from)) {
+            throw new BadRequestException("To date must be on or after from date.");
+        }
+        return new BulkInvoiceWindow(from, to);
+    }
+
+    private List<UUID> distinctIds(List<UUID> ids) {
+        return ids == null ? List.of() : ids.stream()
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
     }
 
     private List<InvoiceWorkOrderDraft> invoiceWorkOrders(UUID tenantId, UUID ownerId, UUID propertyId, List<UUID> workOrderIds) {
@@ -892,22 +1305,18 @@ public class InvoiceService {
     private List<InvoiceLineDraft> invoiceLines(UUID tenantId, InvoiceWorkOrderDraft workOrder) {
         var lines = new ArrayList<InvoiceLineDraft>();
         if (workOrder.basePrice().signum() > 0) {
-            lines.add(new InvoiceLineDraft(
-                    "%s - %s".formatted(workOrder.serviceName(), workOrder.workOrderNumber()),
-                    BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP),
-                    workOrder.basePrice(),
-                    "SERVICE"
-            ));
+            lines.addAll(laborLines(tenantId, workOrder.id(), workOrder.workOrderNumber(), workOrder.serviceName(), workOrder.basePrice()));
         }
         lines.addAll(jdbcTemplate.query("""
-                SELECT coalesce(ii.name, wom.description) AS description, wom.quantity, coalesce(wom.unit_cost, 0) AS unit_cost
+                SELECT coalesce(ii.name, wom.description) AS description, wom.quantity,
+                       coalesce(wom.billing_cost, ii.billing_cost, wom.unit_cost, 0) AS billing_cost
                 FROM work_order_materials wom
                 LEFT JOIN inventory_items ii ON ii.id = wom.inventory_item_id AND ii.tenant_id = wom.tenant_id
                 WHERE wom.tenant_id = ? AND wom.work_order_id = ? AND wom.used = true
                 ORDER BY wom.created_at, wom.description
                 """, (rs, rowNum) -> {
             var quantity = money(rs.getBigDecimal("quantity"));
-            var unitPrice = money(rs.getBigDecimal("unit_cost"));
+            var unitPrice = money(rs.getBigDecimal("billing_cost"));
             return new InvoiceLineDraft(
                     "Material: %s - %s".formatted(rs.getString("description"), workOrder.workOrderNumber()),
                     quantity,
@@ -920,10 +1329,46 @@ public class InvoiceService {
                     "%s - %s".formatted(workOrder.title(), workOrder.workOrderNumber()),
                     BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP),
                     BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
-                    "SERVICE"
+                    "LABOR"
             ));
         }
         return lines;
+    }
+
+    private List<InvoiceLineDraft> laborLines(UUID tenantId, UUID workOrderId, String workOrderNumber, String serviceName, BigDecimal hourlyRate) {
+        return jdbcTemplate.query("""
+                WITH work_minutes AS (
+                    SELECT work_order_id, worker_id,
+                           floor(sum(extract(epoch from (coalesce(ended_at, now()) - started_at))) / 60)::bigint AS actual_work_minutes
+                    FROM work_order_time_entries
+                    WHERE tenant_id = ?
+                      AND work_order_id = ?
+                      AND entry_type = 'WORK'
+                    GROUP BY work_order_id, worker_id
+                )
+                SELECT coalesce(u.display_name, w.display_name, 'Field worker') AS worker_name,
+                       coalesce(wao.actual_work_minutes, wm.actual_work_minutes, 0)::bigint AS actual_work_minutes
+                FROM work_order_assignments woa
+                JOIN workers w ON w.id = woa.worker_id AND w.tenant_id = woa.tenant_id
+                LEFT JOIN app_users u ON u.id = w.user_id
+                LEFT JOIN work_minutes wm ON wm.work_order_id = woa.work_order_id AND wm.worker_id = woa.worker_id
+                LEFT JOIN work_order_assignment_overrides wao
+                    ON wao.tenant_id = woa.tenant_id
+                   AND wao.work_order_id = woa.work_order_id
+                   AND wao.worker_id = woa.worker_id
+                WHERE woa.tenant_id = ?
+                  AND woa.work_order_id = ?
+                ORDER BY woa.lead_worker DESC, coalesce(u.display_name, w.display_name, 'Field worker')
+                """, (rs, rowNum) -> {
+            var minutes = rs.getLong("actual_work_minutes");
+            var hours = hoursFromMinutes(minutes);
+            return new InvoiceLineDraft(
+                    "%s - %s".formatted(rs.getString("worker_name"), workOrderNumber),
+                    hours,
+                    hourlyRate,
+                    "LABOR"
+            );
+        }, tenantId, workOrderId, tenantId, workOrderId).stream().filter(line -> line.lineTotal().signum() > 0).toList();
     }
 
     private List<UUID> invoiceWorkOrderIds(UUID tenantId, UUID invoiceId) {
@@ -938,15 +1383,16 @@ public class InvoiceService {
                 """, UUID.class, tenantId, invoiceId, tenantId, invoiceId);
     }
 
-    private String invoiceNumber() {
-        return "INV-%s-%s".formatted(
-                LocalDate.now().toString().replace("-", ""),
-                UUID.randomUUID().toString().substring(0, 6).toUpperCase()
-        );
-    }
-
     private String invoiceLineType(String sourceType) {
         return "MATERIAL".equals(sourceType) ? "MATERIAL" : "LABOR";
+    }
+
+    private BigDecimal hoursFromMinutes(long minutes) {
+        if (minutes <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.valueOf(minutes)
+                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
     }
 
     private String placeholders(List<?> values) {
@@ -987,6 +1433,14 @@ public class InvoiceService {
         return timestamp == null ? null : timestamp.toInstant();
     }
 
+    private ZoneId zoneId(String value) {
+        try {
+            return value == null || value.isBlank() ? ZoneId.of("America/Toronto") : ZoneId.of(value.trim());
+        } catch (RuntimeException exception) {
+            return ZoneId.of("America/Toronto");
+        }
+    }
+
     private record OwnerRef(UUID id, String name, String email, String billingEmail) {
     }
 
@@ -1023,6 +1477,71 @@ public class InvoiceService {
     private record InvoiceLineDraft(String description, BigDecimal quantity, BigDecimal unitPrice, BigDecimal lineTotal, String sourceType) {
         private InvoiceLineDraft(String description, BigDecimal quantity, BigDecimal unitPrice, String sourceType) {
             this(description, quantity, unitPrice, quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP), sourceType);
+        }
+    }
+
+    private record BulkInvoiceWindow(LocalDate fromDate, LocalDate toDate) {
+    }
+
+    private record BulkInvoiceCandidate(
+            UUID tenantId,
+            UUID workOrderId,
+            String workOrderNumber,
+            String title,
+            String status,
+            UUID ownerId,
+            String ownerCode,
+            String ownerName,
+            String ownerEmail,
+            String ownerBillingEmail,
+            UUID propertyId,
+            String propertyCode,
+            String propertyName,
+            String propertyAddress,
+            UUID serviceTypeId,
+            String serviceName,
+            BigDecimal basePrice,
+            Instant scheduledStart,
+            Instant scheduledEnd,
+            BigDecimal estimatedSubtotal
+    ) {
+    }
+
+    private static final class BulkInvoiceOwnerGroup {
+        private final UUID ownerId;
+        private final String ownerCode;
+        private final String ownerName;
+        private final String ownerEmail;
+        private final String ownerBillingEmail;
+        private final List<BulkInvoicePreviewDto.WorkOrderDto> workOrders = new ArrayList<>();
+
+        private BulkInvoiceOwnerGroup(UUID ownerId, String ownerCode, String ownerName, String ownerEmail, String ownerBillingEmail) {
+            this.ownerId = ownerId;
+            this.ownerCode = ownerCode;
+            this.ownerName = ownerName;
+            this.ownerEmail = ownerEmail;
+            this.ownerBillingEmail = ownerBillingEmail;
+        }
+
+        private void add(BulkInvoicePreviewDto.WorkOrderDto workOrder) {
+            workOrders.add(workOrder);
+        }
+
+        private BulkInvoicePreviewDto.OwnerGroupDto toDto() {
+            var subtotal = workOrders.stream()
+                    .map(BulkInvoicePreviewDto.WorkOrderDto::estimatedSubtotal)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
+            return new BulkInvoicePreviewDto.OwnerGroupDto(
+                    ownerId,
+                    ownerCode,
+                    ownerName,
+                    ownerEmail,
+                    ownerBillingEmail,
+                    workOrders.size(),
+                    subtotal,
+                    List.copyOf(workOrders)
+            );
         }
     }
 }

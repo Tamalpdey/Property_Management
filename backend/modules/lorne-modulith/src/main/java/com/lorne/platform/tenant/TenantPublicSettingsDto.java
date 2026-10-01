@@ -28,7 +28,8 @@ public record TenantPublicSettingsDto(
         Integer smtpPort,
         String smtpUsername,
         boolean smtpPasswordConfigured,
-        boolean smtpUseTls
+        boolean smtpUseTls,
+        boolean liveWorkerTrackingEnabled
 ) {
     public static TenantPublicSettingsDto from(TenantSettingsView settings) {
         return new TenantPublicSettingsDto(
@@ -59,7 +60,8 @@ public record TenantPublicSettingsDto(
                 settings.smtpPort(),
                 settings.smtpUsername(),
                 settings.smtpPasswordConfigured(),
-                settings.smtpUseTls()
+                settings.smtpUseTls(),
+                settings.liveWorkerTrackingEnabled()
         );
     }
 }

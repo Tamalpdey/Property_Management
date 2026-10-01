@@ -3,7 +3,9 @@ package com.lorne.platform.fieldwork.internal.service;
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.fieldwork.internal.dto.WorkerActivityRequest;
 import com.lorne.platform.fieldwork.internal.dto.WorkerDailyLoadoutDto;
+import com.lorne.platform.fieldwork.internal.dto.WorkerInventoryItemDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerLoadoutToolActionRequest;
+import com.lorne.platform.fieldwork.internal.dto.WorkerVehicleUseRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import java.sql.Timestamp;
@@ -44,6 +46,27 @@ public class WorkerDailyLoadoutService {
         return loadout(tenantId, worker, loadoutId, loadoutDate);
     }
 
+    @Transactional(readOnly = true)
+    public List<WorkerInventoryItemDto> inventoryItems(UUID tenantId) {
+        return jdbcTemplate.query("""
+                SELECT ii.id, ic.name AS category_name, ii.name, ii.unit, ii.billing_cost,
+                       ii.quantity_on_hand, ii.storage_location
+                FROM inventory_items ii
+                LEFT JOIN inventory_categories ic ON ic.id = ii.category_id AND ic.tenant_id = ii.tenant_id
+                WHERE ii.tenant_id = ? AND ii.active = true
+                ORDER BY ic.name NULLS LAST, ii.name
+                """, (rs, rowNum) -> new WorkerInventoryItemDto(
+                rs.getObject("id", UUID.class),
+                rs.getString("category_name"),
+                rs.getString("name"),
+                rs.getString("unit"),
+                rs.getBigDecimal("billing_cost"),
+                rs.getBigDecimal("quantity_on_hand"),
+                rs.getString("storage_location"),
+                true
+        ), tenantId);
+    }
+
     @Transactional
     public WorkerDailyLoadoutDto checkOutTool(UUID tenantId, UUID userId, String email, LocalDate date, WorkerLoadoutToolActionRequest request) {
         return updateToolStatus(tenantId, userId, email, date, request, "CHECKED_OUT");
@@ -57,6 +80,66 @@ public class WorkerDailyLoadoutService {
     @Transactional
     public WorkerDailyLoadoutDto reportToolIssue(UUID tenantId, UUID userId, String email, LocalDate date, WorkerLoadoutToolActionRequest request) {
         return updateToolStatus(tenantId, userId, email, date, request, "DAMAGED");
+    }
+
+    @Transactional
+    public WorkerDailyLoadoutDto saveVehicleUse(UUID tenantId, UUID userId, String email, LocalDate date, WorkerVehicleUseRequest request) {
+        var worker = worker(tenantId, userId, email);
+        var loadoutDate = date == null ? LocalDate.now(tenantZoneId(tenantId)) : date;
+        var startKm = request == null ? null : request.startKm();
+        var endKm = request == null ? null : request.endKm();
+        if (startKm != null && endKm != null && endKm.compareTo(startKm) < 0) {
+            throw new BadRequestException("End km must be the same as or greater than start km.");
+        }
+
+        var vehicleAssetId = request == null ? null : request.vehicleAssetId();
+        var vehicleLabel = blankToNull(request == null ? null : request.vehicleLabel());
+        if (vehicleAssetId != null) {
+            vehicleLabel = jdbcTemplate.query("""
+                    SELECT concat_ws(' - ', name, nullif(identifier, ''))
+                    FROM assets
+                    WHERE tenant_id = ? AND id = ? AND active = true AND upper(asset_type) = 'VEHICLE'
+                    """, rs -> {
+                if (!rs.next()) {
+                    throw new BadRequestException("The selected vehicle is not available.");
+                }
+                return rs.getString(1);
+            }, tenantId, vehicleAssetId);
+        }
+        if ((startKm != null || endKm != null) && vehicleAssetId == null && vehicleLabel == null) {
+            throw new BadRequestException("Select or describe the vehicle before entering kilometres.");
+        }
+
+        var id = jdbcTemplate.queryForObject("""
+                INSERT INTO worker_vehicle_usage (
+                    tenant_id, worker_id, usage_date, vehicle_asset_id, vehicle_label,
+                    start_km, end_km, notes, created_by, updated_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, worker_id, usage_date)
+                DO UPDATE SET vehicle_asset_id = EXCLUDED.vehicle_asset_id,
+                              vehicle_label = EXCLUDED.vehicle_label,
+                              start_km = EXCLUDED.start_km,
+                              end_km = EXCLUDED.end_km,
+                              notes = EXCLUDED.notes,
+                              updated_by = EXCLUDED.updated_by,
+                              updated_at = now()
+                RETURNING id
+                """, UUID.class,
+                tenantId, worker.id(), loadoutDate, vehicleAssetId, vehicleLabel,
+                startKm, endKm, blankToNull(request == null ? null : request.notes()), userId, userId
+        );
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("workerId", worker.id().toString());
+        metadata.put("usageDate", loadoutDate.toString());
+        metadata.put("vehicleAssetId", vehicleAssetId == null ? "" : vehicleAssetId.toString());
+        metadata.put("vehicleLabel", vehicleLabel == null ? "" : vehicleLabel);
+        metadata.put("startKm", startKm == null ? "" : startKm);
+        metadata.put("endKm", endKm == null ? "" : endKm);
+        auditWriter.record(tenantId, userId, "WORKER_VEHICLE_USAGE_UPDATED", "WORKER", worker.id(), metadata);
+
+        var loadoutId = ensureLoadout(tenantId, worker.id(), loadoutDate, userId);
+        return loadout(tenantId, worker, loadoutId, loadoutDate);
     }
 
     @Transactional
@@ -189,6 +272,8 @@ public class WorkerDailyLoadoutService {
         var tools = toolItems(tenantId, worker.id(), loadoutId, start, end);
         var materials = materialItems(tenantId, worker.id(), start, end);
         var activities = activityItems(tenantId, worker.id(), loadoutDate);
+        var vehicles = vehicleOptions(tenantId);
+        var vehicleUse = vehicleUse(tenantId, worker.id(), loadoutDate);
         var scheduledJobs = scheduledJobCount(tenantId, worker.id(), start, end);
         var checkedOut = countTools(tools, "CHECKED_OUT");
         var returned = countTools(tools, "RETURNED");
@@ -207,8 +292,38 @@ public class WorkerDailyLoadoutService {
                 issues,
                 tools,
                 materials,
-                activities
+                activities,
+                vehicles,
+                vehicleUse
         );
+    }
+
+    private List<WorkerDailyLoadoutDto.VehicleOptionDto> vehicleOptions(UUID tenantId) {
+        return jdbcTemplate.query("""
+                SELECT id, name, identifier
+                FROM assets
+                WHERE tenant_id = ? AND active = true AND upper(asset_type) = 'VEHICLE'
+                ORDER BY name, identifier
+                """, (rs, rowNum) -> new WorkerDailyLoadoutDto.VehicleOptionDto(
+                rs.getObject("id", UUID.class),
+                rs.getString("name"),
+                rs.getString("identifier")
+        ), tenantId);
+    }
+
+    private WorkerDailyLoadoutDto.VehicleUseDto vehicleUse(UUID tenantId, UUID workerId, LocalDate loadoutDate) {
+        return jdbcTemplate.query("""
+                SELECT id, vehicle_asset_id, vehicle_label, start_km, end_km, notes
+                FROM worker_vehicle_usage
+                WHERE tenant_id = ? AND worker_id = ? AND usage_date = ?
+                """, rs -> rs.next() ? new WorkerDailyLoadoutDto.VehicleUseDto(
+                rs.getObject("id", UUID.class),
+                rs.getObject("vehicle_asset_id", UUID.class),
+                rs.getString("vehicle_label"),
+                rs.getBigDecimal("start_km"),
+                rs.getBigDecimal("end_km"),
+                rs.getString("notes")
+        ) : null, tenantId, workerId, loadoutDate);
     }
 
     private List<WorkerDailyLoadoutDto.ToolItemDto> toolItems(UUID tenantId, UUID workerId, UUID loadoutId, Timestamp start, Timestamp end) {

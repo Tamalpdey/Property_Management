@@ -4,6 +4,7 @@ import type { CreatePropertyRequest, PropertyOwner, PropertyRecord, ServiceType 
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { SelectModule } from 'primeng/select';
 import { TagModule } from 'primeng/tag';
 import { DialogModule } from 'primeng/dialog';
 import { PropertyOwnerService } from '../owners/services/property-owner.service';
@@ -14,7 +15,7 @@ import { PropertyService } from './services/property.service';
 @Component({
   selector: 'lorne-property-page',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, PropertyListComponent, TagModule],
+  imports: [ButtonModule, DialogModule, FormsModule, InputTextModule, PropertyListComponent, SelectModule, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-3">
@@ -60,12 +61,30 @@ import { PropertyService } from './services/property.service';
         <form class="grid gap-4" (ngSubmit)="save()">
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Owner</span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="ownerId" required [(ngModel)]="form.ownerId">
-                <option value="">Select owner</option>
-                @for (owner of owners(); track owner.id) {
-                  <option [value]="owner.id">{{ owner.displayName }}</option>
-                }
-              </select>
+              <p-select
+                styleClass="w-full"
+                name="ownerId"
+                [options]="owners()"
+                optionLabel="displayName"
+                optionValue="id"
+                filterBy="displayName,email,billingEmail,phone,ownerCode"
+                [filter]="true"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="Search owner"
+                required
+                [(ngModel)]="form.ownerId"
+              >
+                <ng-template pTemplate="item" let-owner>
+                  <div>
+                    <p class="font-bold text-slate-900">{{ owner.displayName }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ owner.ownerCode }} · {{ owner.email || owner.billingEmail || 'No email' }}</p>
+                  </div>
+                </ng-template>
+                <ng-template pTemplate="selectedItem" let-owner>
+                  <span>{{ owner?.displayName || 'Search owner' }}</span>
+                </ng-template>
+              </p-select>
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Property name</span>

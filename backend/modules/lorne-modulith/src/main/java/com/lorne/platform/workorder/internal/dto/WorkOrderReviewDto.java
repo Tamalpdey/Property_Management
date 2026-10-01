@@ -91,6 +91,7 @@ public record WorkOrderReviewDto(
             String communicationType,
             UUID invoiceId,
             String invoiceNumber,
+            String serviceName,
             String recipientEmail,
             String subject,
             String body,

@@ -11,6 +11,7 @@ public record EmailDeliveryLogDto(
         String invoiceNumber,
         UUID workOrderId,
         String workOrderNumber,
+        String serviceName,
         String ownerName,
         String recipientEmail,
         String ccEmails,

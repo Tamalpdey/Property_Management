@@ -18,6 +18,8 @@ public record WorkOrderDto(
         String propertyCode,
         String propertyName,
         String propertyAddress,
+        BigDecimal propertyLatitude,
+        BigDecimal propertyLongitude,
         UUID serviceTypeId,
         String serviceName,
         Map<String, Object> maintenanceRecordTemplate,
@@ -74,6 +76,7 @@ public record WorkOrderDto(
             BigDecimal quantity,
             String unit,
             BigDecimal unitCost,
+            BigDecimal billingCost,
             boolean used,
             Instant usedAt
     ) {

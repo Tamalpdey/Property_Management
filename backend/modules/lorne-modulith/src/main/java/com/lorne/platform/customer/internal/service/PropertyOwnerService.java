@@ -26,12 +26,16 @@ public class PropertyOwnerService {
     @Transactional(readOnly = true)
     public List<PropertyOwnerDto> list(UUID tenantId) {
         return jdbcTemplate.query("""
-                SELECT c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active,
+                SELECT c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email,
+                       c.address_line1, c.address_line2, c.city, c.province_code, c.postal_code, c.country_code,
+                       c.notes, c.active,
                        count(p.id)::int AS property_count
                 FROM customers c
                 LEFT JOIN properties p ON p.customer_id = c.id AND p.tenant_id = c.tenant_id
                 WHERE c.tenant_id = ?
-                GROUP BY c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email, c.notes, c.active
+                GROUP BY c.id, c.owner_code, c.display_name, c.email, c.phone, c.billing_email,
+                         c.address_line1, c.address_line2, c.city, c.province_code, c.postal_code, c.country_code,
+                         c.notes, c.active
                 ORDER BY c.active DESC, c.display_name
                 """, (rs, rowNum) -> new PropertyOwnerDto(
                 rs.getObject("id", UUID.class),
@@ -40,6 +44,12 @@ public class PropertyOwnerService {
                 rs.getString("email"),
                 rs.getString("phone"),
                 rs.getString("billing_email"),
+                rs.getString("address_line1"),
+                rs.getString("address_line2"),
+                rs.getString("city"),
+                rs.getString("province_code"),
+                rs.getString("postal_code"),
+                rs.getString("country_code"),
                 rs.getString("notes"),
                 rs.getInt("property_count"),
                 rs.getBoolean("active")
@@ -51,9 +61,26 @@ public class PropertyOwnerService {
         var ownerId = UUID.randomUUID();
         var ownerCode = PublicCodeGenerator.ownerCode(ownerId);
         jdbcTemplate.update("""
-                INSERT INTO customers (id, tenant_id, owner_code, display_name, email, phone, billing_email, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, ownerId, tenantId, ownerCode, request.displayName(), request.email(), request.phone(), request.billingEmail(), request.notes());
+                INSERT INTO customers (
+                    id, tenant_id, owner_code, display_name, email, phone, billing_email,
+                    address_line1, address_line2, city, province_code, postal_code, country_code, notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ownerId,
+                tenantId,
+                ownerCode,
+                request.displayName(),
+                blankToNull(request.email()),
+                blankToNull(request.phone()),
+                blankToNull(request.billingEmail()),
+                blankToNull(request.addressLine1()),
+                blankToNull(request.addressLine2()),
+                blankToNull(request.city()),
+                blankToNull(request.provinceCode()),
+                blankToNull(request.postalCode()),
+                blankToNull(request.countryCode()),
+                blankToNull(request.notes()));
 
         auditWriter.record(tenantId, actorUserId, "PROPERTY_OWNER_CREATED", "PROPERTY_OWNER", ownerId, Map.of(
                 "ownerCode", ownerCode,
@@ -67,7 +94,9 @@ public class PropertyOwnerService {
     public PropertyOwnerDto update(UUID tenantId, UUID actorUserId, UUID ownerId, CreatePropertyOwnerRequest request) {
         var updated = jdbcTemplate.update("""
                 UPDATE customers
-                SET display_name = ?, email = ?, phone = ?, billing_email = ?, notes = ?,
+                SET display_name = ?, email = ?, phone = ?, billing_email = ?,
+                    address_line1 = ?, address_line2 = ?, city = ?, province_code = ?, postal_code = ?, country_code = ?,
+                    notes = ?,
                     updated_at = now(), updated_by = ?
                 WHERE tenant_id = ? AND id = ?
                 """,
@@ -75,6 +104,12 @@ public class PropertyOwnerService {
                 blankToNull(request.email()),
                 blankToNull(request.phone()),
                 blankToNull(request.billingEmail()),
+                blankToNull(request.addressLine1()),
+                blankToNull(request.addressLine2()),
+                blankToNull(request.city()),
+                blankToNull(request.provinceCode()),
+                blankToNull(request.postalCode()),
+                blankToNull(request.countryCode()),
                 blankToNull(request.notes()),
                 actorUserId,
                 tenantId,

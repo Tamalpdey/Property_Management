@@ -52,15 +52,21 @@ public class ServiceCatalogService {
     public ServiceCatalogResponse.ServiceCategoryDto createCategory(UUID tenantId, UUID actorUserId, CreateServiceCategoryRequest request) {
         try {
             var id = jdbcTemplate.queryForObject("""
-                    INSERT INTO service_categories (tenant_id, name, wsib_rate_percent, created_by, updated_by)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO service_categories (tenant_id, name, wsib_rate_percent, maintenance_record_template, created_by, updated_by)
+                    VALUES (?, ?, ?, ?::jsonb, ?, ?)
                     RETURNING id
-                    """, UUID.class, tenantId, request.name(), request.wsibRatePercent(), actorUserId, actorUserId);
+                    """, UUID.class, tenantId, request.name(), request.wsibRatePercent(), templateJson(request.maintenanceRecordTemplate()), actorUserId, actorUserId);
             auditWriter.record(tenantId, actorUserId, "SERVICE_CATEGORY_CREATED", "SERVICE_CATEGORY", id, Map.of(
                     "name", request.name(),
                     "wsibRatePercent", wsibRateText(request.wsibRatePercent())
             ));
-            return new ServiceCatalogResponse.ServiceCategoryDto(id, request.name(), request.wsibRatePercent(), true);
+            return new ServiceCatalogResponse.ServiceCategoryDto(
+                    id,
+                    request.name(),
+                    request.wsibRatePercent(),
+                    normalizedTemplate(request.maintenanceRecordTemplate()),
+                    true
+            );
         } catch (DuplicateKeyException exception) {
             throw new DuplicateResourceException("Service category already exists.");
         }
@@ -72,11 +78,12 @@ public class ServiceCatalogService {
         try {
             var updated = jdbcTemplate.update("""
                     UPDATE service_categories
-                    SET name = ?, wsib_rate_percent = ?, updated_at = now(), updated_by = ?
+                    SET name = ?, wsib_rate_percent = ?, maintenance_record_template = COALESCE(?::jsonb, maintenance_record_template), updated_at = now(), updated_by = ?
                     WHERE tenant_id = ? AND id = ?
                     """,
                     request.name(),
                     request.wsibRatePercent(),
+                    request.maintenanceRecordTemplate() == null ? null : templateJson(request.maintenanceRecordTemplate()),
                     actorUserId,
                     tenantId,
                     categoryId
@@ -238,7 +245,7 @@ public class ServiceCatalogService {
 
     private List<ServiceCatalogResponse.ServiceCategoryDto> categories(UUID tenantId) {
         return jdbcTemplate.query("""
-                SELECT id, name, wsib_rate_percent, active
+                SELECT id, name, wsib_rate_percent, maintenance_record_template::text AS maintenance_record_template, active
                 FROM service_categories
                 WHERE tenant_id = ?
                 ORDER BY name
@@ -246,19 +253,21 @@ public class ServiceCatalogService {
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
                 rs.getBigDecimal("wsib_rate_percent"),
+                template(rs.getString("maintenance_record_template")),
                 rs.getBoolean("active")
         ), tenantId);
     }
 
     private ServiceCatalogResponse.ServiceCategoryDto serviceCategory(UUID tenantId, UUID categoryId) {
         var result = jdbcTemplate.query("""
-                SELECT id, name, wsib_rate_percent, active
+                SELECT id, name, wsib_rate_percent, maintenance_record_template::text AS maintenance_record_template, active
                 FROM service_categories
                 WHERE tenant_id = ? AND id = ?
                 """, (rs, rowNum) -> new ServiceCatalogResponse.ServiceCategoryDto(
                 rs.getObject("id", UUID.class),
                 rs.getString("name"),
                 rs.getBigDecimal("wsib_rate_percent"),
+                template(rs.getString("maintenance_record_template")),
                 rs.getBoolean("active")
         ), tenantId, categoryId);
         if (result.isEmpty()) {
@@ -270,7 +279,9 @@ public class ServiceCatalogService {
     private List<ServiceCatalogResponse.ServiceTypeDto> serviceTypes(UUID tenantId) {
         return jdbcTemplate.query("""
                 SELECT st.id, st.category_id, sc.name AS category_name, st.name, st.description,
-                       st.default_duration_minutes, st.base_price, st.maintenance_record_template::text AS maintenance_record_template, st.active
+                       st.default_duration_minutes, st.base_price,
+                       COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template,
+                       st.active
                 FROM service_types st
                 LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE st.tenant_id = ?
@@ -291,7 +302,9 @@ public class ServiceCatalogService {
     private ServiceCatalogResponse.ServiceTypeDto requireServiceType(UUID tenantId, UUID serviceTypeId) {
         var result = jdbcTemplate.query("""
                 SELECT st.id, st.category_id, sc.name AS category_name, st.name, st.description,
-                       st.default_duration_minutes, st.base_price, st.maintenance_record_template::text AS maintenance_record_template, st.active
+                       st.default_duration_minutes, st.base_price,
+                       COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template,
+                       st.active
                 FROM service_types st
                 LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE st.tenant_id = ? AND st.id = ?

@@ -8,9 +8,11 @@ import com.lorne.platform.fieldwork.internal.dto.WorkerAssignedJobDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerDailyLoadoutDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerJobActionRequest;
 import com.lorne.platform.fieldwork.internal.dto.WorkerJobActionResponse;
+import com.lorne.platform.fieldwork.internal.dto.WorkerInventoryItemDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerLoadoutToolActionRequest;
 import com.lorne.platform.fieldwork.internal.dto.WorkerShiftClockDto;
 import com.lorne.platform.fieldwork.internal.dto.WorkerShiftClockRequest;
+import com.lorne.platform.fieldwork.internal.dto.WorkerVehicleUseRequest;
 import com.lorne.platform.fieldwork.internal.dto.WorkerTodayResponse;
 import com.lorne.platform.fieldwork.internal.service.WorkerDailyLoadoutService;
 import com.lorne.platform.fieldwork.internal.service.WorkerJobService;
@@ -94,6 +96,24 @@ class WorkerTodayController {
             @RequestParam(required = false) LocalDate date
     ) {
         return ApiResponse.ok(workerDailyLoadoutService.loadout(principal.tenantId(), principal.userId(), principal.email(), date));
+    }
+
+    @GetMapping("/inventory")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<List<WorkerInventoryItemDto>> inventory(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(workerDailyLoadoutService.inventoryItems(principal.tenantId()));
+    }
+
+    @PutMapping("/loadout/vehicle-use")
+    @PreAuthorize("hasRole('FIELD_WORKER')")
+    ApiResponse<WorkerDailyLoadoutDto> saveVehicleUse(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestParam(required = false) LocalDate date,
+            @Valid @RequestBody WorkerVehicleUseRequest request
+    ) {
+        return ApiResponse.ok(workerDailyLoadoutService.saveVehicleUse(
+                principal.tenantId(), principal.userId(), principal.email(), date, request
+        ));
     }
 
     @PostMapping("/loadout/tools/check-out")

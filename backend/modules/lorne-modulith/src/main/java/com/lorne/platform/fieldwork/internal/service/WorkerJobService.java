@@ -11,6 +11,7 @@ import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import com.lorne.platform.workorder.internal.dto.UpsertWorkOrderMaintenanceRecordRequest;
 import com.lorne.platform.workorder.internal.dto.WorkOrderMaintenanceRecordDto;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class WorkerJobService {
     private static final int EVIDENCE_LIMIT_PER_GROUP = 15;
+    private static final int DEFAULT_GEOFENCE_RADIUS_METERS = 200;
     private static final Set<String> WORK_ORDER_ACTIONS_BLOCKED_BY_OPEN_ACTIVITY = Set.of(
             "START_TRAVEL",
             "ARRIVE_ON_SITE",
@@ -80,7 +82,8 @@ public class WorkerJobService {
         var jobs = jdbcTemplate.query("""
                 SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.property_code, p.name AS property_name, c.owner_code, c.display_name AS owner_name,
                        concat_ws(', ', p.address_line1, nullif(p.address_line2, ''), p.city, p.province_code, p.postal_code) AS address,
-                       st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
+                       p.latitude AS property_latitude, p.longitude AS property_longitude,
+                       st.name AS service_name, COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.description AS notes,
                        woa.estimated_travel_minutes, woa.estimated_travel_distance_meters,
@@ -91,6 +94,7 @@ public class WorkerJobService {
                 JOIN properties p ON p.id = wo.property_id AND p.tenant_id = wo.tenant_id
                 JOIN customers c ON c.id = wo.customer_id AND c.tenant_id = wo.tenant_id
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE woa.tenant_id = ?
                   AND woa.worker_id = ?
                   AND wo.status <> 'CANCELLED'
@@ -145,6 +149,8 @@ public class WorkerJobService {
                 rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getString("address"),
+                rs.getBigDecimal("property_latitude"),
+                rs.getBigDecimal("property_longitude"),
                 rs.getString("service_name"),
                 template(rs.getString("maintenance_record_template")),
                 rs.getString("status"),
@@ -196,7 +202,10 @@ public class WorkerJobService {
                 case "VIEW_PRE_START_CHECKLIST" -> recordViewAction(tenantId, worker, workOrderId, "WORKER_VIEWED_PRE_START_CHECKLIST", "Pre-start checklist viewed.", now);
                 case "VIEW_COMPLETION_CHECKLIST" -> recordViewAction(tenantId, worker, workOrderId, "WORKER_VIEWED_COMPLETION_CHECKLIST", "Completion checklist viewed.", now);
                 case "VIEW_TIMELINE" -> recordViewAction(tenantId, worker, workOrderId, "WORKER_VIEWED_TIMELINE", "Execution timeline viewed.", now);
-                case "START_TRAVEL" -> updateWorkState(tenantId, worker, workOrderId, "TRAVELING", "ACCEPTED", now, action, request.note());
+                case "START_TRAVEL" -> {
+                    requireTravelCanStart(tenantId, worker.id(), workOrderId);
+                    updateWorkState(tenantId, worker, workOrderId, "TRAVELING", "ACCEPTED", now, action, request.note());
+                }
                 case "ARRIVE_ON_SITE" -> updateWorkState(tenantId, worker, workOrderId, "ON_SITE", "ON_SITE", now, action, request.note());
                 case "START_WORK" -> {
                     var remainingPreStartChecks = remainingRequiredChecklistCount(tenantId, worker.id(), workOrderId, "PRE_START");
@@ -404,6 +413,30 @@ public class WorkerJobService {
                 """, Boolean.class, tenantId, workerId, today));
         if (hasOpenActivity) {
             throw new BadRequestException("End the current worker activity before starting work order actions.");
+        }
+    }
+
+    private void requireTravelCanStart(UUID tenantId, UUID workerId, UUID workOrderId) {
+        var alreadyBeyondTravel = Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM audit_logs al
+                    WHERE al.tenant_id = ?
+                      AND al.resource_type = 'WORK_ORDER'
+                      AND al.resource_id = ?
+                      AND al.action IN ('WORKER_ARRIVE_ON_SITE', 'WORKER_START_WORK', 'WORKER_RESUME_WORK', 'WORKER_COMPLETE_WORK')
+                      AND (al.metadata ->> 'workerId')::uuid = ?
+                ) OR EXISTS (
+                    SELECT 1
+                    FROM work_order_assignment_overrides wao
+                    WHERE wao.tenant_id = ?
+                      AND wao.work_order_id = ?
+                      AND wao.worker_id = ?
+                      AND (wao.actual_arrived_at IS NOT NULL OR wao.actual_work_started_at IS NOT NULL OR wao.actual_finished_at IS NOT NULL)
+                )
+                """, Boolean.class, tenantId, workOrderId, workerId, tenantId, workOrderId, workerId));
+        if (alreadyBeyondTravel) {
+            throw new BadRequestException("Travel cannot be started after arrival or work has already been recorded.");
         }
     }
 
@@ -733,24 +766,27 @@ public class WorkerJobService {
         if (request.quantity() == null || request.quantity().signum() <= 0) {
             throw new BadRequestException("Material quantity must be greater than zero.");
         }
-        var itemName = inventoryItemName(tenantId, request.inventoryItemId());
+        var item = inventoryItem(tenantId, request.inventoryItemId());
         var description = blankToNull(request.materialDescription());
-        if (description == null && itemName == null) {
+        if (description == null && item == null) {
             throw new BadRequestException("Material description is required.");
         }
+        var unitCost = request.unitCost() == null && item != null ? item.unitCost() : request.unitCost();
+        var billingCost = request.billingCost() == null && item != null ? item.billingCost() : request.billingCost();
         jdbcTemplate.update("""
                 INSERT INTO work_order_materials (
-                    tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost,
+                    tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost, billing_cost,
                     used, used_at, used_by, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, true, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, true, ?, ?, ?, ?)
                 """,
                 tenantId,
                 workOrderId,
                 request.inventoryItemId(),
-                description == null ? itemName : description,
+                description == null ? item.name() : description,
                 request.quantity(),
-                request.unitCost(),
+                unitCost,
+                billingCost,
                 timestamp(actionAt),
                 userId,
                 userId,
@@ -758,8 +794,10 @@ public class WorkerJobService {
         );
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("inventoryItemId", request.inventoryItemId() == null ? null : request.inventoryItemId().toString());
-        metadata.put("description", description == null ? itemName : description);
+        metadata.put("description", description == null ? item.name() : description);
         metadata.put("quantity", request.quantity());
+        metadata.put("unitCost", unitCost);
+        metadata.put("billingCost", billingCost);
         metadata.put("actionAt", actionAt.toString());
         auditAction(tenantId, worker, workOrderId, "WORKER_MATERIAL_USED", metadata);
     }
@@ -1021,7 +1059,8 @@ public class WorkerJobService {
         var jobs = jdbcTemplate.query("""
                 SELECT wo.id, wo.work_order_number, wo.work_order_type, wo.title, p.property_code, p.name AS property_name, c.owner_code, c.display_name AS owner_name,
                        concat_ws(', ', p.address_line1, nullif(p.address_line2, ''), p.city, p.province_code, p.postal_code) AS address,
-                       st.name AS service_name, st.maintenance_record_template::text AS maintenance_record_template,
+                       p.latitude AS property_latitude, p.longitude AS property_longitude,
+                       st.name AS service_name, COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template,
                        wo.status::text AS status, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.description AS notes,
                        woa.estimated_travel_minutes, woa.estimated_travel_distance_meters,
@@ -1032,6 +1071,7 @@ public class WorkerJobService {
                 JOIN properties p ON p.id = wo.property_id AND p.tenant_id = wo.tenant_id
                 JOIN customers c ON c.id = wo.customer_id AND c.tenant_id = wo.tenant_id
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE woa.tenant_id = ? AND woa.worker_id = ? AND wo.id = ?
                 """, (rs, rowNum) -> new WorkerAssignedJobDto(
                 rs.getObject("id", UUID.class),
@@ -1043,6 +1083,8 @@ public class WorkerJobService {
                 rs.getString("owner_code"),
                 rs.getString("owner_name"),
                 rs.getString("address"),
+                rs.getBigDecimal("property_latitude"),
+                rs.getBigDecimal("property_longitude"),
                 rs.getString("service_name"),
                 template(rs.getString("maintenance_record_template")),
                 rs.getString("status"),
@@ -1082,6 +1124,8 @@ public class WorkerJobService {
                 job.ownerCode(),
                 job.ownerName(),
                 job.address(),
+                job.propertyLatitude(),
+                job.propertyLongitude(),
                 job.serviceName(),
                 job.maintenanceRecordTemplate(),
                 job.status(),
@@ -1342,7 +1386,8 @@ public class WorkerJobService {
                            coalesce(w.display_name, au.display_name, 'Field worker') AS worker_name,
                            'Ready for field execution.' AS note,
                            woa.created_at AS created_at,
-                           NULL::text AS photo_type
+                           NULL::text AS photo_type,
+                           '{}'::text AS metadata
                     FROM work_order_assignments woa
                     JOIN workers w ON w.id = woa.worker_id AND w.tenant_id = woa.tenant_id
                     LEFT JOIN app_users au ON au.id = w.user_id
@@ -1363,7 +1408,8 @@ public class WorkerJobService {
                                NULLIF(metadata ->> 'label', '')
                            ) AS note,
                            created_at,
-                           metadata ->> 'photoType' AS photo_type
+                           metadata ->> 'photoType' AS photo_type,
+                           metadata::text AS metadata
                     FROM audit_logs
                     WHERE tenant_id = ?
                       AND resource_type = 'WORK_ORDER'
@@ -1398,10 +1444,10 @@ public class WorkerJobService {
                         'WORKER_LEFT_EMERGENCY'
                       )
                 )
-                SELECT action, worker_name, note, created_at, photo_type
+                SELECT action, worker_name, note, created_at, photo_type, metadata
                 FROM ready_event
                 UNION ALL
-                SELECT action, worker_name, note, created_at, photo_type
+                SELECT action, worker_name, note, created_at, photo_type, metadata
                 FROM worker_events
                 ORDER BY created_at
                 """, (rs, rowNum) -> {
@@ -1411,7 +1457,8 @@ public class WorkerJobService {
                     executionLabel(action, rs.getString("photo_type")),
                     rs.getString("worker_name"),
                     instant("created_at", rs),
-                    rs.getString("note")
+                    rs.getString("note"),
+                    metadata(rs.getString("metadata"))
             );
         }, tenantId, workOrderId, workerId, tenantId, workOrderId, workerId.toString(), actorUserId);
     }
@@ -1523,26 +1570,27 @@ public class WorkerJobService {
 
     private Map<String, Object> workOrderTemplate(UUID tenantId, UUID workOrderId) {
         return jdbcTemplate.query("""
-                SELECT st.maintenance_record_template::text AS maintenance_record_template
+                SELECT COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template
                 FROM work_orders wo
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE wo.tenant_id = ? AND wo.id = ?
                 """, rs -> rs.next() ? template(rs.getString("maintenance_record_template")) : EMPTY_MAINTENANCE_RECORD_TEMPLATE, tenantId, workOrderId);
     }
 
-    private String inventoryItemName(UUID tenantId, UUID inventoryItemId) {
+    private InventoryItemRef inventoryItem(UUID tenantId, UUID inventoryItemId) {
         if (inventoryItemId == null) {
             return null;
         }
         return jdbcTemplate.query("""
-                SELECT name
+                SELECT name, unit_cost, billing_cost
                 FROM inventory_items
                 WHERE tenant_id = ? AND id = ?
                 """, rs -> {
             if (!rs.next()) {
                 throw new BadRequestException("Inventory item is not available for this tenant.");
             }
-            return rs.getString("name");
+            return new InventoryItemRef(rs.getString("name"), rs.getBigDecimal("unit_cost"), rs.getBigDecimal("billing_cost"));
         }, tenantId, inventoryItemId);
     }
 
@@ -1557,11 +1605,11 @@ public class WorkerJobService {
         metadata.put("workerName", worker.displayName());
         metadata.put("workerEmail", worker.email());
         metadata.putAll(detail);
-        metadata.putAll(actionMetadata());
+        metadata.putAll(actionMetadata(tenantId, workOrderId));
         auditWriter.record(tenantId, worker.userId(), action, "WORK_ORDER", workOrderId, metadata);
     }
 
-    private Map<String, Object> actionMetadata() {
+    private Map<String, Object> actionMetadata(UUID tenantId, UUID workOrderId) {
         var request = actionRequestContext.get();
         if (request == null) {
             return Map.of();
@@ -1573,7 +1621,69 @@ public class WorkerJobService {
         putIfPresent(metadata, "deviceTimestamp", blankToNull(request.deviceTimestamp()));
         putIfPresent(metadata, "platform", blankToNull(request.platform()));
         putIfPresent(metadata, "userAgent", truncate(blankToNull(request.userAgent()), 512));
+        putIfPresent(metadata, "autoDetected", request.autoDetected());
+        metadata.putAll(geofenceMetadata(tenantId, workOrderId, request));
         return metadata;
+    }
+
+    private Map<String, Object> geofenceMetadata(UUID tenantId, UUID workOrderId, WorkerJobActionRequest request) {
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("geofenceRadiusMeters", DEFAULT_GEOFENCE_RADIUS_METERS);
+        if (request.latitude() == null || request.longitude() == null) {
+            metadata.put("geofenceStatus", "NO_WORKER_LOCATION");
+            metadata.put("geofenceMessage", "Worker location was not captured for this action.");
+            return metadata;
+        }
+        var property = propertyCoordinates(tenantId, workOrderId);
+        if (property == null || property.latitude() == null || property.longitude() == null) {
+            metadata.put("geofenceStatus", "NO_PROPERTY_COORDINATES");
+            metadata.put("geofenceMessage", "Property coordinates are missing, so site distance could not be verified.");
+            return metadata;
+        }
+        var distanceMeters = Math.round(distanceMeters(
+                request.latitude().doubleValue(),
+                request.longitude().doubleValue(),
+                property.latitude().doubleValue(),
+                property.longitude().doubleValue()
+        ));
+        metadata.put("propertyLatitude", property.latitude());
+        metadata.put("propertyLongitude", property.longitude());
+        metadata.put("geofenceDistanceMeters", distanceMeters);
+        if (distanceMeters <= DEFAULT_GEOFENCE_RADIUS_METERS) {
+            metadata.put("geofenceStatus", "INSIDE_SITE");
+            metadata.put("geofenceFlag", false);
+            metadata.put("geofenceMessage", "Worker location was inside the site geofence.");
+        } else {
+            metadata.put("geofenceStatus", "OUTSIDE_SITE");
+            metadata.put("geofenceFlag", true);
+            metadata.put("geofenceMessage", "Worker location was outside the site geofence.");
+        }
+        return metadata;
+    }
+
+    private PropertyCoordinates propertyCoordinates(UUID tenantId, UUID workOrderId) {
+        var rows = jdbcTemplate.query("""
+                SELECT p.latitude, p.longitude
+                FROM work_orders wo
+                JOIN properties p ON p.id = wo.property_id AND p.tenant_id = wo.tenant_id
+                WHERE wo.tenant_id = ? AND wo.id = ?
+                """, (rs, rowNum) -> new PropertyCoordinates(
+                rs.getBigDecimal("latitude"),
+                rs.getBigDecimal("longitude")
+        ), tenantId, workOrderId);
+        return rows.stream().findFirst().orElse(null);
+    }
+
+    private double distanceMeters(double latitudeOne, double longitudeOne, double latitudeTwo, double longitudeTwo) {
+        var radiusMeters = 6371000.0;
+        var phiOne = Math.toRadians(latitudeOne);
+        var phiTwo = Math.toRadians(latitudeTwo);
+        var deltaPhi = Math.toRadians(latitudeTwo - latitudeOne);
+        var deltaLambda = Math.toRadians(longitudeTwo - longitudeOne);
+        var a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2)
+                + Math.cos(phiOne) * Math.cos(phiTwo)
+                * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+        return radiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     private void putIfPresent(Map<String, Object> metadata, String key, Object value) {
@@ -1721,6 +1831,12 @@ public class WorkerJobService {
     }
 
     private record RouteStopRef(String stopType, String name, Instant arrivedAt, Instant completedAt, Instant skippedAt) {
+    }
+
+    private record InventoryItemRef(String name, BigDecimal unitCost, BigDecimal billingCost) {
+    }
+
+    private record PropertyCoordinates(BigDecimal latitude, BigDecimal longitude) {
     }
 
     private record ActionGate(String status, Instant scheduledStart, String assignmentStatus) {

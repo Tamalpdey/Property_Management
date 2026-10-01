@@ -1,4 +1,4 @@
-import { DecimalPipe } from '@angular/common';
+import { CurrencyPipe, DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import type { InventoryItem } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
@@ -12,7 +12,7 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
 @Component({
   selector: 'lorne-inventory-item-list',
   standalone: true,
-  imports: [ButtonModule, DecimalPipe, DenseCollectionFooterComponent, DenseCollectionToolbarComponent, MenuModule, TagModule],
+  imports: [ButtonModule, CurrencyPipe, DecimalPipe, DenseCollectionFooterComponent, DenseCollectionToolbarComponent, MenuModule, TagModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-2">
@@ -30,13 +30,15 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
       />
       <div class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[60rem] border-collapse text-sm">
+          <table class="w-full min-w-[74rem] border-collapse text-sm">
             <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th class="w-10 px-3 py-3"></th>
                 <th class="px-3 py-3">Item</th>
                 <th class="px-3 py-3">Category</th>
                 <th class="px-3 py-3">Location</th>
+                <th class="px-3 py-3">Purchase cost</th>
+                <th class="px-3 py-3">Billing cost</th>
                 <th class="px-3 py-3">On hand</th>
                 <th class="px-3 py-3">Reorder</th>
                 <th class="px-3 py-3">Status</th>
@@ -52,6 +54,8 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                   <td class="px-3 py-3 font-bold text-slate-950">{{ item.name }}</td>
                   <td class="px-3 py-3 text-slate-600">{{ item.categoryName || 'Uncategorized' }}</td>
                   <td class="px-3 py-3 text-slate-600">{{ item.storageLocation || 'No location' }}</td>
+                  <td class="px-3 py-3 font-semibold text-slate-700">{{ item.unitCost === undefined || item.unitCost === null ? '-' : (item.unitCost | currency:'CAD':'symbol':'1.2-2') }}</td>
+                  <td class="px-3 py-3 font-semibold text-teal-700">{{ item.billingCost === undefined || item.billingCost === null ? '-' : (item.billingCost | currency:'CAD':'symbol':'1.2-2') }}</td>
                   <td class="px-3 py-3 font-semibold text-slate-700">{{ item.quantityOnHand | number:'1.0-2' }} {{ item.unit }}</td>
                   <td class="px-3 py-3 text-slate-600">{{ item.reorderLevel ?? 0 | number:'1.0-2' }} {{ item.unit }}</td>
                   <td class="px-3 py-3">
@@ -66,7 +70,7 @@ import { DenseCollectionState } from '../../../shared/collection/dense-collectio
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="8" class="px-3 py-10 text-center text-sm font-semibold text-slate-500">No inventory items yet.</td>
+                  <td colspan="10" class="px-3 py-10 text-center text-sm font-semibold text-slate-500">No inventory items yet.</td>
                 </tr>
               }
             </tbody>
@@ -97,11 +101,15 @@ export class InventoryItemListComponent {
   protected readonly collection = new DenseCollectionState<InventoryItem>(
     this.items,
     (item) => item.id,
-    (item) => [item.name, item.categoryName, item.storageLocation, item.unit, String(item.quantityOnHand), item.reorderLevel?.toString()].filter(Boolean).join(' '),
+    (item) => [item.name, item.categoryName, item.storageLocation, item.unit, item.unitCost?.toString(), item.billingCost?.toString(), String(item.quantityOnHand), item.reorderLevel?.toString()].filter(Boolean).join(' '),
     [
       { label: 'Name A-Z', value: 'name-asc', compare: (left, right) => left.name.localeCompare(right.name) },
       { label: 'Category A-Z', value: 'category-asc', compare: (left, right) => (left.categoryName ?? '').localeCompare(right.categoryName ?? '') },
       { label: 'Location A-Z', value: 'location-asc', compare: (left, right) => (left.storageLocation ?? '').localeCompare(right.storageLocation ?? '') },
+      { label: 'Lowest cost', value: 'cost-asc', compare: (left, right) => (left.unitCost ?? 0) - (right.unitCost ?? 0) },
+      { label: 'Highest cost', value: 'cost-desc', compare: (left, right) => (right.unitCost ?? 0) - (left.unitCost ?? 0) },
+      { label: 'Lowest billing', value: 'billing-asc', compare: (left, right) => (left.billingCost ?? 0) - (right.billingCost ?? 0) },
+      { label: 'Highest billing', value: 'billing-desc', compare: (left, right) => (right.billingCost ?? 0) - (left.billingCost ?? 0) },
       { label: 'Lowest stock', value: 'stock-asc', compare: (left, right) => left.quantityOnHand - right.quantityOnHand },
       { label: 'Highest stock', value: 'stock-desc', compare: (left, right) => right.quantityOnHand - left.quantityOnHand }
     ]

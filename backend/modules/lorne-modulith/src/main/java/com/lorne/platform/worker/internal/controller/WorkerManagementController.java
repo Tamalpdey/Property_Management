@@ -6,7 +6,9 @@ import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
 import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockEntryOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockedInTodayDto;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
 import com.lorne.platform.worker.internal.service.WorkerManagementService;
 import jakarta.validation.Valid;
@@ -40,6 +42,12 @@ class WorkerManagementController {
         return ApiResponse.ok(workerManagementService.list(principal.tenantId()));
     }
 
+    @GetMapping("/clocked-in-today")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<List<WorkerClockedInTodayDto>> clockedInToday(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(workerManagementService.clockedInToday(principal.tenantId()));
+    }
+
     @GetMapping("/{workerId}/clock-entries")
     @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
     ApiResponse<List<WorkerClockEntryDto>> clockEntries(
@@ -49,6 +57,17 @@ class WorkerManagementController {
             @RequestParam(required = false) LocalDate to
     ) {
         return ApiResponse.ok(workerManagementService.clockEntries(principal.tenantId(), workerId, from, to));
+    }
+
+    @PostMapping("/{workerId}/clock-entries/{entryId}/override")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<List<WorkerClockEntryDto>> overrideClockEntry(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable UUID workerId,
+            @PathVariable UUID entryId,
+            @Valid @RequestBody WorkerClockEntryOverrideRequest request
+    ) {
+        return ApiResponse.ok(workerManagementService.overrideClockEntry(principal.tenantId(), principal.userId(), workerId, entryId, request));
     }
 
     @GetMapping("/{workerId}/activities")

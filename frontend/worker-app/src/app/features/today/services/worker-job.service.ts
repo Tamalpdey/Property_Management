@@ -5,12 +5,14 @@ import type {
   PhotoUploadRequest,
   PresignedPhotoUpload,
   WorkerAssignedJob,
+  InventoryItem,
   WorkerActivityRequest,
   WorkerDailyLoadout,
   WorkerClockEntryRecord,
   WorkerJobActionRequest,
   WorkerJobActionResponse,
   WorkerLoadoutToolActionRequest,
+  SaveWorkerVehicleUseRequest,
   TenantSettingsRecord,
   UpsertWorkOrderMaintenanceRecordRequest,
   WorkOrderMaintenanceRecord
@@ -31,6 +33,12 @@ export class WorkerJobService {
   loadout(date: string) {
     return this.http
       .get<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout`, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  inventory() {
+    return this.http
+      .get<ApiResponse<InventoryItem[]>>(`${environment.apiBaseUrl}/field-worker/inventory`)
       .pipe(map((response) => response.data));
   }
 
@@ -61,6 +69,12 @@ export class WorkerJobService {
   reportLoadoutToolIssue(date: string, request: WorkerLoadoutToolActionRequest) {
     return this.http
       .post<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/tools/report-issue`, request, { params: { date } })
+      .pipe(map((response) => response.data));
+  }
+
+  saveVehicleUse(date: string, request: SaveWorkerVehicleUseRequest) {
+    return this.http
+      .put<ApiResponse<WorkerDailyLoadout>>(`${environment.apiBaseUrl}/field-worker/loadout/vehicle-use`, request, { params: { date } })
       .pipe(map((response) => response.data));
   }
 

@@ -29,6 +29,7 @@ export interface DayTicketEntry {
   minutes: number;
   routeStop?: WorkOrderRecord['routeStops'][number];
   activity?: WorkerActivityRecord;
+  timingWarning?: string;
 }
 
 export interface DayTicketShiftSummary {
@@ -248,7 +249,8 @@ export function dayTicketRows(data: ReportGenerationData, workerId: string, date
           timeOut: travelTiming.timeOut,
           timeInFromSchedule: false,
           timeOutFromSchedule: false,
-          minutes: travelTiming.minutes
+          minutes: travelTiming.minutes,
+          timingWarning: travelTiming.timingWarning
         });
       }
     }
@@ -423,6 +425,7 @@ export function dayTicketHtml(input: {
     .clock-sessions { border-top: 1px solid #cbd5e1; display: grid; gap: 4px; margin-top: 12px; padding-top: 8px; }
     .clock-session-row { align-items: center; display: grid; grid-template-columns: 70px 1fr 1fr 70px; gap: 8px; }
     .clock-session-row span { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .adjusted-badge { color: #b45309; display: inline-block; font-size: 8px; font-weight: 800; margin-left: 4px; text-transform: uppercase; }
     .hint { color: #475569; font-size: 10px; font-weight: 700; margin-top: 16px; text-align: center; }
     .schedule-fallback { color: #92400e; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
     .override-badge { color: #b45309; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
@@ -474,14 +477,15 @@ export function dayTicketHtml(input: {
         ${rowSlots.map((row, index) => row ? `
           <tr>
             <td class="rownum">${index + 1}</td>
-            <td class="time">${escapeHtml(timeOnly(row.timeIn, ''))}${row.timeInFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
-            <td class="time">${escapeHtml(timeOnly(row.timeOut, ''))}${row.timeOutFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
+            <td class="time">${escapeHtml(ticketTimeLabel(row.timeIn, input.dateFrom, input.dateTo, ''))}${row.timeInFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
+            <td class="time">${escapeHtml(ticketTimeLabel(row.timeOut, input.dateFrom, input.dateTo, ''))}${row.timeOutFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
             <td class="client">${escapeHtml(dayTicketClient(row))}<div class="muted">${escapeHtml(dayTicketClientMeta(row))}</div></td>
             <td class="wo">${escapeHtml(dayTicketWorkOrderNumber(row))}</td>
             <td class="desc">
               <span class="entry-kind ${escapeAttribute(row.rowType.toLowerCase().replaceAll('_', '-'))}">${escapeHtml(dayTicketRowTypeLabel(row))}</span>
               ${escapeHtml(dayTicketDescription(row, input.options))}
               ${row.rowType === 'TRAVEL' ? '<div class="muted">Sequence: travel started -> arrived on site / work started</div>' : ''}
+              ${row.timingWarning ? `<div class="override-badge">${escapeHtml(row.timingWarning)}</div>` : ''}
               ${row.rowType === 'WORK_ORDER' && input.options.includeService && row.workOrder?.serviceName ? `<div class="muted">${escapeHtml(row.workOrder.serviceName)}</div>` : ''}
               ${row.rowType === 'WORK_ORDER' && input.options.includeStatus && row.workOrder ? `<div class="muted">${escapeHtml(statusLabel(row.workOrder.status))}</div>` : ''}
               ${row.rowType === 'ROUTE_STOP' && input.options.includeStatus ? `<div class="muted">${escapeHtml(routeStopStatusLabel(row.routeStop))}</div>` : ''}
@@ -514,16 +518,17 @@ export function dayTicketHtml(input: {
         <div><span>Down Time:</span><div class="line">${escapeHtml(downTimeMinutes ? minutesLabel(downTimeMinutes) : '')}</div></div>
         <div><span>Total Time:</span><div class="line">${escapeHtml(minutesLabel(totalMinutes))}</div></div>
       </section>
-      ${clockSessions.length > 1 ? `
+      ${clockSessions.length ? `
         <section class="clock-sessions">
           <strong>Clock sessions</strong>
           ${clockSessions.map((entry, index) => `
             <div class="clock-session-row">
-              <span>Session ${index + 1}</span>
+              <span>Session ${index + 1}${entry.override ? '<em class="adjusted-badge">adjusted</em>' : ''}</span>
               <div>Clock-in: ${escapeHtml(shortDateTime(entry.startedAt))}</div>
               <div>Clock-out: ${escapeHtml(entry.endedAt ? shortDateTime(entry.endedAt) : 'Active')}</div>
               <strong>${escapeHtml(minutesLabel(Math.max(0, (entry.durationMinutes ?? minutesBetween(entry.startedAt, entry.endedAt)) - (entry.pauseMinutes ?? 0))))}</strong>
             </div>
+            ${entry.overrideReason ? `<div class="muted">Session ${index + 1} adjustment: ${escapeHtml(entry.overrideReason)}</div>` : ''}
             ${(entry.pauseMinutes ?? 0) > 0 ? `<div class="muted">Session ${index + 1} pause: ${escapeHtml(minutesLabel(entry.pauseMinutes ?? 0))}</div>` : ''}
           `).join('')}
         </section>
@@ -577,6 +582,13 @@ export function dayTicketEstimatedTravelLabel(entry: DayTicketEntry): string {
 
 export function timeOnly(value?: string, fallback = '-'): string {
   return value ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : fallback;
+}
+
+export function ticketTimeLabel(value: string | undefined, dateFrom: string, dateTo: string, fallback = '-'): string {
+  if (!value) {
+    return fallback;
+  }
+  return dateFrom && dateTo && dateFrom !== dateTo ? shortDateTime(value) : timeOnly(value, fallback);
 }
 
 export function minutesLabel(minutes: number): string {
@@ -698,9 +710,13 @@ function dayTicketRouteStopTiming(stop: WorkOrderRecord['routeStops'][number], u
   return { timeIn, timeOut, timeInFromSchedule, timeOutFromSchedule, minutes: minutesBetween(timeIn, timeOut) };
 }
 
-function dayTicketTravelTiming(assignment: WorkOrderAssignment): Pick<DayTicketEntry, 'timeIn' | 'timeOut' | 'timeInFromSchedule' | 'timeOutFromSchedule' | 'minutes'> | null {
+function dayTicketTravelTiming(assignment: WorkOrderAssignment): Pick<DayTicketEntry, 'timeIn' | 'timeOut' | 'timeInFromSchedule' | 'timeOutFromSchedule' | 'minutes' | 'timingWarning'> | null {
   const timeIn = assignment.actualTravelStartedAt;
-  const timeOut = assignment.actualArrivedAt || assignment.actualWorkStartedAt;
+  const candidateTimeOut = assignment.actualArrivedAt || assignment.actualWorkStartedAt;
+  const timeOut = isSameOrAfter(candidateTimeOut, timeIn) ? candidateTimeOut : undefined;
+  const timingWarning = candidateTimeOut && !timeOut
+    ? 'Timing discrepancy: arrival/work start is before travel start'
+    : undefined;
   if (!timeIn) {
     return null;
   }
@@ -709,8 +725,18 @@ function dayTicketTravelTiming(assignment: WorkOrderAssignment): Pick<DayTicketE
     timeOut,
     timeInFromSchedule: false,
     timeOutFromSchedule: false,
-    minutes: minutesBetween(timeIn, timeOut)
+    minutes: minutesBetween(timeIn, timeOut),
+    timingWarning
   };
+}
+
+function isSameOrAfter(value?: string, floor?: string): boolean {
+  if (!value || !floor) {
+    return false;
+  }
+  const valueTime = new Date(value).getTime();
+  const floorTime = new Date(floor).getTime();
+  return !Number.isNaN(valueTime) && !Number.isNaN(floorTime) && valueTime >= floorTime;
 }
 
 function routeStopTypeLabel(stopType: string): string {

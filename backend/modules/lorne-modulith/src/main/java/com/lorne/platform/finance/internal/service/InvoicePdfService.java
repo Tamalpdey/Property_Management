@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -102,14 +104,18 @@ public class InvoicePdfService {
             String phone,
             String website,
             String address,
+            String taxRegistrationNumber,
+            BigDecimal invoiceTaxRate,
+            String provinceCode,
             String paymentTerms,
             String footer,
             byte[] logoBytes,
             Color primary,
-            Color accent
+            Color accent,
+            ZoneId zoneId
     ) {
         private static Brand defaults() {
-            return new Brand("Lorne PropertyOps", "", "", "", "", "", "", "Payment due by the invoice due date.", "Thank you for your business.", null, Color.fromHex("#0f766e"), Color.fromHex("#2563eb"));
+            return new Brand("Lorne PropertyOps", "", "", "", "", "", "", "", BigDecimal.ZERO, "", "Payment due by the invoice due date.", "Thank you for your business.", null, Color.fromHex("#0f766e"), Color.fromHex("#2563eb"), ZoneId.of("America/Toronto"));
         }
 
         private static Brand from(TenantSettingsView settings, byte[] logoBytes) {
@@ -123,12 +129,25 @@ public class InvoicePdfService {
                     value(settings.phone()),
                     value(settings.websiteUrl()),
                     address(settings),
+                    value(settings.taxRegistrationNumber()),
+                    settings.invoiceTaxRate() == null ? BigDecimal.ZERO : settings.invoiceTaxRate(),
+                    value(settings.provinceCode()),
                     firstNonBlank(settings.paymentTerms(), "Payment due by the invoice due date."),
                     firstNonBlank(settings.invoiceFooter(), "Thank you for your business."),
                     logoBytes,
                     Color.fromHex(settings.themePrimaryColor()),
-                    Color.fromHex(settings.themeAccentColor())
+                    Color.fromHex(settings.themeAccentColor()),
+                    InvoicePdfService.zoneId(settings.timezone())
             );
+        }
+
+        private String taxLabel() {
+            if (invoiceTaxRate == null || invoiceTaxRate.signum() <= 0) {
+                return "Tax";
+            }
+            var percent = invoiceTaxRate.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP);
+            var region = provinceCode.isBlank() ? "" : " (" + provinceCode + ")";
+            return "HST" + region + " " + percent.toPlainString() + "%";
         }
 
         private static String address(TenantSettingsView settings) {
@@ -191,12 +210,12 @@ public class InvoicePdfService {
             content.addRect(0, 0, PAGE_WIDTH, 16);
             content.fill();
             fill(0.03f, 0.05f, 0.12f);
-            centerTextAt("INVOICE", BOLD, 22, PAGE_HEIGHT - 82);
-            logoStamp(PAGE_WIDTH - MARGIN - 38, PAGE_HEIGHT - 84, 28);
+            rightTextAt("INVOICE", BOLD, 22, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 82);
+            logoStamp(MARGIN + 28, PAGE_HEIGHT - 84, 28);
             fill(brand.primary());
-            textAt(brand.name(), BOLD, 14, MARGIN, PAGE_HEIGHT - 104);
+            textAt(brand.name(), BOLD, 14, MARGIN + 68, PAGE_HEIGHT - 77);
             fill(0.35f, 0.42f, 0.52f);
-            textAt(firstNonBlank(brand.legalName(), brand.address()), FONT, 8, MARGIN, PAGE_HEIGHT - 118);
+            textAt(firstNonBlank(brand.legalName(), brand.address()), FONT, 8, MARGIN + 68, PAGE_HEIGHT - 91);
             y = PAGE_HEIGHT - 146;
         }
 
@@ -215,51 +234,139 @@ public class InvoicePdfService {
             });
             column(middleX, y, middleWidth, "Invoice to", new String[] {
                     value(invoice.ownerName()),
-                    label("Owner ID", invoice.ownerCode()),
                     firstNonBlank(invoice.ownerBillingEmail(), invoice.ownerEmail()),
-                    value(invoice.propertyName()),
-                    label("Property ID", invoice.propertyCode()),
-                    value(invoice.propertyAddress())
+                    value(invoice.ownerAddress())
             });
             meta(rightX, y, rightWidth, "Invoice number", invoice.invoiceNumber());
-            meta(rightX, y - 26, rightWidth, "Date of invoice", value(invoice.issuedOn()));
-            meta(rightX, y - 52, rightWidth, "Due date", value(invoice.dueOn()));
-            meta(rightX, y - 78, rightWidth, "Status", status(invoice.status()));
-            stroke(0.84f, 0.88f, 0.94f);
-            line(MARGIN, y - 106, PAGE_WIDTH - MARGIN, y - 106);
-            y -= 126;
-            fill(brand.primary());
-            textAt("PROPERTY AND WORK ORDER", BOLD, 8.5f, MARGIN, y);
-            fill(0.05f, 0.09f, 0.16f);
-            textAt(workSummary(invoice), BOLD, 9.5f, MARGIN, y - 16);
-            fill(0.35f, 0.42f, 0.52f);
-            textAt(propertySummary(invoice), FONT, 8.5f, MARGIN, y - 30);
-            var codeSummary = codeSummary(invoice);
-            if (!codeSummary.isBlank()) {
-                textAt(codeSummary, FONT, 8.5f, MARGIN, y - 43);
-                y -= 64;
-            } else {
-                y -= 52;
+            meta(rightX, y - 22, rightWidth, "Date of invoice", value(invoice.issuedOn()));
+            meta(rightX, y - 44, rightWidth, "Due date", value(invoice.dueOn()));
+            if (!brand.taxRegistrationNumber().isBlank()) {
+                meta(rightX, y - 66, rightWidth, "GST/HST number", brand.taxRegistrationNumber());
             }
+            stroke(0.84f, 0.88f, 0.94f);
+            line(MARGIN, y - 90, PAGE_WIDTH - MARGIN, y - 90);
+            y -= 110;
+            workSummaryPanel(invoice);
+        }
+
+        private void workSummaryPanel(InvoiceDto invoice) throws IOException {
+            var codeLines = wrap(codeSummary(invoice), 96);
+            var extraCodeHeight = Math.max(0, codeLines.length - 1) * 10f;
+            ensure(86 + extraCodeHeight);
+            var width = PAGE_WIDTH - (MARGIN * 2);
+            var height = 76f + extraCodeHeight;
+            fill(0.97f, 0.99f, 0.99f);
+            content.addRect(MARGIN, y - height, width, height);
+            content.fill();
+            fill(brand.primary());
+            content.addRect(MARGIN, y - height, 4, height);
+            content.fill();
+            stroke(0.84f, 0.88f, 0.94f);
+            rect(MARGIN, y - height, width, height);
+            fill(brand.primary());
+            textAt("PROPERTY AND WORK ORDER", BOLD, 8f, MARGIN + 12, y - 14);
+            fill(0.05f, 0.09f, 0.16f);
+            textAt(workSummaryTitle(invoice), BOLD, 11f, MARGIN + 12, y - 31);
+            fill(0.35f, 0.42f, 0.52f);
+            textAt(workNumberSummary(invoice), FONT, 8.3f, MARGIN + 12, y - 45);
+            textAt(propertySummary(invoice), FONT, 8.3f, MARGIN + 12, y - 58);
+            var lineY = y - 72;
+            for (var codeLine : codeLines) {
+                fill(brand.primary());
+                textAt(codeLine, BOLD, 7.5f, MARGIN + 12, lineY);
+                lineY -= 10;
+            }
+            y -= height + 18;
         }
 
         private void lineItems(InvoiceDto invoice) throws IOException {
             ensure(70);
-            tableHeader();
-            var rows = 0;
             if (invoice.lines().isEmpty()) {
+                tableHeader();
                 emptyTableRow("No line items have been added.");
-                rows++;
-            } else {
-                for (var line : invoice.lines()) {
-                    tableRow(line);
-                    rows++;
+                blankTableRow();
+                blankTableRow();
+                blankTableRow();
+                blankTableRow();
+                blankTableRow();
+                return;
+            }
+            var grouped = groupedLines(invoice);
+            for (var group : grouped) {
+                workOrderGroupHeader(group.title(), group.subtitle());
+                tableHeader();
+                for (var line : group.lines()) {
+                    tableRow(line, group.serviceName());
                 }
             }
-            while (rows < 6) {
-                blankTableRow();
-                rows++;
+        }
+
+        private List<LineGroup> groupedLines(InvoiceDto invoice) {
+            var workOrders = invoice.workOrders() == null
+                    ? List.<InvoiceDto.InvoiceWorkOrderDto>of()
+                    : invoice.workOrders();
+            var workOrderMap = new java.util.LinkedHashMap<UUID, InvoiceDto.InvoiceWorkOrderDto>();
+            var groupedLines = new java.util.LinkedHashMap<UUID, java.util.List<InvoiceDto.InvoiceLineDto>>();
+            for (var workOrder : workOrders) {
+                workOrderMap.put(workOrder.workOrderId(), workOrder);
+                groupedLines.put(workOrder.workOrderId(), new java.util.ArrayList<>());
             }
+            var additional = new java.util.ArrayList<InvoiceDto.InvoiceLineDto>();
+            for (var line : invoice.lines()) {
+                if (line.workOrderId() != null && groupedLines.containsKey(line.workOrderId())) {
+                    groupedLines.get(line.workOrderId()).add(line);
+                } else {
+                    additional.add(line);
+                }
+            }
+            var groups = new java.util.ArrayList<LineGroup>();
+            for (var entry : groupedLines.entrySet()) {
+                if (entry.getValue().isEmpty()) {
+                    continue;
+                }
+                var workOrder = workOrderMap.get(entry.getKey());
+                groups.add(new LineGroup(
+                        join(" | ", workOrder.workOrderNumber(), firstNonBlank(workOrder.serviceName(), workOrder.title())),
+                        join(" | ", label("Property ID", workOrder.propertyCode()), serviceWindow(workOrder)),
+                        firstNonBlank(workOrder.serviceName(), workOrder.title()),
+                        entry.getValue()
+                ));
+            }
+            if (!additional.isEmpty()) {
+                groups.add(new LineGroup("Additional charges", "Manual invoice lines not tied to a work order.", "", additional));
+            }
+            return groups.isEmpty() ? List.of(new LineGroup(workSummary(invoice), propertySummary(invoice), firstNonBlank(invoice.workOrderTitle(), invoice.propertyName()), invoice.lines())) : groups;
+        }
+
+        private void workOrderGroupHeader(String title, String subtitle) throws IOException {
+            ensure(52);
+            y -= 4;
+            var height = 42f;
+            fill(0.93f, 0.97f, 0.96f);
+            content.addRect(MARGIN, y - height, PAGE_WIDTH - (MARGIN * 2), height);
+            content.fill();
+            fill(brand.primary());
+            content.addRect(MARGIN, y - height, 4, height);
+            content.fill();
+            stroke(0.84f, 0.88f, 0.94f);
+            rect(MARGIN, y - height, PAGE_WIDTH - (MARGIN * 2), height);
+            fill(brand.primary());
+            textAt(title, BOLD, 9.5f, MARGIN + 10, y - 16);
+            fill(0.26f, 0.34f, 0.44f);
+            textAt(subtitle, FONT, 8f, MARGIN + 10, y - 31);
+            y -= height;
+        }
+
+        private String serviceWindow(InvoiceDto.InvoiceWorkOrderDto workOrder) {
+            if (workOrder.scheduledStart() == null) {
+                return "";
+            }
+            var formatter = DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.US).withZone(brand.zoneId());
+            var start = formatter.format(workOrder.scheduledStart());
+            if (workOrder.scheduledEnd() == null) {
+                return "Service: " + start;
+            }
+            return "Service: " + start + " - " + formatter.format(workOrder.scheduledEnd());
         }
 
         private void totals(InvoiceDto invoice) throws IOException {
@@ -277,7 +384,13 @@ public class InvoicePdfService {
             var rowY = top - 18;
             totalRow(x + 14, rowY, "Subtotal", money(invoice.subtotal()), false);
             rowY -= 18;
-            totalRow(x + 14, rowY, "Tax", money(invoice.taxTotal()), false);
+            totalRow(
+                    x + 14,
+                    rowY,
+                    brand.taxLabel(),
+                    money(invoice.taxTotal()),
+                    false
+            );
             rowY -= 12;
             stroke(0.84f, 0.88f, 0.94f);
             line(x + 14, rowY, x + boxWidth - 14, rowY);
@@ -366,7 +479,16 @@ public class InvoicePdfService {
         }
 
         private void tableHeader() throws IOException {
-            tableHeader("Description", "Qty", "Unit price", "Line total");
+            ensure(32);
+            fill(brand.primary());
+            content.addRect(MARGIN, y - 20, PAGE_WIDTH - (MARGIN * 2), 20);
+            content.fill();
+            fill(1f, 1f, 1f);
+            centerTextAt("QTY", BOLD, 7.5f, MARGIN + 26, y - 13);
+            textAt("DESCRIPTION", BOLD, 7.5f, MARGIN + 60, y - 13);
+            centerTextAt("RATE", BOLD, 7.5f, PAGE_WIDTH - 156, y - 13);
+            rightTextAt("AMOUNT", BOLD, 7.5f, PAGE_WIDTH - MARGIN - 8, y - 13);
+            y -= 20;
         }
 
         private void tableHeader(String first, String second, String third, String fourth) throws IOException {
@@ -382,21 +504,25 @@ public class InvoicePdfService {
             y -= 20;
         }
 
-        private void tableRow(InvoiceDto.InvoiceLineDto line) throws IOException {
+        private void tableRow(InvoiceDto.InvoiceLineDto line, String serviceName) throws IOException {
             var wrapped = wrap(line.description(), 66);
-            var rowHeight = Math.max(28, wrapped.length * 11 + 16);
+            var material = "MATERIAL".equalsIgnoreCase(value(line.lineType()));
+            var rowHeight = Math.max(40, wrapped.length * 11 + 28);
             ensure(rowHeight + 8);
-            rowBox(rowHeight, false);
-            var lineY = y - 13;
+            invoiceRowBox(rowHeight, material);
+            fill(material ? brand.accent() : brand.primary());
+            content.addRect(MARGIN, y - rowHeight, 3, rowHeight);
+            content.fill();
+            fill(material ? brand.accent() : brand.primary());
+            textAt(lineTypeLabel(line, serviceName), BOLD, 7.3f, MARGIN + 62, y - 13);
+            var lineY = y - 27;
             fill(0.05f, 0.09f, 0.16f);
             for (var text : wrapped) {
-                textAt(text, FONT, 8.5f, MARGIN + 8, lineY);
+                textAt(text, FONT, 8.5f, MARGIN + 62, lineY);
                 lineY -= 11;
             }
-            fill(0.35f, 0.42f, 0.52f);
-            textAt(typeLabel(line.lineType()) + (line.taxable() ? " | taxable" : ""), FONT, 7.5f, MARGIN + 8, y - rowHeight + 8);
             fill(0.05f, 0.09f, 0.16f);
-            centerTextAt(quantity(line.quantity()), FONT, 8.5f, PAGE_WIDTH - 222, y - 13);
+            centerTextAt(quantity(line.quantity()), FONT, 8.5f, MARGIN + 26, y - 13);
             rightTextAt(money(line.unitPrice()), FONT, 8.5f, PAGE_WIDTH - 126, y - 13);
             rightTextAt(money(line.lineTotal()), BOLD, 8.5f, PAGE_WIDTH - MARGIN - 8, y - 13);
             y -= rowHeight;
@@ -404,7 +530,7 @@ public class InvoicePdfService {
 
         private void emptyTableRow(String message) throws IOException {
             ensure(38);
-            rowBox(28, false);
+            invoiceRowBox(28, false);
             fill(0.35f, 0.42f, 0.52f);
             textAt(message, FONT, 8.5f, MARGIN + 8, y - 17);
             y -= 28;
@@ -412,8 +538,19 @@ public class InvoicePdfService {
 
         private void blankTableRow() throws IOException {
             ensure(24);
-            rowBox(22, false);
+            invoiceRowBox(22, false);
             y -= 22;
+        }
+
+        private void invoiceRowBox(float height, boolean shaded) throws IOException {
+            fill(shaded ? 0.90f : 1f, shaded ? 0.92f : 1f, shaded ? 0.95f : 1f);
+            content.addRect(MARGIN, y - height, PAGE_WIDTH - (MARGIN * 2), height);
+            content.fill();
+            stroke(0.88f, 0.91f, 0.95f);
+            rect(MARGIN, y - height, PAGE_WIDTH - (MARGIN * 2), height);
+            line(MARGIN + 52, y, MARGIN + 52, y - height);
+            line(PAGE_WIDTH - 196, y, PAGE_WIDTH - 196, y - height);
+            line(PAGE_WIDTH - 116, y, PAGE_WIDTH - 116, y - height);
         }
 
         private void rowBox(float height) throws IOException {
@@ -576,6 +713,17 @@ public class InvoicePdfService {
             }
             return builder.isEmpty() ? "LOGO" : builder.toString();
         }
+
+        private String lineTypeLabel(InvoiceDto.InvoiceLineDto line, String serviceName) {
+            var type = value(line.lineType()).toUpperCase(Locale.ROOT);
+            if ("LABOR".equals(type) && serviceName != null && !serviceName.isBlank()) {
+                return "LABOR - " + clean(serviceName);
+            }
+            return typeLabel(line.lineType()).toUpperCase(Locale.ROOT);
+        }
+
+        private record LineGroup(String title, String subtitle, String serviceName, List<InvoiceDto.InvoiceLineDto> lines) {
+        }
     }
 
     private static String typeLabel(String value) {
@@ -618,11 +766,27 @@ public class InvoicePdfService {
     }
 
     private static String workSummary(InvoiceDto invoice) {
+        var numbers = workNumberSummary(invoice);
+        var title = workSummaryTitle(invoice);
+        return join(" | ", title, numbers);
+    }
+
+    private static String workSummaryTitle(InvoiceDto invoice) {
         var workOrders = invoice.workOrders() == null
                 ? List.<InvoiceDto.InvoiceWorkOrderDto>of()
                 : invoice.workOrders();
         if (workOrders.size() <= 1) {
-            return join(" | ", invoice.workOrderNumber(), invoice.workOrderTitle());
+            return firstNonBlank(invoice.workOrderTitle(), "Single work order");
+        }
+        return "%d work orders included".formatted(workOrders.size());
+    }
+
+    private static String workNumberSummary(InvoiceDto invoice) {
+        var workOrders = invoice.workOrders() == null
+                ? List.<InvoiceDto.InvoiceWorkOrderDto>of()
+                : invoice.workOrders();
+        if (workOrders.size() <= 1) {
+            return value(invoice.workOrderNumber());
         }
         var numbers = workOrders.stream()
                 .map(InvoiceDto.InvoiceWorkOrderDto::workOrderNumber)
@@ -630,11 +794,7 @@ public class InvoicePdfService {
                 .limit(4)
                 .toList();
         var suffix = workOrders.size() > 4 ? " +" + (workOrders.size() - 4) + " more" : "";
-        return "%d work orders%s%s".formatted(
-                workOrders.size(),
-                numbers.isEmpty() ? "" : ": ",
-                String.join(", ", numbers) + suffix
-        );
+        return numbers.isEmpty() ? "" : String.join(", ", numbers) + suffix;
     }
 
     private static String propertySummary(InvoiceDto invoice) {
@@ -642,7 +802,7 @@ public class InvoicePdfService {
                 ? List.<InvoiceDto.InvoiceWorkOrderDto>of()
                 : invoice.workOrders();
         if (workOrders.size() <= 1) {
-            return join(" | ", invoice.propertyName(), invoice.propertyAddress());
+            return "";
         }
         var propertyNames = workOrders.stream()
                 .map(InvoiceDto.InvoiceWorkOrderDto::propertyName)
@@ -656,7 +816,34 @@ public class InvoicePdfService {
     }
 
     private static String codeSummary(InvoiceDto invoice) {
-        return join(" | ", label("Owner ID", invoice.ownerCode()), label("Property ID", invoice.propertyCode()));
+        return join(" | ", label("Owner ID", invoice.ownerCode()), label(propertyCodeLabel(invoice), propertyCodeSummary(invoice)));
+    }
+
+    private static String propertyCodeLabel(InvoiceDto invoice) {
+        return propertyCodes(invoice).size() > 1 ? "Property IDs" : "Property ID";
+    }
+
+    private static String propertyCodeSummary(InvoiceDto invoice) {
+        var codes = propertyCodes(invoice);
+        if (codes.isEmpty()) {
+            return value(invoice.propertyCode());
+        }
+        return String.join(", ", codes);
+    }
+
+    private static List<String> propertyCodes(InvoiceDto invoice) {
+        var workOrders = invoice.workOrders() == null
+                ? List.<InvoiceDto.InvoiceWorkOrderDto>of()
+                : invoice.workOrders();
+        var codes = workOrders.stream()
+                .map(InvoiceDto.InvoiceWorkOrderDto::propertyCode)
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+        if (codes.isEmpty() && invoice.propertyCode() != null && !invoice.propertyCode().isBlank()) {
+            return List.of(invoice.propertyCode());
+        }
+        return codes;
     }
 
     private static String label(String label, String value) {
@@ -675,5 +862,13 @@ public class InvoicePdfService {
             builder.append(value.trim());
         }
         return builder.toString();
+    }
+
+    private static ZoneId zoneId(String value) {
+        try {
+            return value == null || value.isBlank() ? ZoneId.of("America/Toronto") : ZoneId.of(value.trim());
+        } catch (RuntimeException exception) {
+            return ZoneId.of("America/Toronto");
+        }
     }
 }

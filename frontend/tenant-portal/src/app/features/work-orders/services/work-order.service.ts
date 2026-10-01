@@ -6,6 +6,7 @@ import type {
   CreateWorkOrderRequest,
   PhotoUploadRequest,
   PresignedPhotoUpload,
+  RefreshWorkOrderTravelEstimatesRequest,
   SendWorkOrderOwnerEmailRequest,
   WorkerAvailabilityOption,
   WorkOrderEvidenceActionRequest,
@@ -34,6 +35,12 @@ export class WorkOrderService {
     ) as Record<string, string>;
     return this.http
       .get<ApiResponse<WorkOrderRecord[]>>(`${environment.apiBaseUrl}/tenant/work-orders`, { params })
+      .pipe(map((response) => response.data));
+  }
+
+  refreshTravelEstimates(request: RefreshWorkOrderTravelEstimatesRequest) {
+    return this.http
+      .post<ApiResponse<WorkOrderRecord[]>>(`${environment.apiBaseUrl}/tenant/work-orders/travel-estimates/refresh`, request)
       .pipe(map((response) => response.data));
   }
 

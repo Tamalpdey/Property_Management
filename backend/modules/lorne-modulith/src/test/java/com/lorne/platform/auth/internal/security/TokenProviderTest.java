@@ -25,6 +25,7 @@ class TokenProviderTest {
                 userId,
                 tenantId,
                 "Field Worker",
+                null,
                 "worker@example.com",
                 List.of("FIELD_WORKER"),
                 List.of("FIELD_WORK", "UPLOAD_JOB_PHOTOS")

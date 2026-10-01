@@ -151,6 +151,17 @@ const CURRENT_WORKER_ID = 'current-worker';
         </section>
       }
 
+      @if (geofenceNotes().length) {
+        <section class="rounded-lg border border-amber-200 bg-amber-50 p-3 shadow-sm">
+          <p class="text-xs font-black uppercase tracking-wide text-amber-800">GPS/geofence audit</p>
+          <div class="mt-2 grid gap-2">
+            @for (note of geofenceNotes(); track note) {
+              <p class="rounded-lg bg-white/75 px-3 py-2 text-sm font-bold text-amber-950">{{ note }}</p>
+            }
+          </div>
+        </section>
+      }
+
       <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <div class="flex items-center justify-between gap-2">
           <div>
@@ -252,6 +263,10 @@ export class WorkerDayTicketComponent {
     return dayTicketTotalMinutes(this.rows(), this.shiftSummary());
   }
 
+  protected geofenceNotes(): string[] {
+    return this.jobs().flatMap((job) => geofenceNotesForJob(job));
+  }
+
   protected shiftSummary() {
     const entries = this.clockEntries();
     if (entries.length) {
@@ -311,7 +326,10 @@ export class WorkerDayTicketComponent {
   }
 
   private toWorkOrderRecord(job: WorkerAssignedJob): WorkOrderRecord {
-    const notes = job.fieldNotes?.map((note) => `${note.workerName}: ${note.note}`).join('\n');
+    const notes = [
+      ...(job.fieldNotes ?? []).map((note) => `${note.workerName}: ${note.note}`),
+      ...geofenceNotesForJob(job)
+    ].join('\n');
     const travelStartedAt = eventTime(job, ['WORKER_START_TRAVEL']);
     const arrivedAt = eventTime(job, ['WORKER_ARRIVE_ON_SITE']);
     const workStartedAt = eventTime(job, ['WORKER_START_WORK', 'WORKER_RESUME_WORK']);
@@ -408,6 +426,26 @@ function eventTime(job: WorkerAssignedJob, actions: string[]): string | undefine
     ?.filter((item) => actions.includes(item.action))
     .sort((left, right) => new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime())[0];
   return event?.occurredAt;
+}
+
+function geofenceNotesForJob(job: WorkerAssignedJob): string[] {
+  const outsideEvents = (job.executionEvents ?? [])
+    .filter((event) => String(event.metadata?.['geofenceStatus'] || '') === 'OUTSIDE_SITE');
+  if (!outsideEvents.length) {
+    return [];
+  }
+  const labels = Array.from(new Set(outsideEvents.map((event) => event.label).filter(Boolean)));
+  const visibleLabels = labels.slice(0, 3).join(', ');
+  const extraLabel = labels.length > 3 ? ', ...' : '';
+  const distances = outsideEvents
+    .map((event) => Number(event.metadata?.['geofenceDistanceMeters'] || 0))
+    .filter((distance) => distance > 0);
+  const farthestDistance = distances.length ? Math.max(...distances) : 0;
+  const distanceLabel = farthestDistance ? `, farthest ${Math.round(farthestDistance)}m from site` : '';
+  const actionLabel = outsideEvents.length === 1
+    ? visibleLabels || '1 action'
+    : `${outsideEvents.length} actions${visibleLabels ? ` (${visibleLabels}${extraLabel})` : ''}`;
+  return [`${job.workOrderNumber}: GPS outside site on ${actionLabel}${distanceLabel}.`];
 }
 
 function minutesBetween(start?: string, end?: string): number {

@@ -7,6 +7,7 @@ import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
 import com.lorne.platform.workorder.internal.dto.CancelWorkOrderRequest;
 import com.lorne.platform.workorder.internal.dto.CreateWorkOrderRequest;
+import com.lorne.platform.workorder.internal.dto.RefreshWorkOrderTravelEstimatesRequest;
 import com.lorne.platform.workorder.internal.dto.SendWorkOrderOwnerEmailRequest;
 import com.lorne.platform.workorder.internal.dto.WorkerAvailabilityDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderDto;
@@ -55,6 +56,15 @@ class WorkOrderManagementController {
             @RequestParam(required = false) LocalDate customTo
     ) {
         return ApiResponse.ok(workOrderManagementService.list(principal.tenantId(), statusFilter, dateFilter, customFrom, customTo));
+    }
+
+    @PostMapping("/travel-estimates/refresh")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    ApiResponse<List<WorkOrderDto>> refreshTravelEstimates(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestBody RefreshWorkOrderTravelEstimatesRequest request
+    ) {
+        return ApiResponse.ok(workOrderManagementService.refreshTravelEstimates(principal.tenantId(), principal.userId(), request));
     }
 
     @GetMapping("/availability")

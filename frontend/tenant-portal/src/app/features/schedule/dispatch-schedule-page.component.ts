@@ -1288,7 +1288,8 @@ export class DispatchSchedulePageComponent {
         inventoryItemId: material.inventoryItemId,
         description: material.description,
         quantity: material.quantity,
-        unitCost: material.unitCost
+        unitCost: material.unitCost,
+        billingCost: material.billingCost
       })),
       assetIds: workOrder.assets.map((asset) => asset.assetId),
       tasks: [],
@@ -1602,7 +1603,8 @@ function workOrderRequest(workOrder: WorkOrderRecord, overrides: Partial<CreateW
       inventoryItemId: material.inventoryItemId,
       description: material.description,
       quantity: material.quantity,
-      unitCost: material.unitCost
+      unitCost: material.unitCost,
+      billingCost: material.billingCost
     })),
     assetIds: workOrder.assets.map((asset) => asset.assetId),
     tasks: [],

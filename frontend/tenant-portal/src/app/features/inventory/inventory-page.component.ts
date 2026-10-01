@@ -217,6 +217,8 @@ export class InventoryPageComponent {
         categoryId: item.categoryId,
         name: item.name,
         unit: item.unit,
+        unitCost: item.unitCost,
+        billingCost: item.billingCost,
         quantityOnHand: this.adjustedQuantity ?? 0,
         reorderLevel: item.reorderLevel,
         storageLocation: item.storageLocation

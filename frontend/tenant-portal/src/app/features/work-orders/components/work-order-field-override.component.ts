@@ -8,6 +8,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { TextareaModule } from 'primeng/textarea';
 import type {
+  InventoryItem,
   WorkOrderAssignment,
   WorkOrderEvidence,
   WorkOrderFieldOverrideRequest,
@@ -16,6 +17,7 @@ import type {
   WorkOrderReviewFieldNote,
   WorkOrderRouteStop,
   WorkOrderTask,
+  WorkerRecord,
   WorkerActivityRecord
 } from '@lorne/contracts';
 import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
@@ -31,6 +33,7 @@ type AssignmentOverrideRow = {
   actualWorkStartedAt: string;
   actualFinishedAt: string;
   actualWorkMinutes: number | null;
+  newAssignment?: boolean;
 };
 
 type TaskOverrideRow = {
@@ -69,6 +72,7 @@ type MaterialOverrideRow = {
   usedAt: string;
   quantity: number | null;
   unitCost: number | null;
+  billingCost: number | null;
 };
 
 type FieldNoteOverrideRow = {
@@ -130,6 +134,10 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
             <p class="mt-1 max-w-4xl text-xs font-semibold leading-5 text-amber-900">
               Use this when dispatch needs to correct field timing, worker status, checklist completion, route stop timing, material usage, or worker notes after the worker app captured the wrong details.
             </p>
+            <div class="mt-2 flex flex-wrap gap-2 text-xs font-bold text-slate-700">
+              <span class="rounded-full border border-amber-200 bg-white px-2.5 py-1">Work order {{ data.workOrder.workOrderNumber }}</span>
+              <span class="rounded-full border border-amber-200 bg-white px-2.5 py-1">ID {{ data.workOrder.id }}</span>
+            </div>
           </div>
           <span class="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase text-amber-800 shadow-sm">
             Audited change
@@ -179,12 +187,24 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
       <div class="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4">
       <div class="grid gap-4">
         <section class="rounded-lg border border-slate-200 bg-white p-4" [class.hidden]="sectionTab() !== 'WORKERS'">
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <p class="text-xs font-bold uppercase tracking-wide text-teal-700">Worker execution</p>
               <h4 class="text-lg font-bold text-slate-950">Assignment status and actual timing</h4>
             </div>
-            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{{ assignmentRows().length }} workers</span>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{{ assignmentRows().length }} workers</span>
+              <select
+                class="h-10 min-w-[14rem] rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800"
+                [(ngModel)]="newWorkerId"
+              >
+                <option value="">Add worker to this work order</option>
+                @for (worker of availableWorkerOptions(); track worker.value) {
+                  <option [value]="worker.value">{{ worker.label }}</option>
+                }
+              </select>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-user-plus" label="Add worker" [disabled]="!newWorkerId" (click)="addAssignmentWorker()"></button>
+            </div>
           </div>
 
           <div class="mt-3 grid gap-3">
@@ -207,15 +227,15 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                 <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)_minmax(12rem,1fr)_8rem]">
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Arrived
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.actualArrivedAt" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.actualArrivedAt" />
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Work started
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.actualWorkStartedAt" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.actualWorkStartedAt" />
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Finished
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.actualFinishedAt" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.actualFinishedAt" />
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Minutes
@@ -273,15 +293,15 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Arrived
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.arrivedAt" [disabled]="row.deleted" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.arrivedAt" [disabled]="row.deleted" />
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Completed
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.completedAt" [disabled]="row.deleted" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.completedAt" [disabled]="row.deleted" />
                   </label>
                   <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                     Skipped
-                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.skippedAt" [disabled]="row.deleted" />
+                    <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.skippedAt" [disabled]="row.deleted" />
                   </label>
                   <label class="flex h-10 items-center gap-2 self-end rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm">
                     <p-checkbox [(ngModel)]="row.visibleToWorker" [binary]="true" [disabled]="row.deleted" />
@@ -337,11 +357,11 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
               <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                   Started
-                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.startedAt" [disabled]="row.deleted" />
+                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.startedAt" [disabled]="row.deleted" />
                 </label>
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                   Ended
-                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.endedAt" [disabled]="row.deleted" />
+                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.endedAt" [disabled]="row.deleted" />
                 </label>
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                   Location
@@ -414,13 +434,33 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
           <div class="mt-3 grid gap-3">
             @for (row of materialRows(); track row.materialId) {
               <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div class="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_7rem_10rem_13rem_auto] xl:items-end">
+                <div class="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_7rem_9rem_9rem_13rem_auto] xl:items-end">
                 <div class="min-w-0">
                   @if (row.newRow) {
-                    <label class="block text-xs font-bold uppercase tracking-wide text-slate-600">
-                      Material description
-                      <input class="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-800" [(ngModel)]="row.description" placeholder="Example: Chlorine tablets 3 in" />
-                    </label>
+                    <div class="grid gap-2">
+                      <label class="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                        Inventory item
+                        <p-select
+                          class="mt-1 w-full"
+                          [options]="inventoryItems()"
+                          optionLabel="name"
+                          optionValue="id"
+                          [filter]="true"
+                          filterBy="name,categoryName,storageLocation,unit"
+                          [showClear]="true"
+                          appendTo="body"
+                          [(ngModel)]="row.inventoryItemId"
+                          placeholder="Search inventory or use ad-hoc"
+                          (ngModelChange)="syncOverrideMaterial(row)"
+                        />
+                      </label>
+                      @if (!row.inventoryItemId) {
+                        <label class="block text-xs font-bold uppercase tracking-wide text-slate-600">
+                          Ad-hoc description
+                          <input class="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-800" [(ngModel)]="row.description" placeholder="Material not found in inventory" />
+                        </label>
+                      }
+                    </div>
                   } @else {
                     <p class="font-bold text-slate-950">{{ row.label }}</p>
                     <p class="mt-1 truncate text-xs font-semibold text-slate-500">{{ row.description }}</p>
@@ -431,12 +471,16 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
                   <p-inputNumber styleClass="mt-1 w-full" inputStyleClass="w-full" [(ngModel)]="row.quantity" [min]="0" [useGrouping]="false" />
                 </label>
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
-                  Unit cost
+                  Purchase cost
                   <p-inputNumber styleClass="mt-1 w-full" inputStyleClass="w-full" [(ngModel)]="row.unitCost" [min]="0" mode="currency" currency="CAD" />
                 </label>
                 <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
+                  Billing cost
+                  <p-inputNumber styleClass="mt-1 w-full" inputStyleClass="w-full" [(ngModel)]="row.billingCost" [min]="0" mode="currency" currency="CAD" />
+                </label>
+                <label class="text-xs font-bold uppercase tracking-wide text-slate-600">
                   Used at
-                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [(ngModel)]="row.usedAt" />
+                  <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="datetime-local" [max]="maxLocalDateTime()" [(ngModel)]="row.usedAt" />
                 </label>
                 <label class="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm">
                   <p-checkbox [(ngModel)]="row.used" [binary]="true" />
@@ -588,6 +632,8 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
 })
 export class WorkOrderFieldOverrideComponent {
   readonly review = input<WorkOrderReview | null>(null);
+  readonly workers = input<WorkerRecord[]>([]);
+  readonly inventoryItems = input<InventoryItem[]>([]);
   readonly busy = input(false);
   readonly initialTab = input<OverrideSectionTab>('WORKERS');
   readonly save = output<WorkOrderFieldOverrideRequest>();
@@ -598,6 +644,7 @@ export class WorkOrderFieldOverrideComponent {
   protected evidenceCaption = '';
   protected receiptVendor = '';
   protected receiptAmount: number | null = null;
+  protected newWorkerId = '';
   protected readonly localEvidenceError = signal('');
   protected readonly assignmentRows = signal<AssignmentOverrideRow[]>([]);
   protected readonly taskRows = signal<TaskOverrideRow[]>([]);
@@ -652,6 +699,15 @@ export class WorkOrderFieldOverrideComponent {
       value: worker.workerId
     }))
   );
+  protected readonly availableWorkerOptions = computed(() => {
+    const assignedIds = new Set(this.assignmentRows().map((worker) => worker.workerId));
+    return this.workers()
+      .filter((worker) => worker.status === 'ACTIVE' && !assignedIds.has(worker.id))
+      .map((worker) => ({
+        label: `${worker.displayName}${worker.email ? ` · ${worker.email}` : ''}`,
+        value: worker.id
+      }));
+  });
 
   constructor() {
     effect(() => this.sectionTab.set(this.initialTab()));
@@ -668,6 +724,30 @@ export class WorkOrderFieldOverrideComponent {
         note: ''
       }
     ]);
+  }
+
+  protected addAssignmentWorker(): void {
+    const worker = this.workers().find((candidate) => candidate.id === this.newWorkerId);
+    if (!worker) {
+      return;
+    }
+    this.assignmentRows.update((rows) => [
+      ...rows,
+      {
+        workerId: worker.id,
+        workerName: worker.displayName,
+        workerEmail: worker.email,
+        assignmentStatus: 'ASSIGNED',
+        leadWorker: rows.length === 0,
+        notes: 'Added by operations override',
+        actualArrivedAt: '',
+        actualWorkStartedAt: '',
+        actualFinishedAt: '',
+        actualWorkMinutes: null,
+        newAssignment: true
+      }
+    ]);
+    this.newWorkerId = '';
   }
 
   protected addRouteStop(): void {
@@ -702,7 +782,8 @@ export class WorkOrderFieldOverrideComponent {
         used: true,
         usedAt: this.toLocalDateTime(new Date().toISOString()),
         quantity: 1,
-        unitCost: 0
+        unitCost: null,
+        billingCost: null
       }
     ]);
   }
@@ -727,6 +808,17 @@ export class WorkOrderFieldOverrideComponent {
         endedAt: ''
       }
     ]);
+  }
+
+  protected syncOverrideMaterial(row: MaterialOverrideRow): void {
+    const item = this.inventoryItems().find((candidate) => candidate.id === row.inventoryItemId);
+    if (!item) {
+      return;
+    }
+    row.label = item.name;
+    row.description = item.name;
+    row.unitCost = item.unitCost ?? null;
+    row.billingCost = item.billingCost ?? null;
   }
 
   protected toggleRouteDeleted(row: RouteStopOverrideRow): void {
@@ -806,7 +898,8 @@ export class WorkOrderFieldOverrideComponent {
         used: row.used,
         usedAt: this.fromLocalDateTime(row.usedAt),
         quantity: row.quantity ?? undefined,
-        unitCost: row.unitCost ?? undefined
+        unitCost: row.unitCost ?? undefined,
+        billingCost: row.billingCost ?? undefined
       })),
       fieldNotes: this.fieldNoteRows()
         .filter((row) => row.note.trim())
@@ -884,7 +977,8 @@ export class WorkOrderFieldOverrideComponent {
       actualArrivedAt: this.toLocalDateTime(assignment.actualArrivedAt),
       actualWorkStartedAt: this.toLocalDateTime(assignment.actualWorkStartedAt),
       actualFinishedAt: this.toLocalDateTime(assignment.actualFinishedAt),
-      actualWorkMinutes: assignment.actualWorkMinutes ?? null
+      actualWorkMinutes: assignment.actualWorkMinutes ?? null,
+      newAssignment: false
     };
   }
 
@@ -928,7 +1022,8 @@ export class WorkOrderFieldOverrideComponent {
       used: material.used,
       usedAt: this.toLocalDateTime(material.usedAt),
       quantity: material.quantity ?? null,
-      unitCost: material.unitCost ?? null
+      unitCost: material.unitCost ?? null,
+      billingCost: material.billingCost ?? null
     };
   }
 
@@ -977,5 +1072,9 @@ export class WorkOrderFieldOverrideComponent {
     }
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+
+  protected maxLocalDateTime(): string {
+    return this.toLocalDateTime(new Date().toISOString());
   }
 }

@@ -8,7 +8,9 @@ import com.lorne.platform.worker.internal.dto.CreateWorkerRequest;
 import com.lorne.platform.worker.internal.dto.UpdateWorkerStatusRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerActivityDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockEntryOverrideRequest;
 import com.lorne.platform.worker.internal.dto.WorkerClockEntryDto;
+import com.lorne.platform.worker.internal.dto.WorkerClockedInTodayDto;
 import com.lorne.platform.worker.internal.dto.WorkerDto;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -76,6 +78,59 @@ public class WorkerManagementService {
     }
 
     @Transactional(readOnly = true)
+    public List<WorkerClockedInTodayDto> clockedInToday(UUID tenantId) {
+        return jdbcTemplate.query("""
+                SELECT wsce.worker_id,
+                       COALESCE(u.display_name, w.display_name) AS worker_name,
+                       w.employee_number,
+                       COALESCE(u.email, w.email) AS email,
+                       wsce.started_at,
+                       open_pause.started_at AS paused_at,
+                       floor(extract(epoch from (now() - wsce.started_at)) / 60)::bigint AS gross_minutes,
+                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes,
+                       GREATEST(
+                           0,
+                           floor(extract(epoch from (now() - wsce.started_at)) / 60)::bigint - COALESCE(pauses.pause_minutes, 0)::bigint
+                       ) AS net_minutes
+                FROM worker_shift_clock_entries wsce
+                JOIN workers w ON w.id = wsce.worker_id AND w.tenant_id = wsce.tenant_id
+                LEFT JOIN app_users u ON u.id = w.user_id
+                LEFT JOIN LATERAL (
+                    SELECT wscp.started_at
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                      AND wscp.ended_at IS NULL
+                    ORDER BY wscp.started_at DESC
+                    LIMIT 1
+                ) open_pause ON true
+                LEFT JOIN LATERAL (
+                    SELECT floor(sum(extract(epoch from (COALESCE(wscp.ended_at, now()) - wscp.started_at))) / 60)::bigint AS pause_minutes
+                    FROM worker_shift_clock_pauses wscp
+                    WHERE wscp.tenant_id = wsce.tenant_id
+                      AND wscp.worker_id = wsce.worker_id
+                      AND wscp.shift_clock_entry_id = wsce.id
+                ) pauses ON true
+                WHERE wsce.tenant_id = ?
+                  AND wsce.ended_at IS NULL
+                  AND w.status = 'ACTIVE'
+                ORDER BY wsce.started_at, COALESCE(u.display_name, w.display_name)
+                """, (rs, rowNum) -> new WorkerClockedInTodayDto(
+                rs.getObject("worker_id", UUID.class),
+                rs.getString("worker_name"),
+                rs.getString("employee_number"),
+                rs.getString("email"),
+                instant("started_at", rs),
+                rs.getTimestamp("paused_at") != null,
+                instant("paused_at", rs),
+                (Long) rs.getObject("gross_minutes"),
+                (Long) rs.getObject("pause_minutes"),
+                (Long) rs.getObject("net_minutes")
+        ), tenantId);
+    }
+
+    @Transactional(readOnly = true)
     public List<WorkerClockEntryDto> clockEntries(UUID tenantId, UUID workerId, LocalDate from, LocalDate to) {
         requireWorker(tenantId, workerId);
         var fromDate = from == null ? LocalDate.now() : from;
@@ -88,7 +143,9 @@ public class WorkerManagementService {
                        CASE WHEN wsce.ended_at IS NULL THEN NULL
                             ELSE floor(extract(epoch from (wsce.ended_at - wsce.started_at)) / 60)::bigint
                        END AS duration_minutes,
-                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes
+                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes,
+                       override_audit.reason AS override_reason,
+                       override_audit.created_at AS override_updated_at
                 FROM worker_shift_clock_entries wsce
                 JOIN tenants t ON t.id = wsce.tenant_id
                 LEFT JOIN LATERAL (
@@ -99,6 +156,17 @@ public class WorkerManagementService {
                       AND wscp.shift_clock_entry_id = wsce.id
                       AND wscp.ended_at IS NOT NULL
                 ) pauses ON true
+                LEFT JOIN LATERAL (
+                    SELECT audit_logs.metadata ->> 'reason' AS reason, audit_logs.created_at
+                    FROM audit_logs
+                    WHERE audit_logs.tenant_id = wsce.tenant_id
+                      AND audit_logs.resource_type = 'WORKER'
+                      AND audit_logs.resource_id = wsce.worker_id
+                      AND audit_logs.action = 'WORKER_CLOCK_ENTRY_OVERRIDDEN'
+                      AND audit_logs.metadata ->> 'clockEntryId' = wsce.id::text
+                    ORDER BY audit_logs.created_at DESC
+                    LIMIT 1
+                ) override_audit ON true
                 WHERE wsce.tenant_id = ?
                   AND wsce.worker_id = ?
                   AND (wsce.started_at AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date <= ?
@@ -110,8 +178,52 @@ public class WorkerManagementService {
                 instant("started_at", rs),
                 instant("ended_at", rs),
                 (Long) rs.getObject("duration_minutes"),
-                (Long) rs.getObject("pause_minutes")
+                (Long) rs.getObject("pause_minutes"),
+                rs.getTimestamp("override_updated_at") != null,
+                rs.getString("override_reason"),
+                instant("override_updated_at", rs)
         ), tenantId, workerId, toDate, fromDate);
+    }
+
+    @Transactional
+    public List<WorkerClockEntryDto> overrideClockEntry(UUID tenantId, UUID actorUserId, UUID workerId, UUID entryId, WorkerClockEntryOverrideRequest request) {
+        requireWorker(tenantId, workerId);
+        if (request == null) {
+            throw new BadRequestException("Clock entry override details are required.");
+        }
+        var reason = blankToNull(request.reason());
+        if (reason == null) {
+            throw new BadRequestException("Override reason is required.");
+        }
+        var startedAt = request.startedAt();
+        var endedAt = request.endedAt();
+        if (startedAt == null || endedAt == null) {
+            throw new BadRequestException("Clock-in and clock-out times are required.");
+        }
+        if (!endedAt.isAfter(startedAt)) {
+            throw new BadRequestException("Clock-out time must be after clock-in time.");
+        }
+        var now = Instant.now();
+        if (startedAt.isAfter(now) || endedAt.isAfter(now)) {
+            throw new BadRequestException("Clock-in and clock-out adjustments cannot be in the future.");
+        }
+        var previous = clockEntrySnapshot(tenantId, workerId, entryId);
+        if (overlapsAnotherClockEntry(tenantId, workerId, entryId, startedAt, endedAt)) {
+            throw new BadRequestException("Adjusted shift time overlaps another shift entry for this worker.");
+        }
+        jdbcTemplate.update("""
+                UPDATE worker_shift_clock_entries
+                SET started_at = ?,
+                    ended_at = ?,
+                    updated_at = now(),
+                    updated_by = ?
+                WHERE tenant_id = ? AND worker_id = ? AND id = ?
+                """, timestamp(startedAt), timestamp(endedAt), actorUserId, tenantId, workerId, entryId);
+        auditWriter.record(tenantId, actorUserId, "WORKER_CLOCK_ENTRY_OVERRIDDEN", "WORKER", workerId, clockEntryOverrideMetadata(
+                entryId, previous, startedAt, endedAt, reason
+        ));
+        var date = startedAt.atZone(tenantZoneId(tenantId)).toLocalDate();
+        return clockEntries(tenantId, workerId, date, date);
     }
 
     @Transactional(readOnly = true)
@@ -684,6 +796,34 @@ public class WorkerManagementService {
         return activities.isEmpty() ? null : activities.getFirst();
     }
 
+    private ClockEntrySnapshot clockEntrySnapshot(UUID tenantId, UUID workerId, UUID entryId) {
+        var entries = jdbcTemplate.query("""
+                SELECT id, started_at, ended_at
+                FROM worker_shift_clock_entries
+                WHERE tenant_id = ? AND worker_id = ? AND id = ?
+                """, (rs, rowNum) -> new ClockEntrySnapshot(
+                rs.getObject("id", UUID.class),
+                instant("started_at", rs),
+                instant("ended_at", rs)
+        ), tenantId, workerId, entryId);
+        if (entries.isEmpty()) {
+            throw new ResourceNotFoundException("Worker clock entry was not found.");
+        }
+        return entries.getFirst();
+    }
+
+    private boolean overlapsAnotherClockEntry(UUID tenantId, UUID workerId, UUID entryId, Instant startedAt, Instant endedAt) {
+        var count = jdbcTemplate.queryForObject("""
+                SELECT count(*)::int
+                FROM worker_shift_clock_entries
+                WHERE tenant_id = ?
+                  AND worker_id = ?
+                  AND id <> ?
+                  AND tstzrange(started_at, COALESCE(ended_at, now()), '[)') && tstzrange(?::timestamptz, ?::timestamptz, '[)')
+                """, Integer.class, tenantId, workerId, entryId, timestamp(startedAt), timestamp(endedAt));
+        return count != null && count > 0;
+    }
+
     private Map<String, Object> activityOverrideMetadata(
             UUID activityId,
             String action,
@@ -705,6 +845,25 @@ public class WorkerManagementService {
         if (before != null) {
             metadata.put("beforeActivityType", before.activityType());
             metadata.put("beforeTitle", before.title());
+            metadata.put("beforeStartedAt", before.startedAt() == null ? "" : before.startedAt().toString());
+            metadata.put("beforeEndedAt", before.endedAt() == null ? "" : before.endedAt().toString());
+        }
+        return metadata;
+    }
+
+    private Map<String, Object> clockEntryOverrideMetadata(
+            UUID entryId,
+            ClockEntrySnapshot before,
+            Instant startedAt,
+            Instant endedAt,
+            String reason
+    ) {
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("clockEntryId", entryId == null ? "" : entryId.toString());
+        metadata.put("reason", reason);
+        metadata.put("startedAt", startedAt == null ? "" : startedAt.toString());
+        metadata.put("endedAt", endedAt == null ? "" : endedAt.toString());
+        if (before != null) {
             metadata.put("beforeStartedAt", before.startedAt() == null ? "" : before.startedAt().toString());
             metadata.put("beforeEndedAt", before.endedAt() == null ? "" : before.endedAt().toString());
         }
@@ -748,6 +907,13 @@ public class WorkerManagementService {
             String locationName,
             String address,
             String notes,
+            Instant startedAt,
+            Instant endedAt
+    ) {
+    }
+
+    private record ClockEntrySnapshot(
+            UUID id,
             Instant startedAt,
             Instant endedAt
     ) {

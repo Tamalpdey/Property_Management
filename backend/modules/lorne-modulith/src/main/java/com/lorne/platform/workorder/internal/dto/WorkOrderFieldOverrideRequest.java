@@ -73,7 +73,8 @@ public record WorkOrderFieldOverrideRequest(
             Boolean used,
             Instant usedAt,
             BigDecimal quantity,
-            BigDecimal unitCost
+            BigDecimal unitCost,
+            BigDecimal billingCost
     ) {
     }
 

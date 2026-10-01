@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, effect, input, output } from '@angu
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { SelectModule } from 'primeng/select';
 import type {
   WorkOrderStatus,
   WorkOrderSource,
@@ -25,7 +26,7 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
 @Component({
   selector: 'lorne-work-order-form',
   standalone: true,
-  imports: [ButtonModule, FormsModule, InputTextModule, VoiceNoteButtonComponent],
+  imports: [ButtonModule, FormsModule, InputTextModule, SelectModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="flex h-full min-h-0 flex-col gap-3" (ngSubmit)="submit()">
@@ -86,21 +87,49 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
           <div class="grid gap-2 md:grid-cols-2">
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Owner <span class="text-red-600">*</span></span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="ownerId" required [(ngModel)]="ownerId" (ngModelChange)="onOwnerChange()">
-                <option value="">Select owner</option>
-                @for (owner of ownerOptions(); track owner.id) {
-                  <option [value]="owner.id">{{ owner.name }}</option>
-                }
-              </select>
+              <p-select
+                styleClass="w-full"
+                name="ownerId"
+                [options]="ownerOptions()"
+                optionLabel="name"
+                optionValue="id"
+                filterBy="name,ownerCode"
+                [filter]="true"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="Search owner"
+                required
+                [(ngModel)]="ownerId"
+                (ngModelChange)="onOwnerChange()"
+              />
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Property <span class="text-red-600">*</span></span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="propertyId" required [(ngModel)]="form.propertyId" (ngModelChange)="onPropertyChange()">
-                <option value="">Select property</option>
-                @for (property of propertyOptions(); track property.id) {
-                  <option [value]="property.id">{{ property.name }} · {{ property.addressLine1 }}</option>
-                }
-              </select>
+              <p-select
+                styleClass="w-full"
+                name="propertyId"
+                [options]="propertyOptions()"
+                optionLabel="name"
+                optionValue="id"
+                filterBy="name,addressLine1,city,propertyCode,ownerName,ownerCode"
+                [filter]="true"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="Search property"
+                required
+                [(ngModel)]="form.propertyId"
+                (ngModelChange)="onPropertyChange()"
+              >
+                <ng-template pTemplate="item" let-property>
+                  <div>
+                    <p class="font-bold text-slate-900">{{ property.name }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ property.propertyCode }} · {{ property.addressLine1 }} · {{ property.ownerName }}</p>
+                  </div>
+                </ng-template>
+                <ng-template pTemplate="selectedItem" let-property>
+                  <span>{{ property?.name || 'Search property' }}</span>
+                </ng-template>
+              </p-select>
             </label>
           </div>
 
@@ -212,37 +241,10 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
               <input class="w-full border border-slate-300 px-3 py-2" name="scheduledEnd" type="datetime-local" [(ngModel)]="scheduledEnd" />
             </label>
           </div>
-          @if (workOrder()?.source === 'RECURRING') {
-            <p class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
-              This is a draft generated from a recurring work template. Recurrence rules are managed from the Schedule board.
-            </p>
-          }
           @if (form.workOrderType === 'PICKUP_DELIVERY') {
             <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
               Pickup orders are one-off dispatch work. Add the real stops: pickup, delivery, return, supplier, warehouse, or keys.
             </p>
-          }
-
-          @if (form.workOrderType !== 'PICKUP_DELIVERY') {
-          <section class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-3">
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Recurrence</span>
-              <select class="w-full border border-slate-300 px-3 py-2" name="recurrenceRule" [(ngModel)]="form.recurrenceRule">
-                <option value="">None</option>
-                <option value="DAILY">Daily</option>
-                <option value="WEEKLY">Weekly</option>
-                <option value="MONTHLY">Monthly</option>
-              </select>
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Every</span>
-              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceInterval" type="number" min="1" [(ngModel)]="form.recurrenceInterval" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-semibold text-slate-700">Until</span>
-              <input class="w-full border border-slate-300 px-3 py-2" name="recurrenceUntil" type="date" [(ngModel)]="form.recurrenceUntil" />
-            </label>
-          </section>
           }
 
           <section class="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
@@ -516,16 +518,35 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
               </div>
             </div>
             @for (material of materialRows; track material.id; let index = $index) {
-              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-[1fr_1fr_7rem_8rem_auto]">
-                <select class="w-full border border-slate-300 px-2 py-2 text-sm" name="materialItem{{ material.id }}" [(ngModel)]="material.inventoryItemId" (ngModelChange)="syncMaterialDescription(material)">
-                  <option value="">Custom material</option>
-                  @for (item of inventoryOptions(material); track item.id) {
-                    <option [value]="item.id">{{ item.name }} · {{ item.quantityOnHand }} {{ item.unit }}</option>
-                  }
-                </select>
-                <input pInputText class="w-full" name="materialDescription{{ material.id }}" placeholder="Description" [(ngModel)]="material.description" />
+              <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 xl:grid-cols-[1fr_1fr_7rem_8rem_8rem_auto]">
+                <p-select
+                  styleClass="w-full"
+                  name="materialItem{{ material.id }}"
+                  [options]="inventoryOptions(material)"
+                  optionLabel="name"
+                  optionValue="id"
+                  filterBy="name,categoryName,storageLocation,unit"
+                  [filter]="true"
+                  [showClear]="true"
+                  appendTo="body"
+                  placeholder="Search inventory or use ad-hoc"
+                  [(ngModel)]="material.inventoryItemId"
+                  (ngModelChange)="syncMaterialDescription(material)"
+                >
+                  <ng-template pTemplate="item" let-item>
+                    <div>
+                      <p class="font-bold text-slate-900">{{ item.name }}</p>
+                      <p class="text-xs font-semibold text-slate-500">{{ item.categoryName || 'Inventory' }} · {{ item.quantityOnHand }} {{ item.unit }}{{ item.billingCost !== undefined && item.billingCost !== null ? ' · bills $' + item.billingCost : '' }}{{ item.storageLocation ? ' · ' + item.storageLocation : '' }}</p>
+                    </div>
+                  </ng-template>
+                  <ng-template pTemplate="selectedItem" let-item>
+                    <span>{{ item?.name || 'Custom material' }}</span>
+                  </ng-template>
+                </p-select>
+                <input pInputText class="w-full" name="materialDescription{{ material.id }}" placeholder="Ad-hoc description" [(ngModel)]="material.description" />
                 <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="materialQuantity{{ material.id }}" type="number" min="0.01" step="0.01" [(ngModel)]="material.quantity" />
-                <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="materialCost{{ material.id }}" type="number" min="0" step="0.01" placeholder="Unit cost" [(ngModel)]="material.unitCost" />
+                <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="materialCost{{ material.id }}" type="number" min="0" step="0.01" placeholder="Purchase cost" [(ngModel)]="material.unitCost" />
+                <input class="w-full border border-slate-300 px-2 py-2 text-sm" name="materialBillingCost{{ material.id }}" type="number" min="0" step="0.01" placeholder="Billing cost" [(ngModel)]="material.billingCost" />
                 <button pButton type="button" severity="secondary" icon="pi pi-trash" [text]="true" (click)="removeMaterial(index)"></button>
               </div>
             } @empty {
@@ -671,11 +692,11 @@ export class WorkOrderFormComponent {
   }
 
   protected ownerOptions(): OwnerOption[] {
-    const owners = new Map<string, string>();
+    const owners = new Map<string, OwnerOption>();
     for (const property of this.properties()) {
-      owners.set(property.ownerId, property.ownerName);
+      owners.set(property.ownerId, { id: property.ownerId, name: property.ownerName, ownerCode: property.ownerCode });
     }
-    return [...owners].map(([id, name]) => ({ id, name })).sort((left, right) => left.name.localeCompare(right.name));
+    return [...owners.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   protected propertyOptions(): PropertyRecord[] {
@@ -733,7 +754,7 @@ export class WorkOrderFormComponent {
   protected filteredInventoryItems(): InventoryItem[] {
     const query = normalized(this.inventorySearch);
     return this.inventoryItems().filter((item) => {
-      const matchesSearch = !query || normalized([item.name, item.categoryName, item.unit].filter(Boolean).join(' ')).includes(query);
+      const matchesSearch = !query || normalized([item.name, item.categoryName, item.storageLocation, item.unit, item.unitCost?.toString(), item.billingCost?.toString()].filter(Boolean).join(' ')).includes(query);
       const matchesStock = this.inventoryStockFilter === 'ALL'
         || (this.inventoryStockFilter === 'AVAILABLE' && item.quantityOnHand > 0)
         || (this.inventoryStockFilter === 'LOW' && this.isLowStock(item));
@@ -828,9 +849,9 @@ export class WorkOrderFormComponent {
       requesterName: this.form.requesterName?.trim() || undefined,
       requesterEmail: this.form.requesterEmail?.trim() || undefined,
       requesterPhone: this.form.requesterPhone?.trim() || undefined,
-      recurrenceRule: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceRule : undefined,
-      recurrenceInterval: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceInterval || 1 : undefined,
-      recurrenceUntil: !isPickupDelivery && this.form.recurrenceRule ? this.form.recurrenceUntil || undefined : undefined,
+      recurrenceRule: undefined,
+      recurrenceInterval: undefined,
+      recurrenceUntil: undefined,
       allowAvailabilityOverride: this.allowAvailabilityOverride || undefined,
       allowAvailabilityOverrideReason: this.allowAvailabilityOverride ? this.availabilityOverrideReason.trim() : undefined,
       scheduledStart: this.scheduledStart ? new Date(this.scheduledStart).toISOString() : undefined,
@@ -842,7 +863,8 @@ export class WorkOrderFormComponent {
           inventoryItemId: material.inventoryItemId || undefined,
           description: material.description.trim() || undefined,
           quantity: Number(material.quantity) || 1,
-          unitCost: material.unitCost === undefined || material.unitCost === null ? undefined : Number(material.unitCost)
+          unitCost: material.unitCost === undefined || material.unitCost === null ? undefined : Number(material.unitCost),
+          billingCost: material.billingCost === undefined || material.billingCost === null ? undefined : Number(material.billingCost)
         })),
       assetIds: [...this.selectedAssetIds],
       tasks: [],
@@ -1160,11 +1182,19 @@ export class WorkOrderFormComponent {
   }
 
   protected syncMaterialDescription(material: MaterialRow): void {
-    if (material.description.trim()) {
+    const item = this.inventoryItems().find((candidate) => candidate.id === material.inventoryItemId);
+    if (!item) {
       return;
     }
-    const item = this.inventoryItems().find((candidate) => candidate.id === material.inventoryItemId);
-    material.description = item?.name || '';
+    if (!material.description.trim()) {
+      material.description = item.name;
+    }
+    if (material.unitCost === undefined || material.unitCost === null) {
+      material.unitCost = item.unitCost;
+    }
+    if (material.billingCost === undefined || material.billingCost === null) {
+      material.billingCost = item.billingCost;
+    }
   }
 
   protected engagementLabel(value: string): string {
@@ -1255,7 +1285,8 @@ export class WorkOrderFormComponent {
           inventoryItemId: material.inventoryItemId || '',
           description: material.description || material.itemName || '',
           quantity: material.quantity,
-          unitCost: material.unitCost
+          unitCost: material.unitCost,
+          billingCost: material.billingCost
         }))
       : [];
     this.taskRows = workOrder.tasks.length
@@ -1350,7 +1381,7 @@ export class WorkOrderFormComponent {
   }
 
   private blankMaterial(): MaterialRow {
-    return { id: crypto.randomUUID(), inventoryItemId: '', description: '', quantity: 1, unitCost: undefined };
+    return { id: crypto.randomUUID(), inventoryItemId: '', description: '', quantity: 1, unitCost: undefined, billingCost: undefined };
   }
 
   private blankTask(phase: ChecklistPhase): TaskRow {
@@ -1508,6 +1539,7 @@ function timeMinutes(value: string): number {
 interface OwnerOption {
   id: string;
   name: string;
+  ownerCode?: string;
 }
 
 interface WorkerAvailability {
@@ -1522,6 +1554,7 @@ interface MaterialRow {
   description: string;
   quantity: number;
   unitCost?: number;
+  billingCost?: number;
 }
 
 interface TaskRow {

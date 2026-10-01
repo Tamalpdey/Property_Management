@@ -9,6 +9,9 @@ public record WorkerClockEntryDto(
         Instant startedAt,
         Instant endedAt,
         Long durationMinutes,
-        Long pauseMinutes
+        Long pauseMinutes,
+        boolean override,
+        String overrideReason,
+        Instant overrideUpdatedAt
 ) {
 }

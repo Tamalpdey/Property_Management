@@ -4,7 +4,8 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
-import type { WorkerDailyLoadout, WorkerLoadoutTool, WorkerLoadoutToolActionRequest } from '@lorne/contracts';
+import { SelectModule } from 'primeng/select';
+import type { SaveWorkerVehicleUseRequest, WorkerDailyLoadout, WorkerLoadoutTool, WorkerLoadoutToolActionRequest } from '@lorne/contracts';
 import { WorkerShiftClockService } from '../../core/services/worker-shift-clock.service';
 import { WorkerJobService } from '../today/services/worker-job.service';
 import { parseDateInput, toDateInput, workerErrorMessage } from '../today/worker-job-ui';
@@ -13,7 +14,7 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
 @Component({
   selector: 'lorne-worker-loadout',
   standalone: true,
-  imports: [ButtonModule, DialogModule, FormsModule, VoiceNoteButtonComponent],
+  imports: [ButtonModule, DialogModule, FormsModule, SelectModule, VoiceNoteButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="mx-auto max-w-6xl space-y-3">
@@ -95,6 +96,67 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
           </label>
         </div>
       </div>
+
+      <section class="rounded-lg border border-teal-100 bg-white p-3 shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-black uppercase tracking-wide text-teal-700">Vehicle use</p>
+            <h2 class="text-lg font-black text-slate-950">Today’s vehicle and odometer</h2>
+            <p class="mt-1 text-xs font-semibold text-slate-500">Optional. Select a fleet vehicle or enter another vehicle.</p>
+          </div>
+          <button
+            pButton
+            type="button"
+            size="small"
+            icon="pi pi-save"
+            label="Save vehicle use"
+            [loading]="savingVehicle()"
+            (click)="saveVehicleUse()"
+          ></button>
+        </div>
+        <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(12rem,1.35fr)_minmax(10rem,1fr)_9rem_9rem_minmax(12rem,1.4fr)]">
+          <label class="grid gap-1 text-sm font-bold text-slate-700">
+            Fleet vehicle
+            <p-select
+              styleClass="w-full"
+              [options]="loadout()?.vehicles ?? []"
+              optionLabel="name"
+              optionValue="id"
+              [filter]="true"
+              filterBy="name,identifier"
+              [showClear]="true"
+              placeholder="Search vehicles"
+              [(ngModel)]="vehicleForm.vehicleAssetId"
+              (onChange)="vehicleSelectionChanged()"
+            >
+              <ng-template pTemplate="item" let-vehicle>
+                <div>
+                  <div class="font-bold">{{ vehicle.name }}</div>
+                  @if (vehicle.identifier) {
+                    <div class="text-xs text-slate-500">{{ vehicle.identifier }}</div>
+                  }
+                </div>
+              </ng-template>
+            </p-select>
+          </label>
+          <label class="grid gap-1 text-sm font-bold text-slate-700">
+            Other vehicle
+            <input class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Vehicle or plate" [(ngModel)]="vehicleForm.vehicleLabel" [disabled]="!!vehicleForm.vehicleAssetId" />
+          </label>
+          <label class="grid gap-1 text-sm font-bold text-slate-700">
+            Start km
+            <input type="number" min="0" step="0.1" class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.startKm" />
+          </label>
+          <label class="grid gap-1 text-sm font-bold text-slate-700">
+            End km
+            <input type="number" min="0" step="0.1" class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.endKm" />
+          </label>
+          <label class="grid gap-1 text-sm font-bold text-slate-700">
+            Notes
+            <input class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Optional notes" [(ngModel)]="vehicleForm.notes" />
+          </label>
+        </div>
+      </section>
 
       <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section class="rounded-lg border border-teal-100 bg-white p-3 shadow-sm">
@@ -273,12 +335,14 @@ export class WorkerLoadoutComponent {
   protected readonly loading = signal(false);
   protected readonly error = signal('');
   protected readonly busyKey = signal('');
+  protected readonly savingVehicle = signal(false);
   protected selectedDate = toDateInput(new Date());
   protected search = '';
   protected statusFilter = 'ALL';
   protected toolIssueDialogVisible = false;
   protected selectedIssueTool: WorkerLoadoutTool | null = null;
   protected toolIssueForm = { note: '' };
+  protected vehicleForm: SaveWorkerVehicleUseRequest = {};
 
   protected readonly filteredTools = computed(() => {
     const search = this.search.trim().toLowerCase();
@@ -315,7 +379,15 @@ export class WorkerLoadoutComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      this.loadout.set(await firstValueFrom(this.workerJobService.loadout(this.selectedDate)));
+      const loadout = await firstValueFrom(this.workerJobService.loadout(this.selectedDate));
+      this.loadout.set(loadout);
+      this.vehicleForm = {
+        vehicleAssetId: loadout.vehicleUse?.vehicleAssetId,
+        vehicleLabel: loadout.vehicleUse?.vehicleLabel,
+        startKm: loadout.vehicleUse?.startKm,
+        endKm: loadout.vehicleUse?.endKm,
+        notes: loadout.vehicleUse?.notes
+      };
     } catch (error) {
       this.error.set(workerErrorMessage(error, 'Unable to load daily loadout. Try again or contact dispatch.'));
     } finally {
@@ -325,6 +397,33 @@ export class WorkerLoadoutComponent {
 
   protected async checkOut(tool: WorkerLoadoutTool): Promise<void> {
     await this.runToolAction(tool, 'CHECKED_OUT', (date, request) => this.workerJobService.checkOutLoadoutTool(date, request));
+  }
+
+  protected vehicleSelectionChanged(): void {
+    if (this.vehicleForm.vehicleAssetId) {
+      this.vehicleForm.vehicleLabel = undefined;
+    }
+  }
+
+  protected async saveVehicleUse(): Promise<void> {
+    if (this.savingVehicle()) {
+      return;
+    }
+    if (this.vehicleForm.startKm != null && this.vehicleForm.endKm != null && this.vehicleForm.endKm < this.vehicleForm.startKm) {
+      this.error.set('End km must be the same as or greater than start km.');
+      return;
+    }
+    this.savingVehicle.set(true);
+    this.error.set('');
+    try {
+      const loadout = await firstValueFrom(this.workerJobService.saveVehicleUse(this.selectedDate, this.vehicleForm));
+      this.loadout.set(loadout);
+      this.vehicleForm = { ...loadout.vehicleUse };
+    } catch (error) {
+      this.error.set(workerErrorMessage(error, 'Unable to save vehicle use. Check the odometer values and try again.'));
+    } finally {
+      this.savingVehicle.set(false);
+    }
   }
 
   protected async returnTool(tool: WorkerLoadoutTool): Promise<void> {

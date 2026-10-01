@@ -1,13 +1,13 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import type { TenantSettingsRecord, WorkerActivityRecord } from '@lorne/contracts';
-import { TenantAnalytics, TenantAnalyticsService } from '../analytics/services/tenant-analytics.service';
+import type { TenantSettingsRecord, WorkerActivityRecord, WorkerClockEntryRecord, WorkerRecord } from '@lorne/contracts';
 import { TenantSettingsService } from '../settings/services/tenant-settings.service';
+import type { DayTicketEntry, ReportGenerationData } from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 import {
   dateInputValue,
   dayTicketActivityRows,
@@ -20,11 +20,14 @@ import {
   dayTicketShiftSummary,
   minutesLabel,
   printHtmlDocument,
+  ticketTimeLabel,
   timeOnly
 } from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 import { WorkerManagementService } from '../workers/services/worker-management.service';
+import { WorkOrderService } from '../work-orders/services/work-order.service';
 
 type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
+type DayTicketData = ReportGenerationData & { generatedAt: Date; workers: WorkerRecord[] };
 
 @Component({
   selector: 'lorne-day-ticket-page',
@@ -53,10 +56,10 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
 
       @if (analytics(); as data) {
         <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div class="grid gap-2 xl:grid-cols-[minmax(12rem,1fr)_10rem_10rem_10rem_auto]">
+          <div class="grid gap-2 xl:grid-cols-[minmax(12rem,1fr)_10rem_10rem_10rem_minmax(16rem,1fr)_auto]">
             <label class="block">
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Worker</span>
-              <select class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" name="dayTicketWorkerId" [(ngModel)]="dayTicketWorkerId" (ngModelChange)="loadWorkerActivities()">
+              <select class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" name="dayTicketWorkerId" [(ngModel)]="dayTicketWorkerId" (ngModelChange)="loadWorkerTiming()">
                 <option value="">Select worker</option>
                 @for (worker of data.workers; track worker.id) {
                   <option [value]="worker.id">{{ worker.displayName }}{{ worker.email ? ' · ' + worker.email : '' }}</option>
@@ -78,7 +81,11 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">To</span>
-              <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" type="date" name="dayTicketDateTo" [(ngModel)]="dayTicketDateTo" [disabled]="dayTicketRangePreset !== 'CUSTOM'" (ngModelChange)="loadWorkerActivities()" />
+              <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" type="date" name="dayTicketDateTo" [(ngModel)]="dayTicketDateTo" [disabled]="dayTicketRangePreset !== 'CUSTOM'" (ngModelChange)="onDayTicketFilterChange()" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Search</span>
+              <input class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700" type="search" name="dayTicketSearch" placeholder="Client, work order, service, address" [(ngModel)]="searchTerm" />
             </label>
             <button pButton type="button" icon="pi pi-print" label="Print Day Ticket" [disabled]="!dayTicketWorkerId || !dayTicketDateFrom || !dayTicketDateTo || printing()" [loading]="printing()" (click)="printDayTicket(data)"></button>
           </div>
@@ -129,6 +136,76 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
           </div>
         </section>
 
+        @if (dayTicketWorkerId) {
+          <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">Shift clock</p>
+                <h2 class="text-base font-black text-slate-950">Clock-in, clock-out, breaks, and adjusted sessions</h2>
+              </div>
+              @if (clockEntries().length) {
+                <div class="grid grid-cols-3 gap-2 text-right">
+                  <div class="rounded-lg bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase text-slate-500">Gross</p>
+                    <p class="text-sm font-black text-slate-950">{{ minutesLabel(shiftGrossMinutes()) }}</p>
+                  </div>
+                  <div class="rounded-lg bg-amber-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase text-amber-700">Break</p>
+                    <p class="text-sm font-black text-amber-800">{{ minutesLabel(shiftPauseMinutes()) }}</p>
+                  </div>
+                  <div class="rounded-lg bg-teal-50 px-3 py-2">
+                    <p class="text-xs font-black uppercase text-teal-700">Net</p>
+                    <p class="text-sm font-black text-teal-800">{{ minutesLabel(shiftNetMinutes()) }}</p>
+                  </div>
+                </div>
+              }
+            </div>
+            <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table class="w-full min-w-[44rem] border-collapse text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-black uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-3 py-2">Session</th>
+                    <th class="px-3 py-2">Clock in</th>
+                    <th class="px-3 py-2">Clock out</th>
+                    <th class="px-3 py-2">Break</th>
+                    <th class="px-3 py-2">Net</th>
+                    <th class="px-3 py-2">Audit</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  @for (entry of clockEntries(); track entry.id) {
+                    <tr>
+                      <td class="px-3 py-2 font-black text-slate-600">Session {{ $index + 1 }}</td>
+                      <td class="px-3 py-2 font-semibold text-slate-700">{{ entry.startedAt | date:'MMM d, h:mm a' }}</td>
+                      <td class="px-3 py-2">
+                        @if (entry.endedAt) {
+                          <span class="font-semibold text-slate-700">{{ entry.endedAt | date:'MMM d, h:mm a' }}</span>
+                        } @else {
+                          <p-tag value="open" severity="warn" />
+                        }
+                      </td>
+                      <td class="px-3 py-2 font-black text-amber-700">{{ minutesLabel(entry.pauseMinutes || 0) }}</td>
+                      <td class="px-3 py-2 font-black text-teal-700">{{ minutesLabel(clockEntryNetMinutes(entry)) }}</td>
+                      <td class="px-3 py-2">
+                        @if (entry.override) {
+                          <span class="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-black uppercase text-amber-800">Adjusted</span>
+                          @if (entry.overrideReason) {
+                            <p class="mt-1 max-w-80 truncate text-xs font-semibold text-amber-700">{{ entry.overrideReason }}</p>
+                          }
+                        } @else {
+                          <span class="text-xs font-semibold text-slate-500">Worker captured</span>
+                        }
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr><td colspan="6" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No shift clock records for this worker and date range.</td></tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        }
+
         <section class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div class="flex items-center justify-between gap-2">
             <div>
@@ -156,15 +233,21 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
                   <tr>
                     <td class="px-3 py-2 font-black text-slate-500">{{ $index + 1 }}</td>
                     <td class="px-3 py-2 font-semibold text-slate-700">
-                      {{ timeOnly(entry.timeIn) }}
+                      {{ ticketTimeLabel(entry.timeIn, dayTicketDateFrom, dayTicketDateTo) }}
                       @if (entry.timeInFromSchedule) {
                         <span class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.65rem] font-black uppercase text-amber-800">Scheduled</span>
                       }
+                      @if (entry.assignment?.timingOverride) {
+                        <span class="ml-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-black uppercase text-amber-800">Adjusted</span>
+                      }
                     </td>
                     <td class="px-3 py-2 font-semibold text-slate-700">
-                      {{ timeOnly(entry.timeOut) }}
+                      {{ ticketTimeLabel(entry.timeOut, dayTicketDateFrom, dayTicketDateTo) }}
                       @if (entry.timeOutFromSchedule) {
                         <span class="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[0.65rem] font-black uppercase text-amber-800">Scheduled</span>
+                      }
+                      @if (entry.assignment?.timingOverride) {
+                        <span class="ml-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-black uppercase text-amber-800">Adjusted</span>
                       }
                     </td>
                     <td class="px-3 py-2">
@@ -191,12 +274,14 @@ type TicketRangePreset = 'DAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
   `
 })
 export class DayTicketPageComponent {
-  private readonly analyticsService = inject(TenantAnalyticsService);
+  private readonly workOrderService = inject(WorkOrderService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
   private readonly workerManagementService = inject(WorkerManagementService);
-  protected readonly analytics = signal<TenantAnalytics | null>(null);
+  private readonly route = inject(ActivatedRoute);
+  protected readonly analytics = signal<DayTicketData | null>(null);
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
   protected readonly workerActivities = signal<WorkerActivityRecord[]>([]);
+  protected readonly clockEntries = signal<WorkerClockEntryRecord[]>([]);
   protected readonly loading = signal(false);
   protected readonly printing = signal(false);
   protected readonly error = signal('');
@@ -204,6 +289,7 @@ export class DayTicketPageComponent {
   protected dayTicketRangePreset: TicketRangePreset = 'DAY';
   protected dayTicketDateFrom = dateInputValue(new Date());
   protected dayTicketDateTo = dateInputValue(new Date());
+  protected searchTerm = '';
   protected dayTicketOptions: DayTicketOptions = {
     useActualTiming: true,
     includeStatus: true,
@@ -216,12 +302,18 @@ export class DayTicketPageComponent {
   };
 
   protected readonly timeOnly = timeOnly;
+  protected readonly ticketTimeLabel = ticketTimeLabel;
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
   protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;
   protected readonly dayTicketEstimatedTravelLabel = dayTicketEstimatedTravelLabel;
 
   constructor() {
+    const params = this.route.snapshot.queryParamMap;
+    this.dayTicketWorkerId = params.get('workerId') || '';
+    this.dayTicketDateFrom = params.get('from') || this.dayTicketDateFrom;
+    this.dayTicketDateTo = params.get('to') || params.get('from') || this.dayTicketDateTo;
+    this.dayTicketRangePreset = this.dayTicketDateFrom === this.dayTicketDateTo ? 'DAY' : 'CUSTOM';
     void this.load();
   }
 
@@ -229,13 +321,19 @@ export class DayTicketPageComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [analytics, settings] = await Promise.all([
-        firstValueFrom(this.analyticsService.overview()),
+      const [workers, workOrders, settings] = await Promise.all([
+        firstValueFrom(this.workerManagementService.list()),
+        firstValueFrom(this.workOrderService.list({
+          statusFilter: 'ALL',
+          dateFilter: 'CUSTOM',
+          customFrom: this.dayTicketDateFrom,
+          customTo: this.dayTicketDateTo
+        })),
         firstValueFrom(this.tenantSettingsService.get())
       ]);
-      this.analytics.set(analytics);
+      this.analytics.set({ workers, workOrders, invoices: [], generatedAt: new Date() });
       this.settings.set(settings);
-      await this.loadWorkerActivities();
+      await this.loadWorkerTiming();
     } catch {
       this.error.set('Unable to load day ticket.');
     } finally {
@@ -243,14 +341,16 @@ export class DayTicketPageComponent {
     }
   }
 
-  protected rows(data: TenantAnalytics) {
-    return [
+  protected rows(data: DayTicketData) {
+    const rows = [
       ...dayTicketRows(data, this.dayTicketWorkerId, this.dayTicketDateFrom, this.dayTicketDateTo, this.dayTicketOptions),
       ...(this.dayTicketOptions.includeActivities ? dayTicketActivityRows(this.workerActivities(), this.dayTicketDateFrom, this.dayTicketDateTo) : [])
     ].sort((left, right) => new Date(left.timeIn || '').getTime() - new Date(right.timeIn || '').getTime());
+    const search = this.searchTerm.trim().toLowerCase();
+    return search ? rows.filter((row) => dayTicketSearchText(row).includes(search)) : rows;
   }
 
-  protected async printDayTicket(data: TenantAnalytics): Promise<void> {
+  protected async printDayTicket(data: DayTicketData): Promise<void> {
     if (this.printing()) {
       return;
     }
@@ -264,6 +364,7 @@ export class DayTicketPageComponent {
           firstValueFrom(this.workerManagementService.activities(worker.id, this.dayTicketDateFrom, this.dayTicketDateTo))
         ])
         : [[], []];
+      this.clockEntries.set(clockEntries);
       this.workerActivities.set(activities);
       printHtmlDocument(dayTicketHtml({
         workerName: worker?.displayName || 'Worker',
@@ -305,23 +406,42 @@ export class DayTicketPageComponent {
 
   protected onDayTicketFilterChange(): void {
     this.applyRangePreset();
-    void this.loadWorkerActivities();
+    void this.load();
   }
 
-  protected async loadWorkerActivities(): Promise<void> {
+  protected async loadWorkerTiming(): Promise<void> {
     if (!this.dayTicketWorkerId || !this.dayTicketDateFrom || !this.dayTicketDateTo) {
       this.workerActivities.set([]);
+      this.clockEntries.set([]);
       return;
     }
     try {
-      this.workerActivities.set(await firstValueFrom(this.workerManagementService.activities(
-        this.dayTicketWorkerId,
-        this.dayTicketDateFrom,
-        this.dayTicketDateTo
-      )));
+      const [clockEntries, activities] = await Promise.all([
+        firstValueFrom(this.workerManagementService.clockEntries(this.dayTicketWorkerId, this.dayTicketDateFrom, this.dayTicketDateTo)),
+        firstValueFrom(this.workerManagementService.activities(this.dayTicketWorkerId, this.dayTicketDateFrom, this.dayTicketDateTo))
+      ]);
+      this.clockEntries.set(clockEntries);
+      this.workerActivities.set(activities);
     } catch {
       this.workerActivities.set([]);
+      this.clockEntries.set([]);
     }
+  }
+
+  protected shiftGrossMinutes(): number {
+    return this.clockEntries().reduce((total, entry) => total + (entry.durationMinutes || 0), 0);
+  }
+
+  protected shiftPauseMinutes(): number {
+    return this.clockEntries().reduce((total, entry) => total + (entry.pauseMinutes || 0), 0);
+  }
+
+  protected shiftNetMinutes(): number {
+    return this.clockEntries().reduce((total, entry) => total + this.clockEntryNetMinutes(entry), 0);
+  }
+
+  protected clockEntryNetMinutes(entry: WorkerClockEntryRecord): number {
+    return Math.max(0, (entry.durationMinutes || 0) - (entry.pauseMinutes || 0));
   }
 
   protected rowKey(entry: ReturnType<DayTicketPageComponent['rows']>[number]): string {
@@ -336,4 +456,27 @@ export class DayTicketPageComponent {
 function localDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function dayTicketSearchText(row: DayTicketEntry): string {
+  return [
+    row.workOrder?.workOrderNumber,
+    row.workOrder?.title,
+    row.workOrder?.description,
+    row.workOrder?.ownerName,
+    row.workOrder?.ownerCode,
+    row.workOrder?.propertyName,
+    row.workOrder?.propertyCode,
+    row.workOrder?.propertyAddress,
+    row.workOrder?.serviceName,
+    row.workOrder?.status,
+    row.assignment?.workerName,
+    row.routeStop?.name,
+    row.routeStop?.address,
+    row.activity?.title,
+    row.activity?.activityType,
+    row.activity?.locationName,
+    row.activity?.address,
+    row.activity?.notes
+  ].filter(Boolean).join(' ').toLowerCase();
 }

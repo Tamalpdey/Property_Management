@@ -88,7 +88,9 @@ public class WorkerShiftClockService {
                        CASE WHEN wsce.ended_at IS NULL THEN NULL
                             ELSE floor(extract(epoch from (wsce.ended_at - wsce.started_at)) / 60)::bigint
                        END AS duration_minutes,
-                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes
+                       COALESCE(pauses.pause_minutes, 0)::bigint AS pause_minutes,
+                       override_audit.reason AS override_reason,
+                       override_audit.created_at AS override_updated_at
                 FROM worker_shift_clock_entries wsce
                 JOIN tenants t ON t.id = wsce.tenant_id
                 LEFT JOIN LATERAL (
@@ -99,6 +101,17 @@ public class WorkerShiftClockService {
                       AND wscp.shift_clock_entry_id = wsce.id
                       AND wscp.ended_at IS NOT NULL
                 ) pauses ON true
+                LEFT JOIN LATERAL (
+                    SELECT audit_logs.metadata ->> 'reason' AS reason, audit_logs.created_at
+                    FROM audit_logs
+                    WHERE audit_logs.tenant_id = wsce.tenant_id
+                      AND audit_logs.resource_type = 'WORKER'
+                      AND audit_logs.resource_id = wsce.worker_id
+                      AND audit_logs.action = 'WORKER_CLOCK_ENTRY_OVERRIDDEN'
+                      AND audit_logs.metadata ->> 'clockEntryId' = wsce.id::text
+                    ORDER BY audit_logs.created_at DESC
+                    LIMIT 1
+                ) override_audit ON true
                 WHERE wsce.tenant_id = ?
                   AND wsce.worker_id = ?
                   AND (wsce.started_at AT TIME ZONE COALESCE(t.timezone, 'America/Toronto'))::date <= ?
@@ -110,7 +123,10 @@ public class WorkerShiftClockService {
                 instant("started_at", rs),
                 instant("ended_at", rs),
                 (Long) rs.getObject("duration_minutes"),
-                (Long) rs.getObject("pause_minutes")
+                (Long) rs.getObject("pause_minutes"),
+                rs.getTimestamp("override_updated_at") != null,
+                rs.getString("override_reason"),
+                instant("override_updated_at", rs)
         ), tenantId, worker.id(), toDate, fromDate);
     }
 

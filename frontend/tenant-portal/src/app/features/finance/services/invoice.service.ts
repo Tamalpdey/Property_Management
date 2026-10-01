@@ -2,7 +2,11 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type {
   ApiResponse,
+  BulkInvoicePreviewRecord,
+  BulkInvoicePreviewRequest,
   CreateBatchInvoiceRequest,
+  CreateBulkInvoicesRequest,
+  CreateBulkInvoicesResponse,
   InvoiceRecord,
   InvoiceLineRequest,
   RecordInvoicePaymentRequest,
@@ -27,6 +31,18 @@ export class InvoiceService {
   createBatch(request: CreateBatchInvoiceRequest) {
     return this.http
       .post<ApiResponse<InvoiceRecord>>(`${environment.apiBaseUrl}/tenant/invoices/batch`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  previewBulk(request: BulkInvoicePreviewRequest) {
+    return this.http
+      .post<ApiResponse<BulkInvoicePreviewRecord>>(`${environment.apiBaseUrl}/tenant/invoices/bulk/preview`, request)
+      .pipe(map((response) => response.data));
+  }
+
+  createBulk(request: CreateBulkInvoicesRequest) {
+    return this.http
+      .post<ApiResponse<CreateBulkInvoicesResponse>>(`${environment.apiBaseUrl}/tenant/invoices/bulk`, request)
       .pipe(map((response) => response.data));
   }
 

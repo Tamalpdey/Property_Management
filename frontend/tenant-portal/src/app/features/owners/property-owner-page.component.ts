@@ -68,6 +68,35 @@ import { PropertyOwnerService } from './services/property-owner.service';
             <span class="mb-1 block text-sm font-semibold text-slate-700">Billing email</span>
             <input pInputText class="w-full" name="billingEmail" type="email" [(ngModel)]="form.billingEmail" />
           </label>
+          <section class="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p class="text-xs font-black uppercase tracking-wide text-teal-700">Owner mailing address</p>
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Address line 1</span>
+              <input pInputText class="w-full" name="addressLine1" [(ngModel)]="form.addressLine1" />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-semibold text-slate-700">Address line 2</span>
+              <input pInputText class="w-full" name="addressLine2" [(ngModel)]="form.addressLine2" />
+            </label>
+            <div class="grid gap-3 md:grid-cols-[1fr_7rem_8rem_6rem]">
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-slate-700">City</span>
+                <input pInputText class="w-full" name="city" [(ngModel)]="form.city" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-slate-700">Province</span>
+                <input pInputText class="w-full" name="provinceCode" maxlength="8" [(ngModel)]="form.provinceCode" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-slate-700">Postal code</span>
+                <input pInputText class="w-full" name="postalCode" [(ngModel)]="form.postalCode" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-semibold text-slate-700">Country</span>
+                <input pInputText class="w-full" name="countryCode" maxlength="2" [(ngModel)]="form.countryCode" />
+              </label>
+            </div>
+          </section>
           <label class="block">
             <span class="mb-1 block text-sm font-semibold text-slate-700">Owner notes</span>
             <textarea class="w-full border border-slate-300 px-3 py-2" name="notes" rows="4" [(ngModel)]="form.notes"></textarea>
@@ -111,6 +140,12 @@ export class PropertyOwnerPageComponent {
       email: owner.email || '',
       phone: owner.phone || '',
       billingEmail: owner.billingEmail || '',
+      addressLine1: owner.addressLine1 || '',
+      addressLine2: owner.addressLine2 || '',
+      city: owner.city || '',
+      provinceCode: owner.provinceCode || 'ON',
+      postalCode: owner.postalCode || '',
+      countryCode: owner.countryCode || 'CA',
       notes: owner.notes || ''
     };
     this.showCreate.set(true);
@@ -174,6 +209,6 @@ export class PropertyOwnerPageComponent {
   }
 
   private blankForm(): CreatePropertyOwnerRequest {
-    return { displayName: '', email: '', phone: '', billingEmail: '', notes: '' };
+    return { displayName: '', email: '', phone: '', billingEmail: '', addressLine1: '', addressLine2: '', city: '', provinceCode: 'ON', postalCode: '', countryCode: 'CA', notes: '' };
   }
 }

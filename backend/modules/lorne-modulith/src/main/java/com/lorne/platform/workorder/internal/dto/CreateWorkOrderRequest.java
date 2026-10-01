@@ -42,7 +42,8 @@ public record CreateWorkOrderRequest(
             UUID inventoryItemId,
             String description,
             @NotNull BigDecimal quantity,
-            BigDecimal unitCost
+            BigDecimal unitCost,
+            BigDecimal billingCost
     ) {
     }
 

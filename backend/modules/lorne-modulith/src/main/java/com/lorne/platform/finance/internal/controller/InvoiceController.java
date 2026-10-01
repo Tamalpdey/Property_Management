@@ -1,7 +1,11 @@
 package com.lorne.platform.finance.internal.controller;
 
-import com.lorne.platform.finance.internal.dto.InvoiceDto;
+import com.lorne.platform.finance.internal.dto.BulkInvoicePreviewDto;
+import com.lorne.platform.finance.internal.dto.BulkInvoicePreviewRequest;
+import com.lorne.platform.finance.internal.dto.CreateBulkInvoicesRequest;
+import com.lorne.platform.finance.internal.dto.CreateBulkInvoicesResponse;
 import com.lorne.platform.finance.internal.dto.CreateBatchInvoiceRequest;
+import com.lorne.platform.finance.internal.dto.InvoiceDto;
 import com.lorne.platform.finance.internal.dto.InvoiceLineRequest;
 import com.lorne.platform.finance.internal.dto.OwnerStatementDto;
 import com.lorne.platform.finance.internal.dto.RecordPaymentRequest;
@@ -69,6 +73,24 @@ class InvoiceController {
             @Valid @RequestBody CreateBatchInvoiceRequest request
     ) {
         return ApiResponse.ok(invoiceService.createBatch(principal.tenantId(), principal.userId(), request));
+    }
+
+    @PostMapping("/bulk/preview")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<BulkInvoicePreviewDto> bulkPreview(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestBody BulkInvoicePreviewRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.bulkPreview(principal.tenantId(), request));
+    }
+
+    @PostMapping("/bulk")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    ApiResponse<CreateBulkInvoicesResponse> createBulk(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @RequestBody CreateBulkInvoicesRequest request
+    ) {
+        return ApiResponse.ok(invoiceService.createBulk(principal.tenantId(), principal.userId(), request));
     }
 
     @GetMapping("/{invoiceId}/pdf")

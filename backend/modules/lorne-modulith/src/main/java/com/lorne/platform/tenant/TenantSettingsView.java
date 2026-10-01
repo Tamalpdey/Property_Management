@@ -15,6 +15,8 @@ public record TenantSettingsView(
         String provinceCode,
         String postalCode,
         String invoicePrefix,
+        java.math.BigDecimal invoiceTaxRate,
+        String taxRegistrationNumber,
         String invoiceFooter,
         String paymentTerms,
         String logoUrl,
@@ -36,7 +38,8 @@ public record TenantSettingsView(
         boolean graphClientSecretConfigured,
         String graphSenderUser,
         boolean autoSendWorkCompletedEmail,
-        boolean autoSendInvoiceEmail
+        boolean autoSendInvoiceEmail,
+        boolean liveWorkerTrackingEnabled
 ) {
     public String invoiceBrandName() {
         return firstNonBlank(organizationName, tenantName, legalName, "Lorne PropertyOps");

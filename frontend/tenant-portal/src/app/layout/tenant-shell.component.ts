@@ -189,6 +189,7 @@ export class TenantShellComponent {
       items: [
         { label: 'Work orders', path: '/work-orders', icon: 'pi pi-calendar-plus' },
         { label: 'Schedule', path: '/schedule', icon: 'pi pi-calendar-clock' },
+        { label: 'Route intelligence', path: '/route-intelligence', icon: 'pi pi-map' },
         { label: 'Messages', path: '/messages', icon: 'pi pi-comments' },
         { label: 'Inventory', path: '/inventory', icon: 'pi pi-box' },
         { label: 'Work audit', path: '/work-audit', icon: 'pi pi-history' }
@@ -198,7 +199,7 @@ export class TenantShellComponent {
       label: 'People',
       items: [
         { label: 'Workers', path: '/workers', icon: 'pi pi-id-card' },
-        { label: 'Payroll', path: '/payroll', icon: 'pi pi-wallet', roles: ['TENANT_ADMIN', 'FINANCE'] }
+        { label: 'Timesheets', path: '/payroll', icon: 'pi pi-clock', roles: ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'] }
       ]
     },
     {

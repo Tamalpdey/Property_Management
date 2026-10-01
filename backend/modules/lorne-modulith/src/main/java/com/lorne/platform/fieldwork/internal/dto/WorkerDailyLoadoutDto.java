@@ -19,8 +19,27 @@ public record WorkerDailyLoadoutDto(
         int issueCount,
         List<ToolItemDto> tools,
         List<MaterialItemDto> materials,
-        List<ActivityItemDto> activities
+        List<ActivityItemDto> activities,
+        List<VehicleOptionDto> vehicles,
+        VehicleUseDto vehicleUse
 ) {
+    public record VehicleOptionDto(
+            UUID id,
+            String name,
+            String identifier
+    ) {
+    }
+
+    public record VehicleUseDto(
+            UUID id,
+            UUID vehicleAssetId,
+            String vehicleLabel,
+            BigDecimal startKm,
+            BigDecimal endKm,
+            String notes
+    ) {
+    }
+
     public record ToolItemDto(
             UUID assetId,
             UUID workOrderId,

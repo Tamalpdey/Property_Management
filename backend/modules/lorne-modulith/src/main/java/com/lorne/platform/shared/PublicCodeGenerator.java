@@ -12,7 +12,8 @@ public final class PublicCodeGenerator {
     }
 
     public static String propertyCode(UUID id) {
-        return code("PRP", id);
+        var compactId = id.toString().replace("-", "").toUpperCase(Locale.ROOT);
+        return "PRP-%s".formatted(compactId.substring(0, 8));
     }
 
     private static String code(String prefix, UUID id) {

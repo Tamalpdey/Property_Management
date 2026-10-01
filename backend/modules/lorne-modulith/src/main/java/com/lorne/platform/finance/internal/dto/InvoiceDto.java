@@ -22,6 +22,7 @@ public record InvoiceDto(
         String ownerName,
         String ownerEmail,
         String ownerBillingEmail,
+        String ownerAddress,
         UUID workOrderId,
         String workOrderNumber,
         String workOrderTitle,
@@ -41,12 +42,15 @@ public record InvoiceDto(
             String propertyName,
             String propertyAddress,
             String status,
-            String serviceName
+            String serviceName,
+            Instant scheduledStart,
+            Instant scheduledEnd
     ) {
     }
 
     public record InvoiceLineDto(
             UUID id,
+            UUID workOrderId,
             String lineType,
             String description,
             BigDecimal quantity,

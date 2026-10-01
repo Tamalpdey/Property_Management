@@ -242,6 +242,8 @@ export interface WorkerAssignedJob {
   ownerCode: string;
   ownerName: string;
   address: string;
+  propertyLatitude?: number;
+  propertyLongitude?: number;
   serviceName?: string;
   maintenanceRecordTemplate?: MaintenanceRecordTemplate;
   status: WorkOrderStatus;
@@ -281,6 +283,7 @@ export interface WorkOrderMaintenanceRecord {
 }
 
 export interface MaintenanceRecordData {
+  serviceDetails?: string;
   callTypes?: Record<string, boolean>;
   otherCallType?: string;
   serviceChecks?: Record<string, boolean>;
@@ -355,6 +358,7 @@ export interface WorkerJobActionRequest {
   materialDescription?: string;
   quantity?: number;
   unitCost?: number;
+  billingCost?: number;
   assetId?: string;
   documentId?: string;
   photoType?: 'BEFORE' | 'AFTER' | 'ISSUE' | 'OTHER';
@@ -367,6 +371,7 @@ export interface WorkerJobActionRequest {
   deviceTimestamp?: string;
   userAgent?: string;
   platform?: string;
+  autoDetected?: boolean;
 }
 
 export interface WorkerFieldNote {
@@ -397,6 +402,7 @@ export interface WorkerExecutionEvent {
   workerName?: string;
   occurredAt: string;
   note?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PhotoUploadRequest {
@@ -435,6 +441,31 @@ export interface WorkerDailyLoadout {
   tools: WorkerLoadoutTool[];
   materials: WorkerLoadoutMaterial[];
   activities: WorkerActivity[];
+  vehicles: WorkerVehicleOption[];
+  vehicleUse?: WorkerVehicleUse;
+}
+
+export interface WorkerVehicleOption {
+  id: string;
+  name: string;
+  identifier?: string;
+}
+
+export interface WorkerVehicleUse {
+  id?: string;
+  vehicleAssetId?: string;
+  vehicleLabel?: string;
+  startKm?: number;
+  endKm?: number;
+  notes?: string;
+}
+
+export interface SaveWorkerVehicleUseRequest {
+  vehicleAssetId?: string;
+  vehicleLabel?: string;
+  startKm?: number;
+  endKm?: number;
+  notes?: string;
 }
 
 export interface WorkerLoadoutTool {
@@ -534,6 +565,12 @@ export interface PropertyOwner {
   email?: string;
   phone?: string;
   billingEmail?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  provinceCode?: string;
+  postalCode?: string;
+  countryCode?: string;
   notes?: string;
   propertyCount: number;
   active: boolean;
@@ -544,6 +581,12 @@ export interface CreatePropertyOwnerRequest {
   email?: string;
   phone?: string;
   billingEmail?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  provinceCode?: string;
+  postalCode?: string;
+  countryCode?: string;
   notes?: string;
 }
 
@@ -601,6 +644,7 @@ export interface ServiceCatalog {
 export interface CreateServiceCategoryRequest {
   name: string;
   wsibRatePercent?: number | null;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
 }
 
 export interface CreateServiceTypeRequest {
@@ -624,6 +668,7 @@ export interface ServiceCategory {
   id: string;
   name: string;
   wsibRatePercent?: number | null;
+  maintenanceRecordTemplate?: MaintenanceRecordTemplate;
   active: boolean;
 }
 
@@ -698,6 +743,8 @@ export interface InventoryItem {
   categoryName?: string;
   name: string;
   unit: string;
+  unitCost?: number;
+  billingCost?: number;
   quantityOnHand: number;
   reorderLevel?: number;
   storageLocation?: string;
@@ -712,6 +759,8 @@ export interface CreateInventoryItemRequest {
   categoryId?: string;
   name: string;
   unit: string;
+  unitCost?: number;
+  billingCost?: number;
   quantityOnHand: number;
   reorderLevel?: number;
   storageLocation?: string;
@@ -798,6 +847,28 @@ export interface WorkerClockEntryRecord {
   endedAt?: string;
   durationMinutes?: number;
   pauseMinutes?: number;
+  override?: boolean;
+  overrideReason?: string;
+  overrideUpdatedAt?: string;
+}
+
+export interface WorkerClockEntryOverrideRequest {
+  startedAt: string;
+  endedAt: string;
+  reason: string;
+}
+
+export interface WorkerClockedInTodayRecord {
+  workerId: string;
+  workerName: string;
+  employeeNumber?: string;
+  email?: string;
+  startedAt: string;
+  paused: boolean;
+  pausedAt?: string;
+  grossMinutes: number;
+  pauseMinutes: number;
+  netMinutes: number;
 }
 
 export type WorkerEngagementType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACTOR' | 'SEASONAL';
@@ -854,6 +925,10 @@ export interface UpdateWorkerStatusRequest {
   leaveReason?: string;
 }
 
+export interface RefreshWorkOrderTravelEstimatesRequest {
+  workOrderIds: string[];
+}
+
 export interface WorkOrderRecord {
   id: string;
   workOrderNumber: string;
@@ -865,6 +940,8 @@ export interface WorkOrderRecord {
   propertyCode: string;
   propertyName: string;
   propertyAddress: string;
+  propertyLatitude?: number;
+  propertyLongitude?: number;
   serviceTypeId?: string;
   serviceName?: string;
   maintenanceRecordTemplate?: MaintenanceRecordTemplate;
@@ -969,6 +1046,7 @@ export interface WorkOrderCommunication {
   communicationType: 'WORK_ORDER_COMPLETION' | 'INVOICE_EMAIL' | 'OWNER_EMAIL';
   invoiceId?: string;
   invoiceNumber?: string;
+  serviceName?: string;
   recipientEmail: string;
   subject: string;
   body: string;
@@ -1002,6 +1080,7 @@ export interface InvoiceRecord {
   ownerName: string;
   ownerEmail?: string;
   ownerBillingEmail?: string;
+  ownerAddress?: string;
   workOrderId?: string;
   workOrderNumber?: string;
   workOrderTitle?: string;
@@ -1025,10 +1104,13 @@ export interface InvoiceWorkOrderRecord {
   propertyAddress?: string;
   status?: string;
   serviceName?: string;
+  scheduledStart?: string;
+  scheduledEnd?: string;
 }
 
 export interface InvoiceLineRecord {
   id: string;
+  workOrderId?: string;
   lineType: 'LABOR' | 'MATERIAL' | 'CUSTOM' | 'DISCOUNT';
   description: string;
   quantity: number;
@@ -1054,6 +1136,61 @@ export interface CreateBatchInvoiceRequest {
   additionalLines?: InvoiceLineRequest[];
   issuedOn?: string;
   dueOn?: string;
+}
+
+export interface BulkInvoicePreviewRequest {
+  fromDate?: string;
+  toDate?: string;
+  ownerIds?: string[];
+}
+
+export interface BulkInvoicePreviewRecord {
+  fromDate: string;
+  toDate: string;
+  ownerCount: number;
+  workOrderCount: number;
+  estimatedSubtotal: number;
+  owners: BulkInvoiceOwnerGroupRecord[];
+}
+
+export interface BulkInvoiceOwnerGroupRecord {
+  ownerId: string;
+  ownerCode?: string;
+  ownerName: string;
+  ownerEmail?: string;
+  ownerBillingEmail?: string;
+  workOrderCount: number;
+  estimatedSubtotal: number;
+  workOrders: BulkInvoiceWorkOrderRecord[];
+}
+
+export interface BulkInvoiceWorkOrderRecord {
+  workOrderId: string;
+  workOrderNumber: string;
+  title: string;
+  status: WorkOrderStatus;
+  propertyId: string;
+  propertyCode?: string;
+  propertyName: string;
+  propertyAddress?: string;
+  serviceName?: string;
+  scheduledStart?: string;
+  scheduledEnd?: string;
+  estimatedSubtotal: number;
+}
+
+export interface CreateBulkInvoicesRequest {
+  fromDate?: string;
+  toDate?: string;
+  ownerIds?: string[];
+  workOrderIds: string[];
+  issuedOn?: string;
+  dueOn?: string;
+}
+
+export interface CreateBulkInvoicesResponse {
+  invoices: InvoiceRecord[];
+  skippedWorkOrderCount: number;
 }
 
 export interface InvoicePaymentRecord {
@@ -1121,6 +1258,8 @@ export interface TenantSettingsRecord {
   provinceCode?: string;
   postalCode?: string;
   invoicePrefix: string;
+  invoiceTaxRate: number;
+  taxRegistrationNumber?: string;
   invoiceFooter?: string;
   paymentTerms?: string;
   logoUrl?: string;
@@ -1141,6 +1280,7 @@ export interface TenantSettingsRecord {
   graphSenderUser?: string;
   autoSendWorkCompletedEmail: boolean;
   autoSendInvoiceEmail: boolean;
+  liveWorkerTrackingEnabled: boolean;
 }
 
 export interface UpdateTenantSettingsRequest {
@@ -1155,6 +1295,8 @@ export interface UpdateTenantSettingsRequest {
   postalCode?: string;
   countryCode?: string;
   invoicePrefix?: string;
+  invoiceTaxRate?: number;
+  taxRegistrationNumber?: string;
   invoiceFooter?: string;
   paymentTerms?: string;
   logoUrl?: string;
@@ -1177,6 +1319,7 @@ export interface UpdateTenantSettingsRequest {
   graphSenderUser?: string;
   autoSendWorkCompletedEmail?: boolean;
   autoSendInvoiceEmail?: boolean;
+  liveWorkerTrackingEnabled?: boolean;
 }
 
 export interface TestTenantEmailRequest {
@@ -1218,6 +1361,7 @@ export interface EmailDeliveryLogRecord {
   invoiceNumber?: string;
   workOrderId?: string;
   workOrderNumber?: string;
+  serviceName?: string;
   ownerName?: string;
   recipientEmail: string;
   ccEmails?: string;
@@ -1325,6 +1469,7 @@ export interface WorkOrderMaterialOverride {
   usedAt?: string;
   quantity?: number;
   unitCost?: number;
+  billingCost?: number;
 }
 
 export interface WorkOrderFieldNoteOverride {
@@ -1431,6 +1576,7 @@ export interface WorkOrderMaterial {
   quantity: number;
   unit?: string;
   unitCost?: number;
+  billingCost?: number;
   used: boolean;
   usedAt?: string;
 }
@@ -1496,6 +1642,7 @@ export interface CreateWorkOrderMaterialRequest {
   description?: string;
   quantity: number;
   unitCost?: number;
+  billingCost?: number;
 }
 
 export interface CreateWorkOrderTaskRequest {

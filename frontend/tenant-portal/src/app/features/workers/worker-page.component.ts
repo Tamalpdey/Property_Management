@@ -509,7 +509,8 @@ export class WorkerPageComponent {
         inventoryItemId: material.inventoryItemId,
         description: material.description,
         quantity: material.quantity,
-        unitCost: material.unitCost
+        unitCost: material.unitCost,
+        billingCost: material.billingCost
       })),
       assetIds: workOrder.assets.map((asset) => asset.assetId),
       tasks: [],

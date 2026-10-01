@@ -16,6 +16,8 @@ public record WorkerAssignedJobDto(
         String ownerCode,
         String ownerName,
         String address,
+        BigDecimal propertyLatitude,
+        BigDecimal propertyLongitude,
         String serviceName,
         Map<String, Object> maintenanceRecordTemplate,
         String status,
@@ -129,7 +131,8 @@ public record WorkerAssignedJobDto(
             String label,
             String workerName,
             Instant occurredAt,
-            String note
+            String note,
+            Map<String, Object> metadata
     ) {
     }
 }

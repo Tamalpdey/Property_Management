@@ -5,7 +5,7 @@ import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import type { CreateServiceTypeRequest, MaintenanceRecordTemplate, ServiceCategory, ServiceType } from '@lorne/contracts';
 
-const DISABLED_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
+export const DISABLED_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   enabled: false,
   title: 'Maintenance record',
   callTypes: [],
@@ -16,27 +16,18 @@ const DISABLED_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   noteLabel: 'Client note'
 };
 
-const GENERAL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
+export const GENERAL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   enabled: true,
-  title: 'Maintenance record',
-  callTypes: [
-    { key: 'maintenance', label: 'Maintenance', defaultSelected: true },
-    { key: 'inspection', label: 'Inspection' },
-    { key: 'other', label: 'Other' }
-  ],
-  checks: [
-    { key: 'area_inspected', label: 'Area inspected' },
-    { key: 'work_completed', label: 'Work completed' },
-    { key: 'area_cleaned', label: 'Work area cleaned' },
-    { key: 'customer_note_added', label: 'Customer note added' }
-  ],
+  title: 'Service record',
+  callTypes: [],
+  checks: [],
   measurements: [],
   chemicals: [],
   deliveries: [],
   noteLabel: 'Client note'
 };
 
-const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
+export const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   enabled: true,
   title: 'Pool maintenance record',
   callTypes: [
@@ -129,48 +120,9 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
           <p-inputnumber styleClass="w-full" inputStyleClass="w-full" name="basePrice" mode="currency" currency="CAD" locale="en-CA" [min]="0" [(ngModel)]="form.basePrice" />
         </label>
       </div>
-      <label class="block">
-        <span class="mb-1 block text-sm font-semibold text-slate-700">Maintenance record template</span>
-        <select class="w-full border border-slate-300 px-3 py-2" name="maintenanceTemplatePreset" [(ngModel)]="maintenanceTemplatePreset" (ngModelChange)="applyMaintenanceTemplatePreset($event)">
-          <option value="none">None</option>
-          <option value="general">General maintenance record</option>
-          <option value="pool">Pool / chemical maintenance record</option>
-        </select>
-      </label>
-      @if (form.maintenanceRecordTemplate?.enabled) {
-        <div class="space-y-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-slate-700">
-          <div class="grid gap-2 md:grid-cols-2">
-            <label class="block">
-              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-emerald-800">Record title</span>
-              <input pInputText class="w-full" name="maintenanceTitle" [ngModel]="template().title" (ngModelChange)="setTemplateValue('title', $event)" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-emerald-800">Note label</span>
-              <input pInputText class="w-full" name="maintenanceNoteLabel" [ngModel]="template().noteLabel" (ngModelChange)="setTemplateValue('noteLabel', $event)" />
-            </label>
-          </div>
-          <div class="grid gap-2 lg:grid-cols-3">
-            <label class="block">
-              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-emerald-800">Checklist rows</span>
-              <textarea class="h-28 w-full rounded border border-emerald-200 px-3 py-2" name="maintenanceChecks" [ngModel]="lines(template().checks)" (ngModelChange)="setTemplateLines('checks', $event)" placeholder="One check per line"></textarea>
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-emerald-800">Reading rows</span>
-              <textarea class="h-28 w-full rounded border border-emerald-200 px-3 py-2" name="maintenanceMeasurements" [ngModel]="measurementLines()" (ngModelChange)="setMeasurementLines($event)" placeholder="Label | unit"></textarea>
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-xs font-black uppercase tracking-wide text-emerald-800">Delivery/material rows</span>
-              <textarea class="h-28 w-full rounded border border-emerald-200 px-3 py-2" name="maintenanceDeliveries" [ngModel]="lines(template().deliveries)" (ngModelChange)="setTemplateLines('deliveries', $event)" placeholder="One material row per line"></textarea>
-            </label>
-          </div>
-          <div class="flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
-            <span class="rounded bg-white px-2 py-1">{{ form.maintenanceRecordTemplate?.callTypes?.length || 0 }} call types</span>
-            <span class="rounded bg-white px-2 py-1">{{ form.maintenanceRecordTemplate?.checks?.length || 0 }} checks</span>
-            <span class="rounded bg-white px-2 py-1">{{ form.maintenanceRecordTemplate?.measurements?.length || 0 }} readings</span>
-            <span class="rounded bg-white px-2 py-1">{{ form.maintenanceRecordTemplate?.deliveries?.length || 0 }} delivery rows</span>
-          </div>
-        </div>
-      }
+      <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        Service records are configured once on the selected category, so every service in that category prints the same layout.
+      </div>
       <button pButton type="submit" class="w-full" [icon]="serviceType() ? 'pi pi-save' : 'pi pi-plus'" [loading]="saving()" [label]="serviceType() ? 'Save service' : 'Add service'"></button>
     </form>
   `

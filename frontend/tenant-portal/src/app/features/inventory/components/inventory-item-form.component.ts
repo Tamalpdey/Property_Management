@@ -33,10 +33,18 @@ import type { CreateInventoryItemRequest, InventoryCategory, InventoryItem } fro
         <span class="mb-1 block text-sm font-semibold text-slate-700">Location</span>
         <input pInputText class="w-full" name="storageLocation" placeholder="Warehouse, van, shelf..." [(ngModel)]="form.storageLocation" />
       </label>
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <label class="block">
           <span class="mb-1 block text-sm font-semibold text-slate-700">Unit</span>
           <input pInputText class="w-full" name="unit" required [(ngModel)]="form.unit" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-semibold text-slate-700">Purchase cost</span>
+          <p-inputnumber styleClass="w-full" inputStyleClass="w-full" name="unitCost" [min]="0" mode="currency" currency="CAD" [(ngModel)]="form.unitCost" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-semibold text-slate-700">Billing cost</span>
+          <p-inputnumber styleClass="w-full" inputStyleClass="w-full" name="billingCost" [min]="0" mode="currency" currency="CAD" [(ngModel)]="form.billingCost" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-semibold text-slate-700">On hand</span>
@@ -66,6 +74,8 @@ export class InventoryItemFormComponent {
       categoryId: this.form.categoryId || undefined,
       name: this.form.name.trim(),
       unit: this.form.unit.trim(),
+      unitCost: this.form.unitCost ?? undefined,
+      billingCost: this.form.billingCost ?? undefined,
       quantityOnHand: this.form.quantityOnHand ?? 0,
       reorderLevel: this.form.reorderLevel ?? undefined,
       storageLocation: this.form.storageLocation?.trim() || undefined
@@ -81,6 +91,8 @@ export class InventoryItemFormComponent {
       categoryId: item.categoryId ?? '',
       name: item.name,
       unit: item.unit,
+      unitCost: item.unitCost,
+      billingCost: item.billingCost,
       quantityOnHand: item.quantityOnHand,
       reorderLevel: item.reorderLevel,
       storageLocation: item.storageLocation ?? ''
@@ -88,6 +100,6 @@ export class InventoryItemFormComponent {
   }
 
   private blankForm(): CreateInventoryItemRequest {
-    return { categoryId: '', name: '', unit: 'each', quantityOnHand: 0, reorderLevel: undefined, storageLocation: '' };
+    return { categoryId: '', name: '', unit: 'each', unitCost: undefined, billingCost: undefined, quantityOnHand: 0, reorderLevel: undefined, storageLocation: '' };
   }
 }

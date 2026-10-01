@@ -57,6 +57,11 @@ export const appRoutes: Routes = [
         loadComponent: () => import('./features/schedule/dispatch-schedule-page.component').then((m) => m.DispatchSchedulePageComponent)
       },
       {
+        path: 'route-intelligence',
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS'])],
+        loadComponent: () => import('./features/schedule/route-intelligence-page.component').then((m) => m.RouteIntelligencePageComponent)
+      },
+      {
         path: 'messages',
         canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/messages/messages-page.component').then((m) => m.MessagesPageComponent)
@@ -89,35 +94,17 @@ export const appRoutes: Routes = [
       {
         path: 'payments',
         canActivate: [roleGuard(['TENANT_ADMIN', 'FINANCE'])],
-        loadComponent: () => import('./shared/pages/tenant-module-placeholder.component').then((m) => m.TenantModulePlaceholderComponent),
-        data: {
-          section: 'Finance',
-          title: 'Payments',
-          summary: 'Track owner payments, outstanding balances, refunds, and payment reconciliation.',
-          capabilities: ['Payment ledger', 'Open balances', 'Refund tracking', 'Reconciliation queue']
-        }
+        loadComponent: () => import('./features/finance/payments-page.component').then((m) => m.PaymentsPageComponent)
       },
       {
         path: 'finance',
         canActivate: [roleGuard(['TENANT_ADMIN', 'FINANCE'])],
-        loadComponent: () => import('./shared/pages/tenant-module-placeholder.component').then((m) => m.TenantModulePlaceholderComponent),
-        data: {
-          section: 'Finance',
-          title: 'Finance overview',
-          summary: 'Monitor revenue, margins, material cost, payroll exposure, and overdue receivables.',
-          capabilities: ['Revenue dashboard', 'Margin by service', 'Material cost trends', 'Receivables aging']
-        }
+        loadComponent: () => import('./features/finance/finance-overview-page.component').then((m) => m.FinanceOverviewPageComponent)
       },
       {
         path: 'payroll',
-        canActivate: [roleGuard(['TENANT_ADMIN', 'FINANCE'])],
-        loadComponent: () => import('./shared/pages/tenant-module-placeholder.component').then((m) => m.TenantModulePlaceholderComponent),
-        data: {
-          section: 'People',
-          title: 'Payroll',
-          summary: 'Review worker hours, job time capture, approvals, rates, and payroll export readiness.',
-          capabilities: ['Worker time review', 'Approval queue', 'Rate exceptions', 'Payroll export']
-        }
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
+        loadComponent: () => import('./features/payroll/timesheet-page.component').then((m) => m.TimesheetPageComponent)
       },
       {
         path: 'reports',

@@ -12,6 +12,8 @@ public record UpdateTenantSettingsRequest(
         String postalCode,
         String countryCode,
         String invoicePrefix,
+        java.math.BigDecimal invoiceTaxRate,
+        String taxRegistrationNumber,
         String invoiceFooter,
         String paymentTerms,
         String logoUrl,
@@ -33,6 +35,7 @@ public record UpdateTenantSettingsRequest(
         Boolean clearGraphClientSecret,
         String graphSenderUser,
         Boolean autoSendWorkCompletedEmail,
-        Boolean autoSendInvoiceEmail
+        Boolean autoSendInvoiceEmail,
+        Boolean liveWorkerTrackingEnabled
 ) {
 }

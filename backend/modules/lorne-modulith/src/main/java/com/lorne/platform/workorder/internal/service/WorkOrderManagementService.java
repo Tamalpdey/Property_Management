@@ -8,9 +8,11 @@ import com.lorne.platform.notification.OwnerNotificationOperations;
 import com.lorne.platform.notification.WorkOrderCompletionEmail;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
+import com.lorne.platform.shared.DailyInvoiceNumberGenerator;
 import com.lorne.platform.tenant.TenantSettingsOperations;
 import com.lorne.platform.workorder.internal.dto.CancelWorkOrderRequest;
 import com.lorne.platform.workorder.internal.dto.CreateWorkOrderRequest;
+import com.lorne.platform.workorder.internal.dto.RefreshWorkOrderTravelEstimatesRequest;
 import com.lorne.platform.workorder.internal.dto.SendWorkOrderOwnerEmailRequest;
 import com.lorne.platform.workorder.internal.dto.WorkerAvailabilityDto;
 import com.lorne.platform.workorder.internal.dto.WorkOrderDto;
@@ -95,6 +97,7 @@ public class WorkOrderManagementService {
     private final ObjectMapper objectMapper;
     private final WorkOrderTravelEstimateUpdater travelEstimateUpdater;
     private final TenantSettingsOperations tenantSettingsOperations;
+    private final DailyInvoiceNumberGenerator invoiceNumberGenerator;
 
     public WorkOrderManagementService(
             JdbcTemplate jdbcTemplate,
@@ -104,7 +107,8 @@ public class WorkOrderManagementService {
             DocumentStorageService documentStorageService,
             ObjectMapper objectMapper,
             WorkOrderTravelEstimateUpdater travelEstimateUpdater,
-            TenantSettingsOperations tenantSettingsOperations
+            TenantSettingsOperations tenantSettingsOperations,
+            DailyInvoiceNumberGenerator invoiceNumberGenerator
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
@@ -114,6 +118,7 @@ public class WorkOrderManagementService {
         this.objectMapper = objectMapper;
         this.travelEstimateUpdater = travelEstimateUpdater;
         this.tenantSettingsOperations = tenantSettingsOperations;
+        this.invoiceNumberGenerator = invoiceNumberGenerator;
     }
 
     @Transactional(readOnly = true)
@@ -138,6 +143,32 @@ public class WorkOrderManagementService {
     @Transactional(readOnly = true)
     public List<WorkOrderDto> list(UUID tenantId, String statusFilter, String dateFilter, LocalDate customFrom, LocalDate customTo) {
         return workOrders(tenantId, null, WorkOrderListFilters.of(statusFilter, dateFilter, customFrom, customTo));
+    }
+
+    @Transactional
+    public List<WorkOrderDto> refreshTravelEstimates(UUID tenantId, UUID actorUserId, RefreshWorkOrderTravelEstimatesRequest request) {
+        if (request == null || request.workOrderIds() == null || request.workOrderIds().isEmpty()) {
+            throw new BadRequestException("Select at least one work order to refresh travel estimates.");
+        }
+        var workOrderIds = request.workOrderIds().stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .limit(51)
+                .toList();
+        if (workOrderIds.isEmpty()) {
+            throw new BadRequestException("Select at least one work order to refresh travel estimates.");
+        }
+        if (workOrderIds.size() > 50) {
+            throw new BadRequestException("Refresh travel estimates for 50 work orders or fewer at a time.");
+        }
+        for (var workOrderId : workOrderIds) {
+            requireWorkOrderExists(tenantId, workOrderId);
+            travelEstimateUpdater.refresh(tenantId, workOrderId);
+            auditWriter.record(tenantId, actorUserId, "WORK_ORDER_TRAVEL_ESTIMATES_REFRESHED", "WORK_ORDER", workOrderId, Map.of(
+                    "source", "ROUTE_INTELLIGENCE"
+            ));
+        }
+        return workOrders(tenantId, null, WorkOrderListFilters.ids(workOrderIds));
     }
 
     @Transactional(readOnly = true)
@@ -653,7 +684,8 @@ public class WorkOrderManagementService {
             if (assignment.workerId() == null) {
                 continue;
             }
-            requireAssignedWorker(tenantId, workOrderId, assignment.workerId());
+            ensureWorkOrderAssignment(tenantId, actorUserId, workOrderId, assignment);
+            validateAssignmentActualTimes(tenantId, workOrderId, assignment);
             var status = normalizedEnum(assignment.assignmentStatus(), WORK_ORDER_ASSIGNMENT_STATUSES, "assignment status");
             var minutes = correctedMinutes(assignment.actualArrivedAt(), assignment.actualWorkStartedAt(), assignment.actualFinishedAt(), assignment.actualWorkMinutes());
             if (status != null || assignment.leadWorker() != null || assignment.notes() != null) {
@@ -751,6 +783,8 @@ public class WorkOrderManagementService {
                 throw new BadRequestException("Worker activity start time is required.");
             }
             var endedAt = activity.endedAt();
+            rejectFutureInstant("Worker activity start time", startedAt);
+            rejectFutureInstant("Worker activity end time", endedAt);
             if (endedAt != null && !endedAt.isAfter(startedAt)) {
                 throw new BadRequestException("Worker activity end time must be after the start time.");
             }
@@ -804,6 +838,8 @@ public class WorkOrderManagementService {
         if (activity.startedAt() == null) {
             throw new BadRequestException("Worker activity start time is required.");
         }
+        rejectFutureInstant("Worker activity start time", activity.startedAt());
+        rejectFutureInstant("Worker activity end time", activity.endedAt());
         if (activity.endedAt() != null && !activity.endedAt().isAfter(activity.startedAt())) {
             throw new BadRequestException("Worker activity end time must be after the start time.");
         }
@@ -845,6 +881,7 @@ public class WorkOrderManagementService {
             var status = normalizedEnum(task.taskStatus(), WORK_ORDER_TASK_STATUSES, "task status");
             var completed = task.completed();
             var completedAt = completed == null ? task.completedAt() : Boolean.TRUE.equals(completed) ? Objects.requireNonNullElse(task.completedAt(), Instant.now()) : null;
+            rejectFutureInstant("Task completion time", completedAt);
             var updated = jdbcTemplate.update("""
                     UPDATE work_order_tasks
                     SET completed = COALESCE(?::boolean, completed),
@@ -903,6 +940,7 @@ public class WorkOrderManagementService {
                         """, tenantId, workOrderId, routeStop.routeStopId());
                 continue;
             }
+            validateRouteStopActualTimes(routeStop);
             var updated = jdbcTemplate.update("""
                     UPDATE work_order_route_stops
                     SET stop_type = COALESCE(?::text, stop_type),
@@ -958,6 +996,7 @@ public class WorkOrderManagementService {
         if (name == null) {
             return 0;
         }
+        validateRouteStopActualTimes(routeStop);
         var stopOrder = jdbcTemplate.queryForObject("""
                 SELECT COALESCE(MAX(stop_order), 0) + 1
                 FROM work_order_route_stops
@@ -1015,6 +1054,7 @@ public class WorkOrderManagementService {
                 continue;
             }
             var usedAt = Boolean.TRUE.equals(material.used()) ? Objects.requireNonNullElse(material.usedAt(), Instant.now()) : material.usedAt();
+            rejectFutureInstant("Material used time", usedAt);
             var updated = jdbcTemplate.update("""
                     UPDATE work_order_materials
                     SET used = COALESCE(?::boolean, used),
@@ -1030,6 +1070,7 @@ public class WorkOrderManagementService {
                         END,
                         quantity = COALESCE(?::numeric, quantity),
                         unit_cost = COALESCE(?::numeric, unit_cost),
+                        billing_cost = COALESCE(?::numeric, billing_cost),
                         updated_by = ?,
                         updated_at = now()
                     WHERE tenant_id = ? AND work_order_id = ? AND id = ?
@@ -1044,6 +1085,7 @@ public class WorkOrderManagementService {
                     material.used(),
                     material.quantity(),
                     material.unitCost(),
+                    material.billingCost(),
                     actorUserId,
                     tenantId,
                     workOrderId,
@@ -1060,28 +1102,33 @@ public class WorkOrderManagementService {
             UUID workOrderId,
             WorkOrderFieldOverrideRequest.MaterialOverride material
     ) {
+        var item = inventoryItem(tenantId, material.inventoryItemId());
         var description = blankToNull(material.description());
-        if (description == null) {
+        if (description == null && item == null) {
             return 0;
         }
         var quantity = material.quantity() == null || material.quantity().signum() <= 0
                 ? BigDecimal.ONE
                 : material.quantity();
+        var unitCost = material.unitCost() == null && item != null ? item.unitCost() : material.unitCost();
+        var billingCost = material.billingCost() == null && item != null ? item.billingCost() : material.billingCost();
         var used = Boolean.TRUE.equals(material.used());
         var usedAt = used ? Objects.requireNonNullElse(material.usedAt(), Instant.now()) : material.usedAt();
+        rejectFutureInstant("Material used time", usedAt);
         jdbcTemplate.update("""
                 INSERT INTO work_order_materials (
-                    tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost,
+                    tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost, billing_cost,
                     used, used_at, used_by, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?::boolean, ?::timestamptz, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::boolean, ?::timestamptz, ?, ?, ?)
                 """,
                 tenantId,
                 workOrderId,
                 material.inventoryItemId(),
-                description,
+                description == null ? item.name() : description,
                 quantity,
-                material.unitCost(),
+                unitCost,
+                billingCost,
                 used,
                 timestamp(usedAt),
                 used ? actorUserId : null,
@@ -1126,6 +1173,78 @@ public class WorkOrderManagementService {
 
     private <T> List<T> nullToEmpty(List<T> values) {
         return values == null ? List.of() : values;
+    }
+
+    private void ensureWorkOrderAssignment(
+            UUID tenantId,
+            UUID actorUserId,
+            UUID workOrderId,
+            WorkOrderFieldOverrideRequest.AssignmentOverride assignment
+    ) {
+        requireTenantWorker(tenantId, assignment.workerId());
+        jdbcTemplate.update("""
+                INSERT INTO work_order_assignments (tenant_id, work_order_id, worker_id, lead_worker, created_by, updated_by)
+                VALUES (?, ?, ?, COALESCE(?::boolean, false), ?, ?)
+                ON CONFLICT (tenant_id, work_order_id, worker_id)
+                DO NOTHING
+                """,
+                tenantId,
+                workOrderId,
+                assignment.workerId(),
+                assignment.leadWorker(),
+                actorUserId,
+                actorUserId
+        );
+    }
+
+    private void validateAssignmentActualTimes(
+            UUID tenantId,
+            UUID workOrderId,
+            WorkOrderFieldOverrideRequest.AssignmentOverride assignment
+    ) {
+        rejectFutureInstant("Actual arrival time", assignment.actualArrivedAt());
+        rejectFutureInstant("Actual work start time", assignment.actualWorkStartedAt());
+        rejectFutureInstant("Actual finish time", assignment.actualFinishedAt());
+        rejectBefore("Actual work start time", assignment.actualWorkStartedAt(), "actual arrival time", assignment.actualArrivedAt());
+        rejectBefore("Actual finish time", assignment.actualFinishedAt(), "actual work start time", assignment.actualWorkStartedAt());
+        rejectBefore("Actual finish time", assignment.actualFinishedAt(), "actual arrival time", assignment.actualArrivedAt());
+        if (assignment.actualArrivedAt() != null) {
+            var travelStartedAt = assignmentTravelStartedAt(tenantId, workOrderId, assignment.workerId());
+            rejectBefore("Actual arrival time", assignment.actualArrivedAt(), "travel start time", travelStartedAt);
+        }
+    }
+
+    private Instant assignmentTravelStartedAt(UUID tenantId, UUID workOrderId, UUID workerId) {
+        var timestamp = jdbcTemplate.queryForObject("""
+                SELECT MIN(al.created_at)
+                FROM audit_logs al
+                WHERE al.tenant_id = ?
+                  AND al.resource_type = 'WORK_ORDER'
+                  AND al.resource_id = ?
+                  AND al.action = 'WORKER_START_TRAVEL'
+                  AND (al.metadata ->> 'workerId')::uuid = ?
+                """, Timestamp.class, tenantId, workOrderId, workerId);
+        return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private void validateRouteStopActualTimes(WorkOrderFieldOverrideRequest.RouteStopOverride routeStop) {
+        rejectFutureInstant("Route stop arrival time", routeStop.arrivedAt());
+        rejectFutureInstant("Route stop completion time", routeStop.completedAt());
+        rejectFutureInstant("Route stop skipped time", routeStop.skippedAt());
+        rejectBefore("Route stop completion time", routeStop.completedAt(), "route stop arrival time", routeStop.arrivedAt());
+        rejectBefore("Route stop skipped time", routeStop.skippedAt(), "route stop arrival time", routeStop.arrivedAt());
+    }
+
+    private void rejectFutureInstant(String label, Instant value) {
+        if (value != null && value.isAfter(Instant.now())) {
+            throw new BadRequestException(label + " cannot be in the future.");
+        }
+    }
+
+    private void rejectBefore(String label, Instant value, String floorLabel, Instant floor) {
+        if (value != null && floor != null && value.isBefore(floor)) {
+            throw new BadRequestException(label + " cannot be before " + floorLabel + ".");
+        }
     }
 
     private void requireAssignedWorker(UUID tenantId, UUID workOrderId, UUID workerId) {
@@ -1219,16 +1338,25 @@ public class WorkOrderManagementService {
         if (!existing.isEmpty()) {
             return review(tenantId, actorUserId, workOrderId);
         }
-        var invoiceId = UUID.randomUUID();
-        var invoiceNumber = invoiceNumber();
         var today = LocalDate.now(tenantZoneId(tenantId));
+        var invoiceId = UUID.randomUUID();
+        var invoiceNumber = invoiceNumberGenerator.next(tenantId, today);
         var dueOn = today.plusDays(30);
         var lines = invoiceLines(tenantId, workOrder);
         var subtotal = lines.stream()
                 .map(InvoiceLineDraft::lineTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
-        var taxTotal = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        var taxRate = invoiceTaxRate(tenantId);
+        var taxable = taxRate.signum() > 0;
+        var taxTotal = taxable
+                ? lines.stream()
+                        .map(InvoiceLineDraft::lineTotal)
+                        .filter(total -> total.signum() > 0)
+                        .map(total -> total.multiply(taxRate))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         var total = subtotal.add(taxTotal).setScale(2, RoundingMode.HALF_UP);
         jdbcTemplate.update("""
                 INSERT INTO invoices (
@@ -1253,17 +1381,20 @@ public class WorkOrderManagementService {
         for (var line : lines) {
             jdbcTemplate.update("""
                     INSERT INTO invoice_lines (
-                        tenant_id, invoice_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate, created_by, updated_by
+                        tenant_id, invoice_id, work_order_id, line_type, description, quantity, unit_price, line_total, taxable, tax_rate, created_by, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, false, 0, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     tenantId,
                     invoiceId,
+                    workOrderId,
                     invoiceLineType(line.sourceType()),
                     line.description(),
                     line.quantity(),
                     line.unitPrice(),
                     line.lineTotal(),
+                    taxable,
+                    taxRate,
                     actorUserId,
                     actorUserId
             );
@@ -1295,8 +1426,9 @@ public class WorkOrderManagementService {
     private List<WorkOrderDto> workOrders(UUID tenantId, UUID workOrderId, WorkOrderListFilters filters) {
         var sql = new StringBuilder("""
                 SELECT wo.id, wo.customer_id, c.owner_code, c.display_name AS owner_name, wo.property_id, p.property_code, p.name AS property_name,
-                       p.address_line1 || ', ' || p.city AS property_address, wo.service_type_id, st.name AS service_name,
-                       st.maintenance_record_template::text AS maintenance_record_template,
+                       p.address_line1 || ', ' || p.city AS property_address, p.latitude AS property_latitude, p.longitude AS property_longitude,
+                       wo.service_type_id, st.name AS service_name,
+                       COALESCE(sc.maintenance_record_template, st.maintenance_record_template)::text AS maintenance_record_template,
                        wo.work_order_number, wo.work_order_type, wo.title, wo.description, wo.status::text AS status, wo.source::text AS source, wo.priority::text AS priority,
                        wo.scheduled_start, wo.scheduled_end, wo.requester_name, wo.requester_email, wo.requester_phone,
                        wo.recurrence_rule, wo.recurrence_interval, wo.recurrence_until
@@ -1304,6 +1436,7 @@ public class WorkOrderManagementService {
                 JOIN customers c ON c.id = wo.customer_id AND c.tenant_id = wo.tenant_id
                 JOIN properties p ON p.id = wo.property_id AND p.tenant_id = wo.tenant_id
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
+                LEFT JOIN service_categories sc ON sc.id = st.category_id AND sc.tenant_id = st.tenant_id
                 WHERE wo.tenant_id = ?
                 """);
         var args = new ArrayList<Object>();
@@ -1311,6 +1444,10 @@ public class WorkOrderManagementService {
         if (workOrderId != null) {
             sql.append(" AND wo.id = ? ");
             args.add(workOrderId);
+        }
+        if (!filters.workOrderIds().isEmpty()) {
+            sql.append(" AND wo.id IN (").append(placeholders(new LinkedHashSet<>(filters.workOrderIds()))).append(") ");
+            args.addAll(filters.workOrderIds());
         }
         applyStatusFilter(sql, filters);
         applyDateFilter(sql, args, tenantId, filters);
@@ -1327,6 +1464,8 @@ public class WorkOrderManagementService {
                 rs.getString("property_code"),
                 rs.getString("property_name"),
                 rs.getString("property_address"),
+                rs.getBigDecimal("property_latitude"),
+                rs.getBigDecimal("property_longitude"),
                 rs.getObject("service_type_id", UUID.class),
                 rs.getString("service_name"),
                 serviceTemplate(rs.getString("maintenance_record_template")),
@@ -1368,6 +1507,8 @@ public class WorkOrderManagementService {
                         row.propertyCode(),
                         row.propertyName(),
                         row.propertyAddress(),
+                        row.propertyLatitude(),
+                        row.propertyLongitude(),
                         row.serviceTypeId(),
                         row.serviceName(),
                         row.maintenanceRecordTemplate(),
@@ -1871,6 +2012,7 @@ public class WorkOrderManagementService {
                        END AS communication_type,
                        edl.invoice_id,
                        i.invoice_number,
+                       coalesce(communication_st.name, communication_wo.title) AS service_name,
                        edl.recipient_email,
                        edl.subject,
                        edl.body,
@@ -1881,6 +2023,8 @@ public class WorkOrderManagementService {
                        edl.created_at
                 FROM email_delivery_logs edl
                 LEFT JOIN invoices i ON i.id = edl.invoice_id AND i.tenant_id = edl.tenant_id
+                LEFT JOIN work_orders communication_wo ON communication_wo.id = ? AND communication_wo.tenant_id = edl.tenant_id
+                LEFT JOIN service_types communication_st ON communication_st.id = communication_wo.service_type_id AND communication_st.tenant_id = communication_wo.tenant_id
                 WHERE edl.tenant_id = ?
                   AND (
                     edl.work_order_id = ?
@@ -1900,6 +2044,7 @@ public class WorkOrderManagementService {
                 rs.getString("communication_type"),
                 rs.getObject("invoice_id", UUID.class),
                 rs.getString("invoice_number"),
+                rs.getString("service_name"),
                 rs.getString("recipient_email"),
                 rs.getString("subject"),
                 rs.getString("body"),
@@ -1908,7 +2053,7 @@ public class WorkOrderManagementService {
                 rs.getString("delivery_mode"),
                 instant("sent_at", rs),
                 instant("created_at", rs)
-        ), tenantId, workOrderId, workOrderId, workOrderId);
+        ), workOrderId, tenantId, workOrderId, workOrderId, workOrderId);
     }
 
     private List<WorkOrderReviewDto.AuditEntryDto> auditEntries(UUID tenantId, UUID workOrderId) {
@@ -1939,7 +2084,7 @@ public class WorkOrderManagementService {
 
     private List<InvoiceLineDraft> invoiceLines(UUID tenantId, WorkOrderDto workOrder) {
         var lines = new ArrayList<InvoiceLineDraft>();
-        var serviceLine = jdbcTemplate.query("""
+        var service = jdbcTemplate.query("""
                 SELECT coalesce(st.name, ?) AS service_name, coalesce(st.base_price, 0) AS base_price
                 FROM work_orders wo
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
@@ -1952,26 +2097,21 @@ public class WorkOrderManagementService {
             if (price.signum() <= 0) {
                 return null;
             }
-            return new InvoiceLineDraft(
-                    rs.getString("service_name"),
-                    BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP),
-                    price,
-                    price,
-                    "SERVICE"
-            );
+            return new ServiceBillingDraft(rs.getString("service_name"), price);
         }, workOrder.title(), tenantId, workOrder.id());
-        if (serviceLine != null) {
-            lines.add(serviceLine);
+        if (service != null) {
+            lines.addAll(laborLines(workOrder, service));
         }
         lines.addAll(jdbcTemplate.query("""
-                SELECT coalesce(ii.name, wom.description) AS description, wom.quantity, coalesce(wom.unit_cost, 0) AS unit_cost
+                SELECT coalesce(ii.name, wom.description) AS description, wom.quantity,
+                       coalesce(wom.billing_cost, ii.billing_cost, wom.unit_cost, 0) AS billing_cost
                 FROM work_order_materials wom
                 LEFT JOIN inventory_items ii ON ii.id = wom.inventory_item_id AND ii.tenant_id = wom.tenant_id
                 WHERE wom.tenant_id = ? AND wom.work_order_id = ? AND wom.used = true
                 ORDER BY wom.created_at, wom.description
                 """, (rs, rowNum) -> {
             var quantity = money(rs.getBigDecimal("quantity"));
-            var unitPrice = money(rs.getBigDecimal("unit_cost"));
+            var unitPrice = money(rs.getBigDecimal("billing_cost"));
             var lineTotal = quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP);
             return new InvoiceLineDraft(
                     "Material: " + rs.getString("description"),
@@ -1987,21 +2127,49 @@ public class WorkOrderManagementService {
                     BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP),
                     BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
                     BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
-                    "SERVICE"
+                    "LABOR"
             ));
         }
         return lines;
+    }
+
+    private List<InvoiceLineDraft> laborLines(WorkOrderDto workOrder, ServiceBillingDraft service) {
+        return workOrder.assignments().stream()
+                .filter(assignment -> assignment.actualWorkMinutes() != null && assignment.actualWorkMinutes() > 0)
+                .map(assignment -> {
+                    var hours = hoursFromMinutes(assignment.actualWorkMinutes());
+                    var lineTotal = hours.multiply(service.hourlyRate()).setScale(2, RoundingMode.HALF_UP);
+                    return new InvoiceLineDraft(
+                            assignment.workerName(),
+                            hours,
+                            service.hourlyRate(),
+                            lineTotal,
+                            "LABOR"
+                    );
+                })
+                .filter(line -> line.lineTotal().signum() > 0)
+                .toList();
     }
 
     private BigDecimal money(BigDecimal value) {
         return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private String invoiceNumber() {
-        return "INV-%s-%s".formatted(
-                LocalDate.now().toString().replace("-", ""),
-                UUID.randomUUID().toString().substring(0, 6).toUpperCase()
-        );
+    private BigDecimal hoursFromMinutes(long minutes) {
+        if (minutes <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.valueOf(minutes)
+                .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal invoiceTaxRate(UUID tenantId) {
+        var taxRate = tenantSettingsOperations.settings(tenantId).invoiceTaxRate();
+        var normalized = (taxRate == null ? BigDecimal.ZERO : taxRate).setScale(4, RoundingMode.HALF_UP);
+        if (normalized.signum() < 0 || normalized.compareTo(BigDecimal.ONE) > 0) {
+            throw new BadRequestException("Invoice tax rate must be between 0 and 1.");
+        }
+        return normalized;
     }
 
     private String invoiceLineType(String sourceType) {
@@ -2257,13 +2425,62 @@ public class WorkOrderManagementService {
         if (customFrom == null && customTo == null) {
             return;
         }
-        sql.append(" AND wo.scheduled_start IS NOT NULL ");
+        sql.append(" AND (");
+        appendTimestampRange(sql, args, "wo.scheduled_start", customFrom, customTo, zoneId);
+        sql.append(" OR ");
+        appendTimestampRange(sql, args, "wo.scheduled_end", customFrom, customTo, zoneId);
+        sql.append("""
+                 OR EXISTS (
+                    SELECT 1
+                    FROM audit_logs al
+                    WHERE al.tenant_id = wo.tenant_id
+                      AND al.resource_type = 'WORK_ORDER'
+                      AND al.resource_id = wo.id
+                      AND al.action IN ('WORKER_START_TRAVEL', 'WORKER_ARRIVE_ON_SITE', 'WORKER_START_WORK', 'WORKER_COMPLETE_WORK')
+                """);
+        appendTimestampBounds(sql, args, "al.created_at", customFrom, customTo, zoneId);
+        sql.append(") OR EXISTS (");
+        sql.append("""
+                    SELECT 1
+                    FROM work_order_assignment_overrides wao
+                    WHERE wao.tenant_id = wo.tenant_id
+                      AND wao.work_order_id = wo.id
+                      AND (
+                """);
+        appendTimestampRange(sql, args, "wao.actual_arrived_at", customFrom, customTo, zoneId);
+        sql.append(" OR ");
+        appendTimestampRange(sql, args, "wao.actual_work_started_at", customFrom, customTo, zoneId);
+        sql.append(" OR ");
+        appendTimestampRange(sql, args, "wao.actual_finished_at", customFrom, customTo, zoneId);
+        sql.append(")) OR EXISTS (");
+        sql.append("""
+                    SELECT 1
+                    FROM work_order_route_stops wors
+                    WHERE wors.tenant_id = wo.tenant_id
+                      AND wors.work_order_id = wo.id
+                      AND (
+                """);
+        appendTimestampRange(sql, args, "wors.planned_arrival", customFrom, customTo, zoneId);
+        sql.append(" OR ");
+        appendTimestampRange(sql, args, "wors.arrived_at", customFrom, customTo, zoneId);
+        sql.append(" OR ");
+        appendTimestampRange(sql, args, "wors.completed_at", customFrom, customTo, zoneId);
+        sql.append("))) ");
+    }
+
+    private void appendTimestampRange(StringBuilder sql, List<Object> args, String expression, LocalDate customFrom, LocalDate customTo, ZoneId zoneId) {
+        sql.append("(").append(expression).append(" IS NOT NULL");
+        appendTimestampBounds(sql, args, expression, customFrom, customTo, zoneId);
+        sql.append(")");
+    }
+
+    private void appendTimestampBounds(StringBuilder sql, List<Object> args, String expression, LocalDate customFrom, LocalDate customTo, ZoneId zoneId) {
         if (customFrom != null) {
-            sql.append(" AND wo.scheduled_start >= ?::timestamptz ");
+            sql.append(" AND ").append(expression).append(" >= ?::timestamptz ");
             args.add(timestamp(customFrom.atStartOfDay(zoneId).toInstant()));
         }
         if (customTo != null) {
-            sql.append(" AND wo.scheduled_start < ?::timestamptz ");
+            sql.append(" AND ").append(expression).append(" < ?::timestamptz ");
             args.add(timestamp(customTo.plusDays(1).atStartOfDay(zoneId).toInstant()));
         }
     }
@@ -2319,6 +2536,7 @@ public class WorkOrderManagementService {
                     FROM work_order_time_entries wote
                     WHERE wote.tenant_id = ?
                       AND wote.work_order_id IN (%s)
+                      AND wote.entry_type = 'WORK'
                     GROUP BY wote.work_order_id, wote.worker_id
                 )
                 SELECT woa.work_order_id, woa.worker_id,
@@ -2382,7 +2600,7 @@ public class WorkOrderManagementService {
         var materials = new LinkedHashMap<UUID, List<WorkOrderDto.MaterialDto>>();
         jdbcTemplate.query("""
                 SELECT wom.id, wom.work_order_id, wom.inventory_item_id, ii.name AS item_name,
-                       wom.description, wom.quantity, ii.unit, wom.unit_cost, wom.used, wom.used_at
+                       wom.description, wom.quantity, ii.unit, wom.unit_cost, wom.billing_cost, wom.used, wom.used_at
                 FROM work_order_materials wom
                 LEFT JOIN inventory_items ii ON ii.id = wom.inventory_item_id AND ii.tenant_id = wom.tenant_id
                 WHERE wom.tenant_id = ?
@@ -2397,6 +2615,7 @@ public class WorkOrderManagementService {
                         rs.getBigDecimal("quantity"),
                         rs.getString("unit"),
                         rs.getBigDecimal("unit_cost"),
+                        rs.getBigDecimal("billing_cost"),
                         rs.getBoolean("used"),
                         instant("used_at", rs)
                 )
@@ -2761,6 +2980,7 @@ public class WorkOrderManagementService {
                     item.put("quantity", material.quantity());
                     item.put("unit", material.unit());
                     item.put("unitCost", material.unitCost());
+                    item.put("billingCost", material.billingCost());
                     item.put("used", material.used());
                     item.put("usedAt", material.usedAt() == null ? null : material.usedAt().toString());
                     return item;
@@ -2846,13 +3066,17 @@ public class WorkOrderManagementService {
         return instant == null ? null : Timestamp.from(instant);
     }
 
-    private record WorkOrderListFilters(String statusFilter, String dateFilter, LocalDate customFrom, LocalDate customTo) {
+    private record WorkOrderListFilters(String statusFilter, String dateFilter, LocalDate customFrom, LocalDate customTo, List<UUID> workOrderIds) {
         private static WorkOrderListFilters all() {
-            return new WorkOrderListFilters("ALL", "ALL", null, null);
+            return new WorkOrderListFilters("ALL", "ALL", null, null, List.of());
+        }
+
+        private static WorkOrderListFilters ids(List<UUID> workOrderIds) {
+            return new WorkOrderListFilters("ALL", "ALL", null, null, workOrderIds == null ? List.of() : workOrderIds);
         }
 
         private static WorkOrderListFilters of(String statusFilter, String dateFilter, LocalDate customFrom, LocalDate customTo) {
-            return new WorkOrderListFilters(normalizedFilter(statusFilter), normalizedFilter(dateFilter), customFrom, customTo);
+            return new WorkOrderListFilters(normalizedFilter(statusFilter), normalizedFilter(dateFilter), customFrom, customTo, List.of());
         }
 
         private static String normalizedFilter(String value) {
@@ -2871,6 +3095,8 @@ public class WorkOrderManagementService {
             String propertyCode,
             String propertyName,
             String propertyAddress,
+            BigDecimal propertyLatitude,
+            BigDecimal propertyLongitude,
             UUID serviceTypeId,
             String serviceName,
             Map<String, Object> maintenanceRecordTemplate,
@@ -2893,12 +3119,15 @@ public class WorkOrderManagementService {
     private record PropertyRef(UUID propertyId, UUID ownerId) {
     }
 
-    private record InventoryItemRef(String name) {
+    private record InventoryItemRef(String name, BigDecimal unitCost, BigDecimal billingCost) {
+    }
+
+    private record ServiceBillingDraft(String serviceName, BigDecimal hourlyRate) {
     }
 
     private record InvoiceLineDraft(String description, BigDecimal quantity, BigDecimal unitPrice, BigDecimal lineTotal, String sourceType) {
         private boolean serviceLine() {
-            return "SERVICE".equals(sourceType);
+            return "LABOR".equals(sourceType);
         }
 
         private boolean materialLine() {
@@ -2960,16 +3189,19 @@ public class WorkOrderManagementService {
             if (description == null && item == null) {
                 throw new BadRequestException("Material description is required when no inventory item is selected.");
             }
+            var unitCost = material.unitCost() == null && item != null ? item.unitCost() : material.unitCost();
+            var billingCost = material.billingCost() == null && item != null ? item.billingCost() : material.billingCost();
             if (material.id() != null && existingMaterialIds.contains(material.id())) {
                 jdbcTemplate.update("""
                         UPDATE work_order_materials
-                        SET inventory_item_id = ?, description = ?, quantity = ?, unit_cost = ?, updated_by = ?, updated_at = now()
+                        SET inventory_item_id = ?, description = ?, quantity = ?, unit_cost = ?, billing_cost = ?, updated_by = ?, updated_at = now()
                         WHERE tenant_id = ? AND work_order_id = ? AND id = ?
                         """,
                         material.inventoryItemId(),
                         description == null ? item.name() : description,
                         material.quantity(),
-                        material.unitCost(),
+                        unitCost,
+                        billingCost,
                         actorUserId,
                         tenantId,
                         workOrderId,
@@ -2980,9 +3212,9 @@ public class WorkOrderManagementService {
             }
             var materialId = jdbcTemplate.queryForObject("""
                     INSERT INTO work_order_materials (
-                        tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost, created_by, updated_by
+                        tenant_id, work_order_id, inventory_item_id, description, quantity, unit_cost, billing_cost, created_by, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                     """,
                     UUID.class,
@@ -2991,7 +3223,8 @@ public class WorkOrderManagementService {
                     material.inventoryItemId(),
                     description == null ? item.name() : description,
                     material.quantity(),
-                    material.unitCost(),
+                    unitCost,
+                    billingCost,
                     actorUserId,
                     actorUserId
             );
@@ -3162,14 +3395,14 @@ public class WorkOrderManagementService {
             return null;
         }
         return jdbcTemplate.query("""
-                SELECT name
+                SELECT name, unit_cost, billing_cost
                 FROM inventory_items
                 WHERE tenant_id = ? AND id = ?
                 """, rs -> {
             if (!rs.next()) {
                 throw new BadRequestException("Inventory item is not available for this tenant.");
             }
-            return new InventoryItemRef(rs.getString("name"));
+            return new InventoryItemRef(rs.getString("name"), rs.getBigDecimal("unit_cost"), rs.getBigDecimal("billing_cost"));
         }, tenantId, inventoryItemId);
     }
 

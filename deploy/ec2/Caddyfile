@@ -29,13 +29,29 @@
 {$ROOT_DOMAIN}, maplepropertyservices.ca {
   import security_headers
 
-  redir https://{$APP_DOMAIN}{uri} permanent
+  handle /login {
+    redir https://{$APP_DOMAIN}/login 308
+  }
+
+  handle {
+    root * /srv/maple-site
+    try_files {path} /index.html
+    file_server
+  }
 }
 
 {$MAIN_DOMAIN}, www.maplepropertyservices.ca {
   import security_headers
 
-  redir https://{$APP_DOMAIN}{uri} permanent
+  handle /login {
+    redir https://{$APP_DOMAIN}/login 308
+  }
+
+  handle {
+    root * /srv/maple-site
+    try_files {path} /index.html
+    file_server
+  }
 }
 
 platinumservices.ca, www.platinumservices.ca {

@@ -104,6 +104,15 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                   <span class="field-label">Invoice prefix</span>
                   <input class="field-input uppercase" name="invoicePrefix" maxlength="12" [(ngModel)]="form.invoicePrefix" />
                 </label>
+                <label class="block">
+                  <span class="field-label">Invoice tax %</span>
+                  <input class="field-input" name="invoiceTaxPercent" type="number" min="0" max="100" step="0.01" [ngModel]="taxPercent()" (ngModelChange)="setTaxPercent($event)" />
+                </label>
+                <label class="block md:col-span-2">
+                  <span class="field-label">GST/HST registration #</span>
+                  <input class="field-input uppercase" name="taxRegistrationNumber" maxlength="40" placeholder="Example: 123456789 RT0001" [(ngModel)]="form.taxRegistrationNumber" />
+                  <span class="mt-1 block text-xs font-semibold text-slate-500">Displayed with the invoice number and dates on generated invoices.</span>
+                </label>
                 <label class="block md:col-span-2">
                   <span class="field-label">Logo URL</span>
                   <div class="logo-url-row">
@@ -271,6 +280,25 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                     </label>
                   </div>
                 </section>
+                <section class="rounded-lg border border-sky-100 bg-sky-50/70 p-3">
+                  <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div class="max-w-2xl">
+                      <p class="text-xs font-black uppercase tracking-wide text-sky-700">Worker location</p>
+                      <h2 class="mt-1 text-lg font-black text-slate-950">Live tracking is opt-in</h2>
+                      <p class="mt-1 text-sm font-semibold leading-6 text-slate-600">
+                        Enable only when the tenant wants continuous GPS features such as auto-arrival while a worker is travelling to a job.
+                      </p>
+                    </div>
+                    <p-tag [value]="form.liveWorkerTrackingEnabled ? 'Live tracking on' : 'Live tracking off'" [severity]="form.liveWorkerTrackingEnabled ? 'success' : 'secondary'" />
+                  </div>
+                  <label class="mt-3 flex items-start gap-2 rounded-lg border border-sky-100 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                    <input class="mt-1" type="checkbox" name="liveWorkerTrackingEnabled" [(ngModel)]="form.liveWorkerTrackingEnabled" />
+                    <span>
+                      <span class="block">Enable live worker tracking</span>
+                      <span class="block text-xs font-semibold text-slate-500">Allows the worker app to run watch-based GPS features. Manual actions may still capture one-time GPS for audit.</span>
+                    </span>
+                  </label>
+                </section>
                 <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <p class="text-xs font-black uppercase tracking-wide text-slate-500">More tenant controls</p>
                   <p class="mt-1 text-sm font-semibold text-slate-600">Additional tenant-wide behavior switches can live here without crowding profile, invoice, or email setup.</p>
@@ -351,6 +379,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
               <span class="rounded-lg bg-slate-50 px-3 py-2">Graph secret: {{ settings()?.graphClientSecretConfigured ? 'configured' : 'not configured' }}</span>
               <span class="rounded-lg bg-slate-50 px-3 py-2">Work completed: {{ form.autoSendWorkCompletedEmail ? 'auto-send on' : 'manual confirmation' }}</span>
               <span class="rounded-lg bg-slate-50 px-3 py-2">Invoice email: {{ form.autoSendInvoiceEmail ? 'auto-send on' : 'manual confirmation' }}</span>
+              <span class="rounded-lg bg-slate-50 px-3 py-2">Worker tracking: {{ form.liveWorkerTrackingEnabled ? 'live tracking enabled' : 'manual action GPS only' }}</span>
             </div>
             <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div class="flex items-start justify-between gap-2">
@@ -579,6 +608,8 @@ export class TenantSettingsPageComponent {
       postalCode: settings.postalCode || '',
       countryCode: settings.countryCode || '',
       invoicePrefix: settings.invoicePrefix || 'INV',
+      invoiceTaxRate: settings.invoiceTaxRate ?? 0.13,
+      taxRegistrationNumber: settings.taxRegistrationNumber || '',
       invoiceFooter: settings.invoiceFooter || '',
       paymentTerms: settings.paymentTerms || '',
       logoUrl: settings.logoUrl || '',
@@ -600,7 +631,8 @@ export class TenantSettingsPageComponent {
       clearGraphClientSecret: false,
       graphSenderUser: settings.graphSenderUser || '',
       autoSendWorkCompletedEmail: settings.autoSendWorkCompletedEmail,
-      autoSendInvoiceEmail: settings.autoSendInvoiceEmail
+      autoSendInvoiceEmail: settings.autoSendInvoiceEmail,
+      liveWorkerTrackingEnabled: settings.liveWorkerTrackingEnabled
     });
     this.testEmailForm.recipientEmail ||= settings.supportEmail || settings.billingEmail || settings.emailFromAddress || '';
     this.testEmailForm.subject ||= `Email test from ${settings.organizationName || settings.tenantName}`;
@@ -634,6 +666,15 @@ export class TenantSettingsPageComponent {
       return 'microsoft graph';
     }
     return this.form.emailProvider === 'TENANT_SMTP' ? 'tenant smtp' : 'platform';
+  }
+
+  protected taxPercent(): number {
+    return Number(((this.form.invoiceTaxRate ?? 0) * 100).toFixed(2));
+  }
+
+  protected setTaxPercent(value: number | string): void {
+    const percent = Number(value || 0);
+    this.form.invoiceTaxRate = Math.max(0, Math.min(100, percent)) / 100;
   }
 
   protected automationSummary(): string {

@@ -50,14 +50,16 @@ public class InventoryService {
     public InventoryCatalogResponse.InventoryItemDto createItem(UUID tenantId, UUID actorUserId, CreateInventoryItemRequest request) {
         requireInventoryCategory(tenantId, request.categoryId());
         var id = jdbcTemplate.queryForObject("""
-                INSERT INTO inventory_items (tenant_id, category_id, name, unit, quantity_on_hand, reorder_level, storage_location)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO inventory_items (tenant_id, category_id, name, unit, unit_cost, billing_cost, quantity_on_hand, reorder_level, storage_location)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId,
                 request.categoryId(),
                 request.name(),
                 request.unit(),
+                request.unitCost(),
+                request.billingCost(),
                 request.quantityOnHand(),
                 request.reorderLevel(),
                 blankToNull(request.storageLocation())
@@ -66,6 +68,8 @@ public class InventoryService {
         auditWriter.record(tenantId, actorUserId, "INVENTORY_ITEM_CREATED", "INVENTORY_ITEM", id, Map.of(
                 "name", request.name(),
                 "unit", request.unit(),
+                "unitCost", request.unitCost() == null ? "" : request.unitCost(),
+                "billingCost", request.billingCost() == null ? "" : request.billingCost(),
                 "quantityOnHand", request.quantityOnHand(),
                 "reorderLevel", request.reorderLevel() == null ? "" : request.reorderLevel(),
                 "categoryName", categoryName == null ? "" : categoryName,
@@ -77,6 +81,8 @@ public class InventoryService {
                 categoryName,
                 request.name(),
                 request.unit(),
+                request.unitCost(),
+                request.billingCost(),
                 request.quantityOnHand(),
                 request.reorderLevel(),
                 blankToNull(request.storageLocation()),
@@ -90,13 +96,15 @@ public class InventoryService {
         requireInventoryCategory(tenantId, request.categoryId());
         var updated = jdbcTemplate.update("""
                 UPDATE inventory_items
-                SET category_id = ?, name = ?, unit = ?, quantity_on_hand = ?, reorder_level = ?,
+                SET category_id = ?, name = ?, unit = ?, unit_cost = ?, billing_cost = ?, quantity_on_hand = ?, reorder_level = ?,
                     storage_location = ?, updated_at = now(), updated_by = ?
                 WHERE tenant_id = ? AND id = ?
                 """,
                 request.categoryId(),
                 request.name(),
                 request.unit(),
+                request.unitCost(),
+                request.billingCost(),
                 request.quantityOnHand(),
                 request.reorderLevel(),
                 blankToNull(request.storageLocation()),
@@ -111,6 +119,8 @@ public class InventoryService {
         auditWriter.record(tenantId, actorUserId, "INVENTORY_ITEM_UPDATED", "INVENTORY_ITEM", itemId, Map.of(
                 "name", item.name(),
                 "unit", item.unit(),
+                "unitCost", item.unitCost() == null ? "" : item.unitCost(),
+                "billingCost", item.billingCost() == null ? "" : item.billingCost(),
                 "quantityOnHand", item.quantityOnHand(),
                 "reorderLevel", item.reorderLevel() == null ? "" : item.reorderLevel(),
                 "storageLocation", item.storageLocation() == null ? "" : item.storageLocation()
@@ -161,7 +171,8 @@ public class InventoryService {
 
     private java.util.List<InventoryCatalogResponse.InventoryItemDto> items(UUID tenantId) {
         return jdbcTemplate.query("""
-                SELECT ii.id, ii.category_id, ic.name AS category_name, ii.name, ii.unit, ii.quantity_on_hand, ii.reorder_level, ii.storage_location, ii.active
+                SELECT ii.id, ii.category_id, ic.name AS category_name, ii.name, ii.unit, ii.unit_cost, ii.billing_cost,
+                       ii.quantity_on_hand, ii.reorder_level, ii.storage_location, ii.active
                 FROM inventory_items ii
                 LEFT JOIN inventory_categories ic ON ic.id = ii.category_id AND ic.tenant_id = ii.tenant_id
                 WHERE ii.tenant_id = ?
@@ -172,6 +183,8 @@ public class InventoryService {
                 rs.getString("category_name"),
                 rs.getString("name"),
                 rs.getString("unit"),
+                rs.getBigDecimal("unit_cost"),
+                rs.getBigDecimal("billing_cost"),
                 rs.getBigDecimal("quantity_on_hand"),
                 rs.getBigDecimal("reorder_level"),
                 rs.getString("storage_location"),
@@ -181,7 +194,7 @@ public class InventoryService {
 
     private InventoryCatalogResponse.InventoryItemDto requireInventoryItem(UUID tenantId, UUID itemId) {
         var result = jdbcTemplate.query("""
-                SELECT ii.id, ii.category_id, ic.name AS category_name, ii.name, ii.unit, ii.quantity_on_hand,
+                SELECT ii.id, ii.category_id, ic.name AS category_name, ii.name, ii.unit, ii.unit_cost, ii.billing_cost, ii.quantity_on_hand,
                        ii.reorder_level, ii.storage_location, ii.active
                 FROM inventory_items ii
                 LEFT JOIN inventory_categories ic ON ic.id = ii.category_id AND ic.tenant_id = ii.tenant_id
@@ -192,6 +205,8 @@ public class InventoryService {
                 rs.getString("category_name"),
                 rs.getString("name"),
                 rs.getString("unit"),
+                rs.getBigDecimal("unit_cost"),
+                rs.getBigDecimal("billing_cost"),
                 rs.getBigDecimal("quantity_on_hand"),
                 rs.getBigDecimal("reorder_level"),
                 rs.getString("storage_location"),

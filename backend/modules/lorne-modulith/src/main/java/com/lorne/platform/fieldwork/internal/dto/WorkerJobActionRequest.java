@@ -14,6 +14,7 @@ public record WorkerJobActionRequest(
         String materialDescription,
         BigDecimal quantity,
         BigDecimal unitCost,
+        BigDecimal billingCost,
         UUID assetId,
         UUID documentId,
         String photoType,
@@ -25,6 +26,7 @@ public record WorkerJobActionRequest(
         BigDecimal locationAccuracyMeters,
         String deviceTimestamp,
         String userAgent,
-        String platform
+        String platform,
+        Boolean autoDetected
 ) {
 }

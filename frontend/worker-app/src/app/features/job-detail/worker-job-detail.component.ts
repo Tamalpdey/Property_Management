@@ -7,6 +7,7 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
+import { SelectModule } from 'primeng/select';
 import { TagModule } from 'primeng/tag';
 import type {
   WorkerStepKey,
@@ -17,6 +18,9 @@ import type {
   WorkerJobMaterial,
   WorkerJobAsset,
   WorkerJobActionRequest,
+  WorkerExecutionEvent,
+  TenantSettingsRecord,
+  InventoryItem,
   WorkerFieldNote,
   WorkerJobEvidence,
   MaintenanceRecordData,
@@ -64,6 +68,9 @@ const EMPTY_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   deliveries: [],
   noteLabel: 'Client note'
 };
+
+const AUTO_ARRIVAL_RADIUS_METERS = 200;
+const AUTO_ARRIVAL_MAX_ACCURACY_METERS = 120;
 
 const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   enabled: true,
@@ -131,6 +138,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
     InputNumberModule,
     InputTextModule,
     NgTemplateOutlet,
+    SelectModule,
     TagModule,
     VoiceNoteButtonComponent,
     WorkerActionBarComponent,
@@ -142,6 +150,12 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
     <section class="mx-auto max-w-5xl space-y-2 pb-24 sm:pb-32">
       @if (error()) {
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">{{ error() }}</p>
+      }
+      @if (autoArrivalMessage()) {
+        <p class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-bold text-teal-800">
+          <i class="pi pi-map-marker mr-1"></i>
+          {{ autoArrivalMessage() }}
+        </p>
       }
       @if (job(); as selectedJob) {
         <article class="overflow-hidden rounded-lg border border-teal-100 bg-white shadow-lg shadow-teal-950/10">
@@ -606,6 +620,17 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                     @if (event.note) {
                       <span class="mt-1 block text-xs font-semibold leading-5 text-slate-600">{{ event.note }}</span>
                     }
+                    @if (geofenceLabel(event)) {
+                      <span
+                        class="mt-1 inline-flex rounded-full px-2 py-1 text-[0.68rem] font-black uppercase tracking-wide"
+                        [class.bg-teal-100]="geofenceSeverity(event) === 'success'"
+                        [class.text-teal-800]="geofenceSeverity(event) === 'success'"
+                        [class.bg-amber-100]="geofenceSeverity(event) === 'warn'"
+                        [class.text-amber-800]="geofenceSeverity(event) === 'warn'"
+                        [class.bg-red-100]="geofenceSeverity(event) === 'danger'"
+                        [class.text-red-800]="geofenceSeverity(event) === 'danger'"
+                      >{{ geofenceLabel(event) }}</span>
+                    }
                   </span>
                 </div>
               } @empty {
@@ -667,6 +692,19 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
               </p>
             </section>
 
+            @if (generalServiceRecord(selectedJob)) {
+              <label class="block">
+                <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Service details</span>
+                <textarea class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" name="maintenanceServiceDetails" rows="8" placeholder="Describe the work completed, observations, and adjustments" [(ngModel)]="maintenanceForm.serviceDetails"></textarea>
+              </label>
+              <lorne-voice-note-button
+                [text]="maintenanceForm.serviceDetails"
+                label="Speak service details"
+                [showUnsupported]="true"
+                (textChange)="maintenanceForm.serviceDetails = $event"
+                (error)="error.set($event)"
+              />
+            } @else {
             <section class="grid gap-2 sm:grid-cols-3">
               @for (callType of maintenanceCallTypes(selectedJob); track callType.key) {
                 <label class="maintenance-check">
@@ -749,6 +787,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
               </div>
             </section>
             }
+            }
 
             <label class="block">
               <span class="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">{{ maintenanceNoteLabel(selectedJob) }}</span>
@@ -803,13 +842,45 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
             }
             @if (!actionForm.materialId) {
             <label class="block">
-              <span class="mb-1 block text-sm font-bold text-slate-700">Used material or purchase detail</span>
+              <span class="mb-1 block text-sm font-bold text-slate-700">Inventory material</span>
+              <p-select
+                styleClass="w-full"
+                name="inventoryItemId"
+                [options]="inventoryItems()"
+                optionLabel="name"
+                optionValue="id"
+                [filter]="true"
+                filterBy="name,categoryName,storageLocation,unit"
+                [showClear]="true"
+                appendTo="body"
+                placeholder="Search inventory or add ad-hoc"
+                [(ngModel)]="actionForm.inventoryItemId"
+                (ngModelChange)="selectWorkerInventoryItem()"
+              >
+                <ng-template pTemplate="item" let-item>
+                  <div>
+                    <p class="font-black text-slate-900">{{ item.name }}</p>
+                    <p class="text-xs font-semibold text-slate-500">{{ item.categoryName || 'Inventory' }} · {{ item.quantityOnHand }} {{ item.unit }}</p>
+                  </div>
+                </ng-template>
+              </p-select>
+            </label>
+            @if (!actionForm.inventoryItemId) {
+            <label class="block">
+              <span class="mb-1 block text-sm font-bold text-slate-700">Ad-hoc material description</span>
               <input pInputText class="w-full" name="materialDescription" required [(ngModel)]="actionForm.materialDescription" (ngModelChange)="saveActionDraft()" />
             </label>
+            }
             <label class="block">
               <span class="mb-1 block text-sm font-bold text-slate-700">Quantity</span>
               <p-inputNumber name="quantity" [(ngModel)]="actionForm.quantity" (ngModelChange)="saveActionDraft()" [min]="0.01" [step]="0.25" styleClass="w-full" />
             </label>
+            @if (!actionForm.inventoryItemId) {
+              <label class="block">
+                <span class="mb-1 block text-sm font-bold text-slate-700">Billing cost (optional)</span>
+                <p-inputNumber name="billingCost" [(ngModel)]="actionForm.billingCost" (ngModelChange)="saveActionDraft()" [min]="0" mode="currency" currency="CAD" styleClass="w-full" />
+              </label>
+            }
             }
           }
 
@@ -1240,6 +1311,9 @@ export class WorkerJobDetailComponent implements OnDestroy {
   protected readonly activityConflictError = signal('');
   protected readonly activeActivityConflict = signal<WorkerActivity | null>(null);
   protected readonly now = signal(Date.now());
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
+  protected readonly inventoryItems = signal<InventoryItem[]>([]);
+  protected readonly autoArrivalMessage = signal('');
   protected readonly maxEvidencePerGroup = 15;
   protected readonly steps = WORKER_STEPS;
   protected readonly activityTypeLabel = activityTypeLabel;
@@ -1258,6 +1332,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
   private readonly timerHandle = window.setInterval(() => this.now.set(Date.now()), 30000);
   private pendingActivityConflictRequest: WorkerJobActionRequest | null = null;
   private pendingActivityConflictJobId = '';
+  private autoArrivalWatchId: number | null = null;
 
   protected readonly job = computed(() => this.jobs().find((candidate) => candidate.id === this.jobId()) ?? null);
 
@@ -1267,6 +1342,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     window.clearInterval(this.timerHandle);
+    this.stopAutoArrivalWatcher();
   }
 
   protected async load(): Promise<void> {
@@ -1281,9 +1357,16 @@ export class WorkerJobDetailComponent implements OnDestroy {
       from.setDate(anchor.getDate() - 30);
       const to = new Date(anchor);
       to.setDate(anchor.getDate() + 60);
-      const jobs = await firstValueFrom(this.workerJobService.jobs(toDateInput(from), toDateInput(to)));
+      const [jobs, settings, inventory] = await Promise.all([
+        firstValueFrom(this.workerJobService.jobs(toDateInput(from), toDateInput(to))),
+        firstValueFrom(this.workerJobService.settings()),
+        firstValueFrom(this.workerJobService.inventory())
+      ]);
       this.jobs.set(jobs);
+      this.tenantSettings.set(settings);
+      this.inventoryItems.set(inventory);
       await this.loadMaintenanceRecord();
+      this.refreshAutoArrivalWatcher();
     } catch (error) {
       this.error.set(workerErrorMessage(error, 'Unable to load job detail. Check backend status and worker profile mapping.'));
     } finally {
@@ -1333,6 +1416,36 @@ export class WorkerJobDetailComponent implements OnDestroy {
 
   protected stepsForJob(job: WorkerAssignedJob): typeof WORKER_STEPS {
     return this.isPickupDelivery(job) ? this.pickupSteps : this.steps;
+  }
+
+  protected geofenceLabel(event: WorkerExecutionEvent): string {
+    const metadata = event.metadata ?? {};
+    const status = String(metadata['geofenceStatus'] || '');
+    const distance = Number(metadata['geofenceDistanceMeters'] || 0);
+    if (status === 'INSIDE_SITE') {
+      return distance ? `GPS inside site · ${Math.round(distance)}m` : 'GPS inside site';
+    }
+    if (status === 'OUTSIDE_SITE') {
+      return distance ? `GPS outside site · ${Math.round(distance)}m` : 'GPS outside site';
+    }
+    if (status === 'NO_PROPERTY_COORDINATES') {
+      return 'GPS captured · site coordinates missing';
+    }
+    if (status === 'NO_WORKER_LOCATION') {
+      return 'GPS not captured';
+    }
+    return '';
+  }
+
+  protected geofenceSeverity(event: WorkerExecutionEvent): 'success' | 'warn' | 'danger' {
+    const status = String(event.metadata?.['geofenceStatus'] || '');
+    if (status === 'INSIDE_SITE') {
+      return 'success';
+    }
+    if (status === 'OUTSIDE_SITE') {
+      return 'danger';
+    }
+    return 'warn';
   }
 
   protected primaryActionLabel(job: WorkerAssignedJob): string {
@@ -1850,6 +1963,10 @@ export class WorkerJobDetailComponent implements OnDestroy {
     return this.maintenanceTemplate(job).title || 'Maintenance record';
   }
 
+  protected generalServiceRecord(job: WorkerAssignedJob): boolean {
+    return isGeneralServiceRecordTemplate(this.maintenanceTemplate(job), job.serviceName || job.title || '');
+  }
+
   protected maintenanceNoteLabel(job: WorkerAssignedJob): string {
     return this.maintenanceTemplate(job).noteLabel || 'Client note';
   }
@@ -1937,6 +2054,15 @@ export class WorkerJobDetailComponent implements OnDestroy {
     }
   }
 
+  protected selectWorkerInventoryItem(): void {
+    const item = this.inventoryItems().find((candidate) => candidate.id === this.actionForm.inventoryItemId);
+    if (item) {
+      this.actionForm.materialDescription = item.name;
+      this.actionForm.billingCost = item.billingCost;
+    }
+    this.saveActionDraft();
+  }
+
   protected async arriveRouteStop(job: WorkerAssignedJob, stop: WorkOrderRouteStop): Promise<void> {
     if (!this.canUpdateRouteStop(job, stop)) {
       return;
@@ -1969,6 +2095,9 @@ export class WorkerJobDetailComponent implements OnDestroy {
       return true;
     }
     if (isWorkerAssignmentClosed(job)) {
+      return true;
+    }
+    if (action === 'START_TRAVEL' && hasProgressBeyondTravel(job)) {
       return true;
     }
     if (action === 'START_WORK' && !this.isPickupDelivery(job)) {
@@ -2039,6 +2168,9 @@ export class WorkerJobDetailComponent implements OnDestroy {
     }
     if (isWorkerAssignmentClosed(job)) {
       return 'Your assignment is already submitted. Only photos and purchase receipts can still be added before operations closes the work order.';
+    }
+    if (action === 'START_TRAVEL' && hasProgressBeyondTravel(job)) {
+      return 'Travel cannot be started after arrival or work has already been recorded.';
     }
     return 'This worker action is not available for the current job status.';
   }
@@ -2529,12 +2661,84 @@ export class WorkerJobDetailComponent implements OnDestroy {
     };
   }
 
+  private refreshAutoArrivalWatcher(): void {
+    this.stopAutoArrivalWatcher();
+    const selectedJob = this.job();
+    if (!selectedJob || !this.canAutoDetectArrival(selectedJob)) {
+      this.autoArrivalMessage.set('');
+      return;
+    }
+    if (!navigator.geolocation) {
+      this.autoArrivalMessage.set('Auto-arrival is unavailable because this device does not support location.');
+      return;
+    }
+    this.autoArrivalMessage.set('Auto-arrival armed. We will mark arrival when you enter the site area.');
+    this.autoArrivalWatchId = navigator.geolocation.watchPosition(
+      (position) => void this.handleAutoArrivalPosition(position),
+      () => this.autoArrivalMessage.set('Auto-arrival is waiting for location permission or GPS signal.'),
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+  }
+
+  private stopAutoArrivalWatcher(): void {
+    if (this.autoArrivalWatchId !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(this.autoArrivalWatchId);
+    }
+    this.autoArrivalWatchId = null;
+  }
+
+  private canAutoDetectArrival(job: WorkerAssignedJob): boolean {
+    return this.tenantSettings()?.liveWorkerTrackingEnabled === true
+      && workerFacingStatus(job) === 'TRAVELING'
+      && typeof job.propertyLatitude === 'number'
+      && typeof job.propertyLongitude === 'number'
+      && !job.executionEvents.some((event) => event.action === 'WORKER_ARRIVE_ON_SITE');
+  }
+
+  private async handleAutoArrivalPosition(position: GeolocationPosition): Promise<void> {
+    const selectedJob = this.job();
+    if (!selectedJob || !this.canAutoDetectArrival(selectedJob)) {
+      this.stopAutoArrivalWatcher();
+      this.autoArrivalMessage.set('');
+      return;
+    }
+    const accuracy = Math.round(position.coords.accuracy || 0);
+    if (accuracy > AUTO_ARRIVAL_MAX_ACCURACY_METERS) {
+      this.autoArrivalMessage.set(`Auto-arrival waiting for better GPS accuracy. Current accuracy is about ${accuracy}m.`);
+      return;
+    }
+    const distance = distanceMeters(
+      position.coords.latitude,
+      position.coords.longitude,
+      selectedJob.propertyLatitude ?? 0,
+      selectedJob.propertyLongitude ?? 0
+    );
+    if (distance > AUTO_ARRIVAL_RADIUS_METERS) {
+      this.autoArrivalMessage.set(`Auto-arrival armed. You are about ${Math.round(distance)}m from the site.`);
+      return;
+    }
+    this.stopAutoArrivalWatcher();
+    this.autoArrivalMessage.set('Auto-arrival detected. Marking you on site...');
+    const saved = await this.runAction(selectedJob, {
+      action: 'ARRIVE_ON_SITE',
+      note: 'Auto-detected arrival inside the site geofence.',
+      autoDetected: true
+    });
+    if (saved) {
+      this.autoArrivalMessage.set('Arrival was auto-detected and recorded.');
+      await this.load();
+    } else {
+      this.refreshAutoArrivalWatcher();
+    }
+  }
+
   private jobId(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
   }
 }
 
 interface MaintenanceRecordForm {
+  serviceDetails: string;
   callTypes: Record<string, boolean>;
   otherCallType: string;
   serviceChecks: Record<string, boolean>;
@@ -2562,7 +2766,12 @@ function maintenanceTemplateForJob(job?: WorkerAssignedJob): MaintenanceRecordTe
   }
   const serviceText = normalizeText([job?.serviceName, job?.title].filter(Boolean).join(' '));
   const materialText = normalizeText((job?.materials ?? []).map((material) => material.itemName || material.description || '').join(' '));
-  if (serviceText.includes('pool') || serviceText.includes('chemical') || materialText.includes('chlor')) {
+  if (
+    serviceText.includes('pool')
+    || serviceText.includes('aquatic')
+    || serviceText.includes('chemical')
+    || materialText.includes('chlor')
+  ) {
     return POOL_MAINTENANCE_TEMPLATE;
   }
   return EMPTY_MAINTENANCE_TEMPLATE;
@@ -2593,7 +2802,7 @@ function emptyMaintenanceRecordForm(
       || [...completedChecklist].some((label) => label.includes(normalizeText(item.label)))
   ]));
   const deliveries = Object.fromEntries((template.deliveries ?? []).map((item) => [item.key, '']));
-  for (const material of job?.materials ?? []) {
+  for (const material of (job?.materials ?? []).filter((item) => item.used)) {
     const delivery = deliveryForMaterial(material, template.deliveries ?? []);
     if (delivery) {
       deliveries[delivery.key] = [material.quantity, material.unit].filter((part) => part !== undefined && part !== null && String(part).trim()).join(' ');
@@ -2601,6 +2810,7 @@ function emptyMaintenanceRecordForm(
   }
 
   const form = {
+    serviceDetails: saved?.serviceDetails ?? '',
     callTypes,
     otherCallType: saved?.otherCallType ?? '',
     serviceChecks,
@@ -2616,6 +2826,7 @@ function emptyMaintenanceRecordForm(
 
 function mergeMaintenanceRecordData(form: MaintenanceRecordForm, saved: MaintenanceRecordData): MaintenanceRecordForm {
   return {
+    serviceDetails: saved.serviceDetails ?? form.serviceDetails,
     callTypes: { ...form.callTypes, ...(saved.callTypes ?? {}) },
     otherCallType: saved.otherCallType ?? form.otherCallType,
     serviceChecks: { ...form.serviceChecks, ...(saved.serviceChecks ?? {}) },
@@ -2630,6 +2841,7 @@ function mergeMaintenanceRecordData(form: MaintenanceRecordForm, saved: Maintena
 
 function maintenanceRecordData(form: MaintenanceRecordForm): MaintenanceRecordData {
   return {
+    serviceDetails: form.serviceDetails,
     callTypes: { ...form.callTypes },
     otherCallType: form.otherCallType,
     serviceChecks: { ...form.serviceChecks },
@@ -2650,6 +2862,7 @@ function maintenanceRecordHasFieldData(record: MaintenanceRecordData | null | un
   const hasText = (values: Record<string, string> | undefined): boolean =>
     Object.values(values ?? {}).some((value) => String(value ?? '').trim().length > 0);
   return hasChecked(record.callTypes)
+    || String(record.serviceDetails ?? '').trim().length > 0
     || String(record.otherCallType ?? '').trim().length > 0
     || hasChecked(record.serviceChecks)
     || hasText(record.measurements)
@@ -2695,6 +2908,10 @@ function maintenanceRecordNote(job: WorkerAssignedJob, template: MaintenanceReco
     `Service: ${job.serviceName || job.title || 'General service'}`,
     `Call type: ${selectedCallTypes.join(', ') || 'Not selected'}`
   ];
+
+  if (form.serviceDetails.trim()) {
+    lines.push('', 'Service details:', form.serviceDetails.trim());
+  }
 
   const completedChecks = (template.checks ?? [])
     .filter((item) => form.serviceChecks[item.key])
@@ -2742,6 +2959,16 @@ function maintenanceRecordNote(job: WorkerAssignedJob, template: MaintenanceReco
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isGeneralServiceRecordTemplate(template: MaintenanceRecordTemplate, serviceName: string): boolean {
+  const text = normalizeText([template.title || '', serviceName].join(' '));
+  return !(text.includes('pool')
+    || text.includes('aquatic')
+    || text.includes('chemical')
+    || text.includes('chlorine')
+    || Boolean(template.chemicals?.length)
+    || Boolean(template.measurements?.length));
 }
 
 function viewAction(panel: WorkerDetailPanel): WorkerJobAction {
@@ -2850,6 +3077,15 @@ function totalWorkDuration(job: WorkerAssignedJob): string {
   return totalMs > 0 ? compactDuration(totalMs) : '';
 }
 
+function hasProgressBeyondTravel(job: WorkerAssignedJob): boolean {
+  return job.executionEvents.some((event) => [
+    'WORKER_ARRIVE_ON_SITE',
+    'WORKER_START_WORK',
+    'WORKER_RESUME_WORK',
+    'WORKER_COMPLETE_WORK'
+  ].includes(event.action));
+}
+
 function latestEvent(job: WorkerAssignedJob, actions: string[]) {
   return [...job.executionEvents]
     .filter((event) => actions.includes(event.action))
@@ -2895,7 +3131,7 @@ function currentPosition(): Promise<GeolocationPosition | null> {
         resolve(position);
       }
     };
-    const timeout = window.setTimeout(() => done(null), 1500);
+    const timeout = window.setTimeout(() => done(null), 3500);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         window.clearTimeout(timeout);
@@ -2905,7 +3141,19 @@ function currentPosition(): Promise<GeolocationPosition | null> {
         window.clearTimeout(timeout);
         done(null);
       },
-      { enableHighAccuracy: false, maximumAge: 60000, timeout: 1200 }
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 3200 }
     );
   });
+}
+
+function distanceMeters(latitudeOne: number, longitudeOne: number, latitudeTwo: number, longitudeTwo: number): number {
+  const radiusMeters = 6371000;
+  const phiOne = latitudeOne * Math.PI / 180;
+  const phiTwo = latitudeTwo * Math.PI / 180;
+  const deltaPhi = (latitudeTwo - latitudeOne) * Math.PI / 180;
+  const deltaLambda = (longitudeTwo - longitudeOne) * Math.PI / 180;
+  const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2)
+    + Math.cos(phiOne) * Math.cos(phiTwo)
+    * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  return radiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }

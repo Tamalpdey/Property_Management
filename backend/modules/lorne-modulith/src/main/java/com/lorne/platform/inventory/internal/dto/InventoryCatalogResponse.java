@@ -14,6 +14,8 @@ public record InventoryCatalogResponse(List<InventoryCategoryDto> categories, Li
             String categoryName,
             String name,
             String unit,
+            BigDecimal unitCost,
+            BigDecimal billingCost,
             BigDecimal quantityOnHand,
             BigDecimal reorderLevel,
             String storageLocation,

@@ -1,6 +1,7 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, effect, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
@@ -21,6 +22,8 @@ import type {
   SendWorkOrderOwnerEmailRequest
 } from '@lorne/contracts';
 import { VoiceNoteButtonComponent } from '../../../shared/voice-note-button.component';
+import { emailBodyText, emailPreviewDocument, renderEmailBody } from '../../../shared/email-body-text';
+import { maintenanceRecordDisplayTitle } from '../work-order-maintenance-record';
 
 export type WorkOrderReviewTab = 'SUMMARY' | 'WORKERS' | 'EVIDENCE' | 'RESOURCES' | 'INVOICE' | 'COMMUNICATION' | 'TIME' | 'AUDIT';
 type AuditGroupTab = 'WORKER' | 'ADMIN';
@@ -78,7 +81,7 @@ interface WorkOrderWorkerSummary {
                 <button pButton type="button" size="small" icon="pi pi-file-edit" label="Generate invoice" [loading]="busy()" (click)="generateInvoice.emit()"></button>
               }
               <button pButton type="button" size="small" severity="secondary" icon="pi pi-print" label="Print" (click)="printWorkOrder.emit()"></button>
-              <button pButton type="button" size="small" severity="secondary" icon="pi pi-clipboard" label="Maintenance record" (click)="printMaintenanceRecord.emit()"></button>
+              <button pButton type="button" size="small" severity="secondary" icon="pi pi-clipboard" [label]="recordButtonLabel(data)" (click)="printMaintenanceRecord.emit()"></button>
             </div>
           </div>
           </div>
@@ -223,8 +226,8 @@ interface WorkOrderWorkerSummary {
               <div class="rounded-lg border border-slate-200 bg-white p-3">
                 <div class="flex items-center justify-between gap-3">
                   <div>
-                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Maintenance records</p>
-                    <p class="text-sm font-semibold text-slate-500">Structured records submitted from the worker app.</p>
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Service records</p>
+                    <p class="text-sm font-semibold text-slate-500">Structured service and maintenance records submitted from the worker app.</p>
                   </div>
                   <p-tag [value]="maintenanceRecords(data).length + ' saved'" severity="info" />
                 </div>
@@ -237,6 +240,10 @@ interface WorkOrderWorkerSummary {
                           <p class="text-xs font-bold text-slate-500">{{ record.workerName }} · {{ record.updatedAt | date:'MMM d, h:mm a' }}</p>
                         </div>
                         <p-tag [value]="recordSummary(record)" severity="success" />
+                      </div>
+                      <div class="mt-2 flex flex-wrap items-center gap-2">
+                        <span class="text-[0.68rem] font-black uppercase tracking-wide text-teal-700">Call type</span>
+                        <span class="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-700">{{ maintenanceCallTypes(record) }}</span>
                       </div>
                       @if (record.recordData.clientNote) {
                         <p class="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{{ record.recordData.clientNote }}</p>
@@ -659,9 +666,22 @@ interface WorkOrderWorkerSummary {
                     </div>
                     <div class="mt-3 rounded-lg bg-white px-3 py-2">
                       <p class="text-xs font-black uppercase tracking-wide text-slate-500">Subject</p>
-                      <p class="mt-1 text-sm font-black text-slate-950">{{ communication.subject }}</p>
+                      <p class="mt-1 text-sm font-black text-slate-950">{{ communicationSubject(communication) }}</p>
                       <p class="mt-3 text-xs font-black uppercase tracking-wide text-slate-500">Message preview</p>
-                      <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">{{ communication.body }}</p>
+                      <p class="mt-1 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700" [class.line-clamp-4]="!communicationExpanded(communication.id)">{{ communicationPreview(communication) }}</p>
+                      <div class="mt-1 flex flex-wrap items-center gap-1">
+                        <button pButton type="button" size="small" severity="secondary" [text]="true" icon="pi pi-eye" label="View email" (click)="openCommunicationPreview(communication)"></button>
+                        <button
+                          pButton
+                          type="button"
+                          size="small"
+                          severity="secondary"
+                          [text]="true"
+                          [icon]="communicationExpanded(communication.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                          [label]="communicationExpanded(communication.id) ? 'Collapse text' : 'Show full text'"
+                          (click)="toggleCommunication(communication.id)"
+                        ></button>
+                      </div>
                     </div>
                     @if (communication.providerMessage) {
                       <p class="mt-2 text-xs font-semibold text-slate-500">{{ communication.providerMessage }}</p>
@@ -733,6 +753,25 @@ interface WorkOrderWorkerSummary {
                 } @empty {
                   <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">No work time entries.</p>
                 }
+              </div>
+              <div class="mt-4 border-t border-slate-200 pt-4">
+                <p class="text-xs font-black uppercase tracking-wide text-teal-700">GPS/geofence</p>
+                <div class="mt-3 grid gap-2">
+                  @for (audit of geofenceAuditEntries(data); track audit.id) {
+                    <div class="rounded-lg bg-slate-50 px-3 py-2">
+                      <div class="flex items-start justify-between gap-2">
+                        <div>
+                          <p class="text-sm font-black text-slate-950">{{ auditActionLabel(audit) }}</p>
+                          <p class="mt-1 text-xs font-bold text-slate-500">{{ audit.actorName || geofenceWorker(audit) || 'Worker' }} · {{ audit.createdAt | date:'MMM d, h:mm a' }}</p>
+                        </div>
+                        <p-tag [value]="geofenceStatusLabel(audit)" [severity]="geofenceSeverity(audit)" />
+                      </div>
+                      <p class="mt-2 text-xs font-semibold leading-5 text-slate-600">{{ geofenceSummary(audit) }}</p>
+                    </div>
+                  } @empty {
+                    <p class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">No GPS/geofence details captured yet.</p>
+                  }
+                </div>
               </div>
             </aside>
           </section>
@@ -1010,6 +1049,36 @@ interface WorkOrderWorkerSummary {
           </section>
         }
       </p-dialog>
+
+      <p-dialog header="Email message" [modal]="true" [visible]="communicationPreviewOpen()" [style]="{ width: 'min(52rem, 96vw)' }" (visibleChange)="!$event && closeCommunicationPreview()">
+        @if (selectedCommunication(); as communication) {
+          <div class="space-y-3">
+            <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm sm:grid-cols-2">
+              <div><span class="block text-xs font-black uppercase text-slate-500">Subject</span><p class="font-bold text-slate-950">{{ communicationSubject(communication) }}</p></div>
+              <div><span class="block text-xs font-black uppercase text-slate-500">Sent</span><p class="font-bold text-slate-700">{{ (communication.sentAt || communication.createdAt) | date:'MMM d, yyyy, h:mm a' }}</p></div>
+              <div><span class="block text-xs font-black uppercase text-slate-500">To</span><p class="break-words font-bold text-slate-700">{{ communication.recipientEmail }}</p></div>
+              <div><span class="block text-xs font-black uppercase text-slate-500">Type</span><p class="font-bold text-teal-800">{{ communicationLabel(communication) }}</p></div>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-black uppercase text-slate-500">Complete message</span>
+              <div class="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                <button pButton type="button" size="small" icon="pi pi-desktop" label="Email preview" [text]="communicationView() !== 'HTML'" (click)="communicationView.set('HTML')"></button>
+                <button pButton type="button" size="small" icon="pi pi-align-left" label="Plain text" [text]="communicationView() !== 'TEXT'" (click)="communicationView.set('TEXT')"></button>
+              </div>
+            </div>
+            <div class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+              @if (communicationView() === 'HTML') {
+                <iframe title="Email message preview" class="h-[58vh] w-full border-0 bg-white" sandbox="" referrerpolicy="no-referrer" [srcdoc]="communicationHtml()"></iframe>
+              } @else {
+                <div class="max-h-[58vh] overflow-y-auto whitespace-pre-wrap p-4 text-sm font-medium leading-6 text-slate-700">{{ communicationPreview(communication) }}</div>
+              }
+            </div>
+            <div class="flex justify-end border-t border-slate-200 pt-3">
+              <button pButton type="button" severity="secondary" label="Close" (click)="closeCommunicationPreview()"></button>
+            </div>
+          </div>
+        }
+      </p-dialog>
     } @else {
       <section class="rounded-lg border border-slate-200 bg-white p-8 text-center">
         <p class="text-sm font-bold text-slate-500">{{ loading() ? 'Loading review...' : 'Select a work order to review.' }}</p>
@@ -1067,6 +1136,7 @@ interface WorkOrderWorkerSummary {
   `
 })
 export class WorkOrderReviewComponent {
+  private readonly sanitizer = inject(DomSanitizer);
   readonly review = input<WorkOrderReview | null>(null);
   readonly loading = input(false);
   readonly busy = input(false);
@@ -1074,6 +1144,7 @@ export class WorkOrderReviewComponent {
   readonly initialTab = input<WorkOrderReviewTab>('SUMMARY');
   readonly canManageWorkOrders = input(true);
   readonly canManageBilling = input(true);
+  readonly emailLogoUrl = input('');
   readonly reviewAction = output<WorkOrderReviewActionRequest>();
   readonly generateInvoice = output<void>();
   readonly notifyOwner = output<SendWorkOrderOwnerEmailRequest>();
@@ -1097,6 +1168,17 @@ export class WorkOrderReviewComponent {
   protected readonly evidencePreviewOpen = signal(false);
   protected readonly evidencePreviewIndex = signal(0);
   protected readonly notifyDialogOpen = signal(false);
+  protected readonly expandedCommunicationId = signal<string | null>(null);
+  protected readonly communicationPreviewOpen = signal(false);
+  protected readonly communicationView = signal<'HTML' | 'TEXT'>('HTML');
+  protected readonly selectedCommunication = signal<WorkOrderCommunication | null>(null);
+  protected readonly communicationHtml = computed<SafeHtml>(() => {
+    const communication = this.selectedCommunication();
+    return this.sanitizer.bypassSecurityTrustHtml(emailPreviewDocument(
+      communication?.body,
+      communication ? this.communicationValues(communication) : {}
+    ));
+  });
   protected readonly notifyForm: SendWorkOrderOwnerEmailRequest = {
     recipientEmail: '',
     ccEmails: '',
@@ -1200,6 +1282,41 @@ export class WorkOrderReviewComponent {
     return 'secondary';
   }
 
+  protected communicationSubject(communication: WorkOrderCommunication): string {
+    return renderEmailBody(communication.subject, this.communicationValues(communication));
+  }
+
+  protected communicationPreview(communication: WorkOrderCommunication): string {
+    return emailBodyText(communication.body, this.communicationValues(communication));
+  }
+
+  protected openCommunicationPreview(communication: WorkOrderCommunication): void {
+    this.selectedCommunication.set(communication);
+    this.communicationView.set('HTML');
+    this.communicationPreviewOpen.set(true);
+  }
+
+  protected closeCommunicationPreview(): void {
+    this.communicationPreviewOpen.set(false);
+    this.selectedCommunication.set(null);
+  }
+
+  private communicationValues(communication: WorkOrderCommunication): Record<string, string> {
+    return {
+      serviceName: communication.serviceName || '',
+      invoiceNumber: communication.invoiceNumber || '',
+      tenantLogoUrl: this.emailLogoUrl()
+    };
+  }
+
+  protected communicationExpanded(communicationId: string): boolean {
+    return this.expandedCommunicationId() === communicationId;
+  }
+
+  protected toggleCommunication(communicationId: string): void {
+    this.expandedCommunicationId.update((current) => current === communicationId ? null : communicationId);
+  }
+
   protected canNotifyOwner(data: WorkOrderReview): boolean {
     return ['APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED'].includes(data.workOrder.status);
   }
@@ -1232,7 +1349,15 @@ export class WorkOrderReviewComponent {
   }
 
   protected recordTitle(record: WorkOrderMaintenanceRecord): string {
-    return record.templateSnapshot?.title || 'Maintenance record';
+    return maintenanceRecordDisplayTitle(
+      record.templateSnapshot,
+      this.review()?.workOrder.serviceName || this.review()?.workOrder.title || 'General service'
+    );
+  }
+
+  protected recordButtonLabel(data: WorkOrderReview): string {
+    const template = data.maintenanceRecords?.[0]?.templateSnapshot ?? data.workOrder.maintenanceRecordTemplate;
+    return maintenanceRecordDisplayTitle(template, data.workOrder.serviceName || data.workOrder.title || 'General service');
   }
 
   protected maintenanceRecords(data: WorkOrderReview): WorkOrderMaintenanceRecord[] {
@@ -1243,6 +1368,19 @@ export class WorkOrderReviewComponent {
     const checks = Object.values(record.recordData?.serviceChecks ?? {}).filter(Boolean).length;
     const deliveries = Object.values(record.recordData?.deliveries ?? {}).filter((value) => String(value ?? '').trim()).length;
     return `${checks} checks · ${deliveries} deliveries`;
+  }
+
+  protected maintenanceCallTypes(record: WorkOrderMaintenanceRecord): string {
+    const selected = (record.templateSnapshot?.callTypes ?? [])
+      .filter((callType) => record.recordData?.callTypes?.[callType.key])
+      .map((callType) => callType.key === 'other'
+        ? (record.recordData?.otherCallType?.trim() || callType.label)
+        : callType.label);
+    const other = record.recordData?.otherCallType?.trim();
+    if (other && !selected.includes(other)) {
+      selected.push(other);
+    }
+    return selected.join(', ') || 'Not selected';
   }
 
   protected completedTaskCount(tasks: WorkOrderTask[]): number {
@@ -1351,6 +1489,62 @@ export class WorkOrderReviewComponent {
 
   protected isWorkerAudit(audit: WorkOrderAuditEntry): boolean {
     return audit.action.startsWith('WORKER_');
+  }
+
+  protected geofenceAuditEntries(data: WorkOrderReview): WorkOrderAuditEntry[] {
+    return this.workerAuditEntries(data)
+      .filter((audit) => Boolean(audit.metadata?.['geofenceStatus']))
+      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+  }
+
+  protected geofenceWorker(audit: WorkOrderAuditEntry): string {
+    return stringValue(audit.metadata?.['workerName']);
+  }
+
+  protected geofenceStatusLabel(audit: WorkOrderAuditEntry): string {
+    const status = stringValue(audit.metadata?.['geofenceStatus']);
+    if (status === 'INSIDE_SITE') {
+      return 'inside site';
+    }
+    if (status === 'OUTSIDE_SITE') {
+      return 'outside site';
+    }
+    if (status === 'NO_PROPERTY_COORDINATES') {
+      return 'site coordinates missing';
+    }
+    if (status === 'NO_WORKER_LOCATION') {
+      return 'gps missing';
+    }
+    return status.toLowerCase().replaceAll('_', ' ') || 'gps';
+  }
+
+  protected geofenceSeverity(audit: WorkOrderAuditEntry): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
+    const status = stringValue(audit.metadata?.['geofenceStatus']);
+    if (status === 'INSIDE_SITE') {
+      return 'success';
+    }
+    if (status === 'OUTSIDE_SITE') {
+      return 'danger';
+    }
+    if (status === 'NO_PROPERTY_COORDINATES' || status === 'NO_WORKER_LOCATION') {
+      return 'warn';
+    }
+    return 'secondary';
+  }
+
+  protected geofenceSummary(audit: WorkOrderAuditEntry): string {
+    const metadata = audit.metadata ?? {};
+    const message = stringValue(metadata['geofenceMessage']);
+    const distance = numberValue(metadata['geofenceDistanceMeters']);
+    const radius = numberValue(metadata['geofenceRadiusMeters']);
+    const accuracy = numberValue(metadata['locationAccuracyMeters']);
+    const autoDetected = metadata['autoDetected'] === true ? ' Auto-detected arrival.' : '';
+    const details = [
+      distance > 0 ? `${Math.round(distance)}m from property` : '',
+      radius > 0 ? `${Math.round(radius)}m radius` : '',
+      accuracy > 0 ? `${Math.round(accuracy)}m accuracy` : ''
+    ].filter(Boolean).join(' · ');
+    return `${message || this.geofenceStatusLabel(audit)}${details ? ' ' + details + '.' : ''}${autoDetected}`;
   }
 
   protected timeEntryLabel(entryType: string): string {
@@ -1616,6 +1810,8 @@ const HIDDEN_AUDIT_KEYS = new Set([
   'assetId',
   'latitude',
   'longitude',
+  'propertyLatitude',
+  'propertyLongitude',
   'locationAccuracyMeters',
   'platform'
 ]);
@@ -1730,6 +1926,11 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function numberValue(value: unknown): number {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
 function auditPhotoTypeLabel(metadata: Record<string, unknown>): string {
   const photoType = stringValue(metadata['photoType']).toUpperCase();
   switch (photoType) {
@@ -1768,7 +1969,7 @@ function displayValue(value: unknown): string {
     return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
   if (typeof value === 'string') {
-    return prettifyValue(value);
+    return prettifyValue(emailBodyText(value));
   }
   if (typeof value === 'boolean') {
     return value ? 'yes' : 'no';

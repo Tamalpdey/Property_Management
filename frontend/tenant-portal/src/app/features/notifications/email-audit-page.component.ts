@@ -1,12 +1,14 @@
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
-import type { EmailDeliveryLogRecord, ResendEmailDeliveryRequest } from '@lorne/contracts';
+import type { EmailDeliveryLogRecord, ResendEmailDeliveryRequest, TenantSettingsRecord } from '@lorne/contracts';
+import { emailBodyText, emailPreviewDocument, renderEmailBody } from '../../shared/email-body-text';
 import { TenantSettingsService } from '../settings/services/tenant-settings.service';
 
 @Component({
@@ -35,7 +37,7 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
       }
 
       <section class="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div class="audit-header grid grid-cols-[10rem_1.1fr_1.1fr_1.2fr_0.9fr_0.8fr_7rem] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-500">
+        <div class="audit-header grid grid-cols-[10rem_1.1fr_1.1fr_1.2fr_0.9fr_0.8fr_11rem] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-500">
           <span>Sent</span>
           <span>Type</span>
           <span>Related</span>
@@ -50,10 +52,10 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
         } @else {
           <div class="divide-y divide-slate-100">
             @for (log of logs(); track log.id) {
-              <article class="audit-row grid grid-cols-[10rem_1.1fr_1.1fr_1.2fr_0.9fr_0.8fr_7rem] gap-2 px-3 py-2.5 text-sm">
+              <article class="audit-row grid grid-cols-[10rem_1.1fr_1.1fr_1.2fr_0.9fr_0.8fr_11rem] gap-2 px-3 py-2.5 text-sm">
                 <div class="font-semibold text-slate-600">{{ (log.sentAt || log.createdAt) | date:'MMM d, h:mm a' }}</div>
                 <div class="min-w-0">
-                  <p class="truncate font-black text-slate-950">{{ log.subject || emailTypeLabel(log.communicationType) }}</p>
+                  <p class="truncate font-black text-slate-950">{{ messageSubject(log) }}</p>
                   <p class="mt-0.5 text-xs font-semibold text-slate-500">{{ emailTypeLabel(log.communicationType) }} · {{ log.deliveryMode.toLowerCase() }}</p>
                 </div>
                 <div class="min-w-0">
@@ -76,7 +78,8 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
                   <p class="mt-1 text-xs font-black uppercase text-slate-500">{{ log.deliveryMode }}</p>
                 </div>
                 <p class="line-clamp-2 text-xs font-semibold text-slate-500">{{ log.providerMessage || 'Recorded delivery attempt.' }}</p>
-                <div class="flex justify-end">
+                <div class="flex justify-end gap-1">
+                  <button pButton type="button" size="small" severity="secondary" icon="pi pi-eye" label="View" (click)="openMessage(log)"></button>
                   <button pButton type="button" size="small" severity="secondary" icon="pi pi-send" label="Resend" (click)="openResend(log)"></button>
                 </div>
               </article>
@@ -86,6 +89,36 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
           </div>
         }
       </section>
+
+      <p-dialog header="Email message" [modal]="true" [visible]="messageOpen()" [style]="{ width: 'min(52rem, 96vw)' }" (visibleChange)="!$event && closeMessage()">
+        @if (selectedMessage(); as log) {
+          <div class="space-y-3">
+            <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm sm:grid-cols-2">
+              <div><span class="field-label">Subject</span><p class="font-bold text-slate-950">{{ messageSubject(log) }}</p></div>
+              <div><span class="field-label">Sent</span><p class="font-bold text-slate-700">{{ (log.sentAt || log.createdAt) | date:'MMM d, yyyy, h:mm a' }}</p></div>
+              <div><span class="field-label">To</span><p class="break-words font-bold text-slate-700">{{ log.recipientEmail }}</p></div>
+              <div><span class="field-label">Related</span><p class="font-bold text-teal-800">{{ relatedLabel(log) }}</p></div>
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="field-label mb-0">Complete message</span>
+              <div class="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                <button pButton type="button" size="small" icon="pi pi-desktop" label="Email preview" [text]="messageView() !== 'HTML'" (click)="messageView.set('HTML')"></button>
+                <button pButton type="button" size="small" icon="pi pi-align-left" label="Plain text" [text]="messageView() !== 'TEXT'" (click)="messageView.set('TEXT')"></button>
+              </div>
+            </div>
+            <div class="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
+              @if (messageView() === 'HTML') {
+                <iframe title="Email message preview" class="h-[58vh] w-full border-0 bg-white" sandbox="" referrerpolicy="no-referrer" [srcdoc]="messageHtml()"></iframe>
+              } @else {
+                <div class="max-h-[58vh] overflow-y-auto whitespace-pre-wrap p-4 text-sm font-medium leading-6 text-slate-700">{{ messageBody(log) }}</div>
+              }
+            </div>
+            <div class="flex justify-end border-t border-slate-200 pt-3">
+              <button pButton type="button" severity="secondary" label="Close" (click)="closeMessage()"></button>
+            </div>
+          </div>
+        }
+      </p-dialog>
 
       <p-dialog header="Resend email" [modal]="true" [visible]="resendOpen()" [style]="{ width: 'min(44rem, 94vw)' }" (visibleChange)="!$event && closeResend()">
         @if (selectedLog(); as log) {
@@ -136,13 +169,22 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
 })
 export class EmailAuditPageComponent {
   private readonly tenantSettingsService = inject(TenantSettingsService);
+  private readonly sanitizer = inject(DomSanitizer);
   protected readonly loading = signal(false);
   protected readonly resending = signal(false);
   protected readonly logs = signal<EmailDeliveryLogRecord[]>([]);
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly resendOpen = signal(false);
+  protected readonly messageOpen = signal(false);
+  protected readonly messageView = signal<'HTML' | 'TEXT'>('HTML');
   protected readonly selectedLog = signal<EmailDeliveryLogRecord | null>(null);
+  protected readonly selectedMessage = signal<EmailDeliveryLogRecord | null>(null);
+  protected readonly messageHtml = computed<SafeHtml>(() => {
+    const log = this.selectedMessage();
+    return this.sanitizer.bypassSecurityTrustHtml(emailPreviewDocument(log?.body, log ? this.messageValues(log) : {}));
+  });
   protected readonly resendForm: ResendEmailDeliveryRequest = {
     recipientEmail: '',
     ccEmails: '',
@@ -156,7 +198,12 @@ export class EmailAuditPageComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      this.logs.set(await firstValueFrom(this.tenantSettingsService.emailDeliveries(100)));
+      const [logs, tenantSettings] = await Promise.all([
+        firstValueFrom(this.tenantSettingsService.emailDeliveries(100)),
+        firstValueFrom(this.tenantSettingsService.get())
+      ]);
+      this.logs.set(logs);
+      this.tenantSettings.set(tenantSettings);
     } catch (exception) {
       this.error.set(apiErrorMessage(exception, 'Unable to load email audit.'));
       this.logs.set([]);
@@ -173,6 +220,35 @@ export class EmailAuditPageComponent {
     this.message.set('');
     this.error.set('');
     this.resendOpen.set(true);
+  }
+
+  protected openMessage(log: EmailDeliveryLogRecord): void {
+    this.selectedMessage.set(log);
+    this.messageView.set('HTML');
+    this.messageOpen.set(true);
+  }
+
+  protected closeMessage(): void {
+    this.messageOpen.set(false);
+    this.selectedMessage.set(null);
+  }
+
+  protected messageBody(log: EmailDeliveryLogRecord): string {
+    return emailBodyText(log.body, this.messageValues(log)) || 'No message body was recorded.';
+  }
+
+  protected messageSubject(log: EmailDeliveryLogRecord): string {
+    return renderEmailBody(log.subject, this.messageValues(log)) || this.emailTypeLabel(log.communicationType);
+  }
+
+  private messageValues(log: EmailDeliveryLogRecord): Record<string, string> {
+    return {
+      serviceName: log.serviceName || '',
+      workOrderNumber: log.workOrderNumber || '',
+      invoiceNumber: log.invoiceNumber || '',
+      ownerName: log.ownerName || '',
+      tenantLogoUrl: this.tenantSettings()?.logoUrl || ''
+    };
   }
 
   protected closeResend(): void {

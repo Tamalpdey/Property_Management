@@ -7,6 +7,8 @@ import com.lorne.platform.tenant.TenantSettingsOperations;
 import com.lorne.platform.tenant.TenantSettingsView;
 import com.lorne.platform.tenant.internal.dto.TenantSettingsDto;
 import com.lorne.platform.tenant.internal.dto.UpdateTenantSettingsRequest;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Locale;
@@ -37,7 +39,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 SELECT t.display_name AS tenant_name, t.legal_name, t.timezone, t.country_code AS tenant_country_code,
                        ts.organization_name, ts.billing_email, ts.support_email, ts.phone, ts.website_url,
                        ts.address_line1, ts.city, ts.province_code, ts.postal_code, ts.country_code,
-                       coalesce(ts.invoice_prefix, 'INV') AS invoice_prefix, ts.invoice_footer, ts.payment_terms,
+                       coalesce(ts.invoice_prefix, 'INV') AS invoice_prefix,
+                       coalesce(ts.invoice_tax_rate, 0.13) AS invoice_tax_rate,
+                       ts.tax_registration_number,
+                       ts.invoice_footer, ts.payment_terms,
                        ts.logo_url, coalesce(ts.theme_primary_color, '#0f766e') AS theme_primary_color,
                        coalesce(ts.theme_accent_color, '#2563eb') AS theme_accent_color,
                        coalesce(ts.email_provider, 'SYSTEM') AS email_provider,
@@ -49,7 +54,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                        ts.graph_client_secret IS NOT NULL AS graph_client_secret_configured,
                        ts.graph_sender_user,
                        coalesce(ts.auto_send_work_completed_email, false) AS auto_send_work_completed_email,
-                       coalesce(ts.auto_send_invoice_email, false) AS auto_send_invoice_email
+                       coalesce(ts.auto_send_invoice_email, false) AS auto_send_invoice_email,
+                       coalesce(ts.live_worker_tracking_enabled, false) AS live_worker_tracking_enabled
                 FROM tenants t
                 LEFT JOIN tenant_settings ts ON ts.tenant_id = t.id
                 WHERE t.id = ?
@@ -74,13 +80,14 @@ public class TenantSettingsService implements TenantSettingsOperations {
     public TenantSettingsDto update(UUID tenantId, UUID actorUserId, UpdateTenantSettingsRequest request) {
         var safeRequest = request == null ? new UpdateTenantSettingsRequest(
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null,
-                null, null
+                null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null
         ) : request;
         var provider = provider(safeRequest.emailProvider());
         var primaryColor = color(safeRequest.themePrimaryColor(), "#0f766e", "Primary color must use #RRGGBB format.");
         var accentColor = color(safeRequest.themeAccentColor(), "#2563eb", "Accent color must use #RRGGBB format.");
+        var invoiceTaxRate = taxRate(safeRequest.invoiceTaxRate());
         var invoicePrefix = firstNonBlank(safeRequest.invoicePrefix(), "INV").toUpperCase(Locale.ROOT);
         if (invoicePrefix.length() > 12) {
             throw new BadRequestException("Invoice prefix must be 12 characters or fewer.");
@@ -99,7 +106,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 UPDATE tenant_settings
                 SET billing_email = ?, support_email = ?, phone = ?, website_url = ?,
                     address_line1 = ?, city = ?, province_code = ?, postal_code = ?, country_code = ?,
-                    invoice_prefix = ?, invoice_footer = ?, payment_terms = ?, logo_url = ?,
+                    invoice_prefix = ?, invoice_tax_rate = ?, tax_registration_number = ?, invoice_footer = ?, payment_terms = ?, logo_url = ?,
                     theme_primary_color = ?, theme_accent_color = ?,
                     email_provider = ?, email_sender_name = ?, email_from_address = ?, email_reply_to_address = ?,
                     smtp_host = ?, smtp_port = ?, smtp_username = ?, smtp_use_tls = ?,
@@ -116,6 +123,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                     END,
                     auto_send_work_completed_email = ?,
                     auto_send_invoice_email = ?,
+                    live_worker_tracking_enabled = ?,
                     updated_by = ?, updated_at = now()
                 WHERE tenant_id = ?
                 """,
@@ -129,6 +137,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 text(safeRequest.postalCode()),
                 text(safeRequest.countryCode()),
                 invoicePrefix,
+                invoiceTaxRate,
+                text(safeRequest.taxRegistrationNumber()),
                 text(safeRequest.invoiceFooter()),
                 text(safeRequest.paymentTerms()),
                 text(safeRequest.logoUrl()),
@@ -153,6 +163,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 text(safeRequest.graphClientSecret()),
                 Boolean.TRUE.equals(safeRequest.autoSendWorkCompletedEmail()),
                 Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail()),
+                Boolean.TRUE.equals(safeRequest.liveWorkerTrackingEnabled()),
                 actorUserId,
                 tenantId
         );
@@ -160,8 +171,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 "organizationNameManagedBy", "SUPER_ADMIN",
                 "emailProvider", provider,
                 "invoicePrefix", invoicePrefix,
+                "invoiceTaxRate", invoiceTaxRate,
                 "autoSendWorkCompletedEmail", Boolean.TRUE.equals(safeRequest.autoSendWorkCompletedEmail()),
-                "autoSendInvoiceEmail", Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail())
+                "autoSendInvoiceEmail", Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail()),
+                "liveWorkerTrackingEnabled", Boolean.TRUE.equals(safeRequest.liveWorkerTrackingEnabled())
         ));
         return get(tenantId);
     }
@@ -182,6 +195,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("province_code"),
                 rs.getString("postal_code"),
                 rs.getString("invoice_prefix"),
+                rs.getBigDecimal("invoice_tax_rate"),
+                rs.getString("tax_registration_number"),
                 rs.getString("invoice_footer"),
                 rs.getString("payment_terms"),
                 rs.getString("logo_url"),
@@ -203,7 +218,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getBoolean("graph_client_secret_configured"),
                 rs.getString("graph_sender_user"),
                 rs.getBoolean("auto_send_work_completed_email"),
-                rs.getBoolean("auto_send_invoice_email")
+                rs.getBoolean("auto_send_invoice_email"),
+                rs.getBoolean("live_worker_tracking_enabled")
         );
     }
 
@@ -223,6 +239,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.provinceCode(),
                 settings.postalCode(),
                 settings.invoicePrefix(),
+                settings.invoiceTaxRate(),
+                settings.taxRegistrationNumber(),
                 settings.invoiceFooter(),
                 settings.paymentTerms(),
                 settings.logoUrl(),
@@ -242,7 +260,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.graphClientSecretConfigured(),
                 settings.graphSenderUser(),
                 settings.autoSendWorkCompletedEmail(),
-                settings.autoSendInvoiceEmail()
+                settings.autoSendInvoiceEmail(),
+                settings.liveWorkerTrackingEnabled()
         );
     }
 
@@ -252,6 +271,14 @@ public class TenantSettingsService implements TenantSettingsOperations {
             throw new BadRequestException("Email provider must be SYSTEM, TENANT_SMTP, or TENANT_GRAPH.");
         }
         return normalized;
+    }
+
+    private BigDecimal taxRate(BigDecimal value) {
+        var rate = (value == null ? new BigDecimal("0.13") : value).setScale(4, RoundingMode.HALF_UP);
+        if (rate.signum() < 0 || rate.compareTo(BigDecimal.ONE) > 0) {
+            throw new BadRequestException("Invoice tax rate must be between 0 and 1.");
+        }
+        return rate;
     }
 
     private String color(String value, String fallback, String error) {

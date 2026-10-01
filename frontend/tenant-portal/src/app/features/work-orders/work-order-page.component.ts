@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, ViewChild, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
+import { MessageService } from 'primeng/api';
 import { TagModule } from 'primeng/tag';
 import type {
   WorkOrderStatus,
@@ -139,10 +141,6 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
             <div class="rounded-lg border border-slate-200 bg-white p-3">
               <p class="font-black text-slate-950">Resources</p>
               <p class="mt-1 font-semibold text-slate-600">Add planned materials, inventory, tools, or equipment only when the worker needs to use or return them.</p>
-            </div>
-            <div class="rounded-lg border border-slate-200 bg-white p-3">
-              <p class="font-black text-slate-950">Recurring work</p>
-              <p class="mt-1 font-semibold text-slate-600">Use recurring templates for repeated service. Drafts can be generated ahead and then scheduled by operations.</p>
             </div>
             <div class="rounded-lg border border-slate-200 bg-white p-3">
               <p class="font-black text-slate-950">Operations review</p>
@@ -342,6 +340,7 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
           [initialTab]="reviewTarget()"
           [canManageWorkOrders]="canManageWorkOrders()"
           [canManageBilling]="canManageBilling()"
+          [emailLogoUrl]="tenantSettings()?.logoUrl || ''"
           (reviewAction)="submitReviewAction($event)"
           (generateInvoice)="generateInvoice()"
           (notifyOwner)="notifyOwner($event)"
@@ -362,6 +361,8 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
       >
         <lorne-work-order-field-override
           [review]="review()"
+          [workers]="workers()"
+          [inventoryItems]="inventoryItems()"
           [busy]="reviewSaving()"
           [initialTab]="overrideTarget()"
           (save)="applyFieldOverride($event)"
@@ -404,6 +405,8 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
 })
 export class WorkOrderPageComponent {
   private readonly workOrderService = inject(WorkOrderService);
+  private readonly messageService = inject(MessageService);
+  private readonly route = inject(ActivatedRoute);
   private readonly propertyService = inject(PropertyService);
   private readonly serviceCatalogService = inject(ServiceCatalogService);
   private readonly workerManagementService = inject(WorkerManagementService);
@@ -419,9 +422,9 @@ export class WorkOrderPageComponent {
   protected readonly workOrders = signal<WorkOrderRecord[]>([]);
   protected readonly workOrdersLoading = signal(false);
   protected readonly statusFilter = signal<WorkOrderStatusFilter>('OPEN');
-  protected readonly dateFilter = signal<WorkOrderDateFilter>('ALL');
-  protected readonly customFrom = signal('');
-  protected readonly customTo = signal('');
+  protected readonly dateFilter = signal<WorkOrderDateFilter>('CUSTOM');
+  protected readonly customFrom = signal(dateInput(firstDayOfMonth(new Date())));
+  protected readonly customTo = signal(dateInput(lastDayOfMonth(new Date())));
   protected readonly properties = signal<PropertyRecord[]>([]);
   protected readonly serviceTypes = signal<ServiceType[]>([]);
   protected readonly workers = signal<WorkerRecord[]>([]);
@@ -467,7 +470,28 @@ export class WorkOrderPageComponent {
   protected bulkOverrideReason = '';
 
   constructor() {
+    this.applyInitialRouteFilters();
     void this.load();
+  }
+
+  private applyInitialRouteFilters(): void {
+    const params = this.route.snapshot.queryParamMap;
+    const status = params.get('status') as WorkOrderStatusFilter | null;
+    const date = params.get('date') as WorkOrderDateFilter | null;
+    const from = params.get('from');
+    const to = params.get('to');
+    if (status && isWorkOrderStatusFilter(status)) {
+      this.statusFilter.set(status);
+    }
+    if (date && isWorkOrderDateFilter(date)) {
+      this.dateFilter.set(date);
+    }
+    if (from !== null) {
+      this.customFrom.set(from);
+    }
+    if (to !== null) {
+      this.customTo.set(to);
+    }
   }
 
   async load(): Promise<void> {
@@ -500,12 +524,26 @@ export class WorkOrderPageComponent {
     this.error.set('');
     try {
       const editing = this.editingWorkOrder();
+      let savedWorkOrder: WorkOrderRecord;
       if (editing) {
-        await firstValueFrom(this.workOrderService.update(editing.id, request));
+        savedWorkOrder = await firstValueFrom(this.workOrderService.update(editing.id, request));
       } else {
-        await firstValueFrom(this.workOrderService.create(request));
+        savedWorkOrder = await firstValueFrom(this.workOrderService.create(request));
       }
       await this.loadWorkOrders();
+      if (!editing && !this.workOrders().some((workOrder) => workOrder.id === savedWorkOrder.id)) {
+        this.statusFilter.set('ALL');
+        this.dateFilter.set('ALL');
+        this.customFrom.set('');
+        this.customTo.set('');
+        await this.loadWorkOrders();
+      }
+      this.messageService.add({
+        severity: editing ? 'success' : 'info',
+        summary: editing ? 'Work order updated' : 'Work order created',
+        detail: `${savedWorkOrder.workOrderNumber} · ${savedWorkOrder.propertyName}`,
+        life: 8000
+      });
       this.workOrderForm?.reset();
       this.editingWorkOrder.set(null);
       this.showCreate.set(false);
@@ -1067,7 +1105,8 @@ export class WorkOrderPageComponent {
         inventoryItemId: material.inventoryItemId,
         description: material.description,
         quantity: material.quantity,
-        unitCost: material.unitCost
+        unitCost: material.unitCost,
+        billingCost: material.billingCost
       })),
       assetIds: workOrder.assets.map((asset) => asset.assetId),
       tasks: [],
@@ -1685,4 +1724,27 @@ function escapeHtml(value: string | number | boolean): string {
 
 function escapeAttribute(value: string | number | boolean): string {
   return escapeHtml(value);
+}
+
+function firstDayOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function lastDayOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function dateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isWorkOrderStatusFilter(value: string): value is WorkOrderStatusFilter {
+  return ['ALL', 'OPEN', 'REVIEW', 'BILLING', 'DRAFT', 'ASSIGNED', 'TRAVELING', 'ON_SITE', 'IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'CLOSED', 'CANCELLED'].includes(value);
+}
+
+function isWorkOrderDateFilter(value: string): value is WorkOrderDateFilter {
+  return ['ALL', 'TODAY', 'TOMORROW', 'THIS_WEEK', 'NEXT_7', 'OVERDUE', 'UNSCHEDULED', 'PAST', 'CUSTOM'].includes(value);
 }
