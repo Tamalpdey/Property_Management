@@ -460,10 +460,10 @@ export function dayTicketHtml(input: {
     <header>
       <div class="brand-wrap">
         ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
-        <div class="brand-text">
-          <div class="brand">${escapeHtml(brand.name)}</div>
+        ${brand.name || brand.address ? `<div class="brand-text">
+          ${brand.name ? `<div class="brand">${escapeHtml(brand.name)}</div>` : ''}
           ${brand.address ? `<div class="subbrand">${escapeHtml(brand.address)}</div>` : ''}
-        </div>
+        </div>` : ''}
       </div>
       <div class="title-block">
         <h1>DAY TICKET</h1>
@@ -903,10 +903,12 @@ function ticketDateLabel(from: string, to: string): string {
 }
 
 function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; address: string; contact: string; logoUrl: string } {
-  const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
+  const showName = settings?.dayTicketShowCompanyName !== false;
+  const showAddress = settings?.dayTicketShowCompanyAddress !== false;
+  const name = showName ? firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services') : '';
   return {
     name,
-    address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
+    address: showAddress ? joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode) : '',
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
   };

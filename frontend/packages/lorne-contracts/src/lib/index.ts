@@ -1263,6 +1263,8 @@ export interface TenantSettingsRecord {
   invoiceFooter?: string;
   paymentTerms?: string;
   logoUrl?: string;
+  dayTicketShowCompanyName: boolean;
+  dayTicketShowCompanyAddress: boolean;
   themePrimaryColor: string;
   themeAccentColor: string;
   emailProvider: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
@@ -1300,6 +1302,8 @@ export interface UpdateTenantSettingsRequest {
   invoiceFooter?: string;
   paymentTerms?: string;
   logoUrl?: string;
+  dayTicketShowCompanyName?: boolean;
+  dayTicketShowCompanyAddress?: boolean;
   themePrimaryColor?: string;
   themeAccentColor?: string;
   emailProvider?: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';

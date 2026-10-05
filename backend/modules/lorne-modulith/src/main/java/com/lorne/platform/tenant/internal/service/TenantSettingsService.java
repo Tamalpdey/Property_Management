@@ -43,7 +43,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                        coalesce(ts.invoice_tax_rate, 0.13) AS invoice_tax_rate,
                        ts.tax_registration_number,
                        ts.invoice_footer, ts.payment_terms,
-                       ts.logo_url, coalesce(ts.theme_primary_color, '#0f766e') AS theme_primary_color,
+                       ts.logo_url,
+                       coalesce(ts.day_ticket_show_company_name, true) AS day_ticket_show_company_name,
+                       coalesce(ts.day_ticket_show_company_address, true) AS day_ticket_show_company_address,
+                       coalesce(ts.theme_primary_color, '#0f766e') AS theme_primary_color,
                        coalesce(ts.theme_accent_color, '#2563eb') AS theme_accent_color,
                        coalesce(ts.email_provider, 'SYSTEM') AS email_provider,
                        ts.email_sender_name, ts.email_from_address, ts.email_reply_to_address,
@@ -80,7 +83,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
     public TenantSettingsDto update(UUID tenantId, UUID actorUserId, UpdateTenantSettingsRequest request) {
         var safeRequest = request == null ? new UpdateTenantSettingsRequest(
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null
         ) : request;
@@ -104,9 +107,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 """, tenantId, actorUserId, actorUserId);
         jdbcTemplate.update("""
                 UPDATE tenant_settings
-                SET billing_email = ?, support_email = ?, phone = ?, website_url = ?,
+                SET organization_name = ?, billing_email = ?, support_email = ?, phone = ?, website_url = ?,
                     address_line1 = ?, city = ?, province_code = ?, postal_code = ?, country_code = ?,
                     invoice_prefix = ?, invoice_tax_rate = ?, tax_registration_number = ?, invoice_footer = ?, payment_terms = ?, logo_url = ?,
+                    day_ticket_show_company_name = ?, day_ticket_show_company_address = ?,
                     theme_primary_color = ?, theme_accent_color = ?,
                     email_provider = ?, email_sender_name = ?, email_from_address = ?, email_reply_to_address = ?,
                     smtp_host = ?, smtp_port = ?, smtp_username = ?, smtp_use_tls = ?,
@@ -127,6 +131,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                     updated_by = ?, updated_at = now()
                 WHERE tenant_id = ?
                 """,
+                text(safeRequest.organizationName()),
                 text(safeRequest.billingEmail()),
                 text(safeRequest.supportEmail()),
                 text(safeRequest.phone()),
@@ -142,6 +147,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 text(safeRequest.invoiceFooter()),
                 text(safeRequest.paymentTerms()),
                 text(safeRequest.logoUrl()),
+                safeRequest.dayTicketShowCompanyName() == null || safeRequest.dayTicketShowCompanyName(),
+                safeRequest.dayTicketShowCompanyAddress() == null || safeRequest.dayTicketShowCompanyAddress(),
                 primaryColor,
                 accentColor,
                 provider,
@@ -168,10 +175,12 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 tenantId
         );
         auditWriter.record(tenantId, actorUserId, "TENANT_SETTINGS_UPDATED", "TENANT", tenantId, Map.of(
-                "organizationNameManagedBy", "SUPER_ADMIN",
+                "organizationName", firstNonBlank(safeRequest.organizationName(), ""),
                 "emailProvider", provider,
                 "invoicePrefix", invoicePrefix,
                 "invoiceTaxRate", invoiceTaxRate,
+                "dayTicketShowCompanyName", safeRequest.dayTicketShowCompanyName() == null || safeRequest.dayTicketShowCompanyName(),
+                "dayTicketShowCompanyAddress", safeRequest.dayTicketShowCompanyAddress() == null || safeRequest.dayTicketShowCompanyAddress(),
                 "autoSendWorkCompletedEmail", Boolean.TRUE.equals(safeRequest.autoSendWorkCompletedEmail()),
                 "autoSendInvoiceEmail", Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail()),
                 "liveWorkerTrackingEnabled", Boolean.TRUE.equals(safeRequest.liveWorkerTrackingEnabled())
@@ -200,6 +209,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("invoice_footer"),
                 rs.getString("payment_terms"),
                 rs.getString("logo_url"),
+                rs.getBoolean("day_ticket_show_company_name"),
+                rs.getBoolean("day_ticket_show_company_address"),
                 rs.getString("theme_primary_color"),
                 rs.getString("theme_accent_color"),
                 rs.getString("email_provider"),
@@ -244,6 +255,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.invoiceFooter(),
                 settings.paymentTerms(),
                 settings.logoUrl(),
+                settings.dayTicketShowCompanyName(),
+                settings.dayTicketShowCompanyAddress(),
                 settings.themePrimaryColor(),
                 settings.themeAccentColor(),
                 settings.emailProvider(),

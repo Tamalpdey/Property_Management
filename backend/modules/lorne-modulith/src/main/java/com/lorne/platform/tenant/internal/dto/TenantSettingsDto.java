@@ -20,6 +20,8 @@ public record TenantSettingsDto(
         String invoiceFooter,
         String paymentTerms,
         String logoUrl,
+        boolean dayTicketShowCompanyName,
+        boolean dayTicketShowCompanyAddress,
         String themePrimaryColor,
         String themeAccentColor,
         String emailProvider,

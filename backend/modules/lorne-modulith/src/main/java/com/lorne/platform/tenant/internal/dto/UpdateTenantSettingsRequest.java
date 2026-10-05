@@ -17,6 +17,8 @@ public record UpdateTenantSettingsRequest(
         String invoiceFooter,
         String paymentTerms,
         String logoUrl,
+        Boolean dayTicketShowCompanyName,
+        Boolean dayTicketShowCompanyAddress,
         String themePrimaryColor,
         String themeAccentColor,
         String emailProvider,

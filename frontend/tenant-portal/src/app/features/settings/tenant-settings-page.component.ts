@@ -56,8 +56,8 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
               <div class="grid gap-3 md:grid-cols-2">
                 <label class="block">
                   <span class="field-label">Organization name</span>
-                  <input class="field-input" name="organizationName" [ngModel]="form.organizationName" disabled />
-                  <span class="mt-1 block text-xs font-semibold text-slate-500">Managed during tenant onboarding by the super admin.</span>
+                  <input class="field-input" name="organizationName" maxlength="160" [(ngModel)]="form.organizationName" />
+                  <span class="mt-1 block text-xs font-semibold text-slate-500">Displayed next to the logo on admin and worker day tickets.</span>
                 </label>
                 <label class="block">
                   <span class="field-label">Website</span>
@@ -82,6 +82,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                 <label class="block md:col-span-2">
                   <span class="field-label">Address</span>
                   <input class="field-input" name="addressLine1" [(ngModel)]="form.addressLine1" />
+                  <span class="mt-1 block text-xs font-semibold text-slate-500">The complete address below is displayed under the company name on day tickets.</span>
                 </label>
                 <label class="block">
                   <span class="field-label">City</span>
@@ -95,6 +96,20 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                   <span class="field-label">Postal code</span>
                   <input class="field-input" name="postalCode" [(ngModel)]="form.postalCode" />
                 </label>
+                <section class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2 md:grid-cols-2">
+                  <div class="md:col-span-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Day ticket header</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-500">Choose which company details appear next to the logo on admin and worker Day Tickets.</p>
+                  </div>
+                  <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                    <input class="mt-1" type="checkbox" name="dayTicketShowCompanyName" [(ngModel)]="form.dayTicketShowCompanyName" />
+                    <span>Show company name</span>
+                  </label>
+                  <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                    <input class="mt-1" type="checkbox" name="dayTicketShowCompanyAddress" [(ngModel)]="form.dayTicketShowCompanyAddress" />
+                    <span>Show company address</span>
+                  </label>
+                </section>
               </div>
             }
 
@@ -308,7 +323,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
           </div>
 
           <div class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-3 py-3">
-            <p class="text-xs font-semibold text-slate-500">Settings affect new invoice PDFs and outgoing owner emails.</p>
+            <p class="text-xs font-semibold text-slate-500">Settings affect printed reports, new invoice PDFs, and outgoing owner emails.</p>
             <button pButton type="submit" icon="pi pi-save" label="Save settings" [loading]="saving()"></button>
           </div>
         </form>
@@ -363,6 +378,27 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                 }
               </div>
               <p class="mt-6 inline-flex rounded-md bg-white/15 px-2 py-1 text-xs font-black uppercase">Invoice {{ form.invoicePrefix || 'INV' }}-0001</p>
+            </div>
+            <div class="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+              <p class="text-xs font-black uppercase tracking-wide text-slate-500">Day ticket header</p>
+              <div class="mt-3 flex min-w-0 items-center gap-3">
+                @if (form.logoUrl) {
+                  <span class="report-logo-preview">
+                    <img [src]="form.logoUrl" alt="Day ticket logo preview" />
+                  </span>
+                }
+                @if (form.dayTicketShowCompanyName || form.dayTicketShowCompanyAddress) {
+                  <div class="min-w-0">
+                    @if (form.dayTicketShowCompanyName) {
+                      <p class="truncate text-base font-black uppercase text-slate-950">{{ brandName() }}</p>
+                    }
+                    @if (form.dayTicketShowCompanyAddress) {
+                      <p class="mt-1 break-words text-xs font-bold leading-5 text-slate-500">{{ companyAddress() || 'Company address not set' }}</p>
+                    }
+                  </div>
+                }
+              </div>
+              <p class="mt-3 text-xs font-semibold leading-5 text-slate-500">This header is shared by the admin and worker Day Ticket print views.</p>
             </div>
           </div>
 
@@ -419,6 +455,8 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
     .logo-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; }
     .logo-preview { display: grid; place-items: center; height: 3.5rem; width: 3.5rem; flex: 0 0 auto; overflow: hidden; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.92); padding: 0.35rem; }
     .logo-preview img { max-height: 100%; max-width: 100%; object-fit: contain; }
+    .report-logo-preview { display: grid; place-items: center; height: 3.75rem; width: 6rem; flex: 0 0 auto; overflow: hidden; border: 1px solid #e2e8f0; background: #fff; padding: 0.4rem; }
+    .report-logo-preview img { max-height: 100%; max-width: 100%; object-fit: contain; object-position: left center; }
     .settings-tab { border-radius: 0.45rem; padding: 0.55rem 0.75rem; color: #64748b; transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease; }
     .settings-tab:hover { color: #0f172a; background: rgba(255, 255, 255, 0.72); }
     .settings-tab-active { background: #0f766e; color: #ffffff; box-shadow: 0 1px 4px rgba(15, 118, 110, 0.24); }
@@ -453,6 +491,13 @@ export class TenantSettingsPageComponent {
     body: ''
   };
   protected readonly brandName = computed(() => this.form.organizationName || this.settings()?.tenantName || 'Tenant');
+  protected readonly companyAddress = computed(() => [
+    this.form.addressLine1,
+    this.form.city,
+    this.form.provinceCode,
+    this.form.postalCode,
+    this.form.countryCode
+  ].map((value) => value?.trim()).filter(Boolean).join(', '));
   protected readonly userPhotoUrl = computed(() => this.auth.currentUser()?.profilePhotoUrl || '');
   protected readonly userDisplayName = computed(() => this.displayName(this.auth.currentUser()));
   protected readonly userEmail = computed(() => this.auth.currentUser()?.email || '');
@@ -484,8 +529,7 @@ export class TenantSettingsPageComponent {
     this.error.set('');
     this.message.set('');
     try {
-      const { organizationName: _organizationName, ...request } = this.form;
-      const saved = await firstValueFrom(this.tenantSettingsService.update(request));
+      const saved = await firstValueFrom(this.tenantSettingsService.update(this.form));
       this.settings.set(saved);
       this.populate(saved);
       this.message.set('Tenant settings saved.');
@@ -613,6 +657,8 @@ export class TenantSettingsPageComponent {
       invoiceFooter: settings.invoiceFooter || '',
       paymentTerms: settings.paymentTerms || '',
       logoUrl: settings.logoUrl || '',
+      dayTicketShowCompanyName: settings.dayTicketShowCompanyName !== false,
+      dayTicketShowCompanyAddress: settings.dayTicketShowCompanyAddress !== false,
       themePrimaryColor: settings.themePrimaryColor || '#0f766e',
       themeAccentColor: settings.themeAccentColor || '#2563eb',
       emailProvider: settings.emailProvider || 'SYSTEM',
