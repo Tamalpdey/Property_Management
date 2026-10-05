@@ -379,80 +379,95 @@ export function dayTicketHtml(input: {
   const rowSlots = Array.from({ length: Math.max(10, input.rows.length) }, (_, index) => input.rows[index]);
   const brand = tenantBrand(input.settings);
   const rangeLabel = ticketDateLabel(input.dateFrom, input.dateTo);
+  const workOrderLabel = dayTicketWorkOrderLabeler(input.rows, input.dateFrom || input.dateTo);
   return `<!doctype html>
 <html>
 <head>
   <title>Day Ticket - ${escapeHtml(input.workerName)} - ${escapeHtml(rangeLabel)}</title>
   <style>
-    @page { margin: 12mm; size: letter portrait; }
+    /* Author-defined margin boxes replace the browser's own header/footer (about:blank, date, title) and give real page numbers. */
+    @page {
+      margin: 12mm;
+      size: letter portrait;
+      @top-left { content: ''; }
+      @top-center { content: ''; }
+      @top-right { color: #475569; content: 'Page ' counter(page) ' of ' counter(pages); font: 800 9px Arial, sans-serif; letter-spacing: .06em; text-transform: uppercase; }
+      @bottom-left { content: ''; }
+      @bottom-center { content: ''; }
+      @bottom-right { content: ''; }
+    }
     * { box-sizing: border-box; }
     body { color: #111827; font-family: Arial, sans-serif; font-size: 11px; margin: 0; }
-    .sheet { border: 2px solid #334155; min-height: 252mm; padding: 16px; }
-    header { align-items: start; display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; margin-bottom: 16px; }
-    .brand-wrap { align-items: center; display: flex; gap: 10px; min-width: 0; }
-    .logo { background: #fff; border: 1px solid #cbd5e1; height: 38px; object-fit: contain; padding: 2px; width: 52px; }
-    .brand { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-    .brand-meta { margin-top: 4px; padding-left: 62px; }
-    .brand-meta.no-logo { padding-left: 0; }
-    .subbrand { color: #475569; font-size: 11px; font-weight: 700; line-height: 1.25; margin-top: 2px; }
-    h1 { font-size: 26px; letter-spacing: .06em; margin: 12px 0 0; text-align: center; }
-    .ticket-number { font-size: 14px; font-weight: 800; text-align: right; }
+    .sheet { border: 2px solid #334155; box-decoration-break: clone; -webkit-box-decoration-break: clone; min-height: 252mm; padding: 16px; }
+    header { align-items: center; border-bottom: 2px solid #334155; display: grid; grid-template-columns: 1fr auto; gap: 24px; margin-bottom: 14px; padding-bottom: 12px; }
+    .brand-wrap { align-items: center; display: flex; gap: 14px; min-width: 0; }
+    .logo { display: block; flex: none; height: 60px; max-width: 180px; object-fit: contain; object-position: left center; width: auto; }
+    .brand-text { min-width: 0; }
+    .brand { font-size: 20px; font-weight: 800; letter-spacing: .03em; line-height: 1.15; text-transform: uppercase; }
+    .subbrand { color: #475569; font-size: 11px; font-weight: 700; line-height: 1.3; margin-top: 4px; }
+    .title-block { text-align: right; }
+    h1 { font-size: 26px; letter-spacing: .08em; line-height: 1; margin: 0; white-space: nowrap; }
     .fields { align-items: end; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin: 12px 0; }
     .field { align-items: end; display: grid; grid-template-columns: auto 1fr; gap: 8px; }
-    .field span { font-size: 14px; font-weight: 700; }
+    .field span { font-size: 16px; font-weight: 800; }
+    .fields .line { color: #0f172a; font-size: 18px; font-weight: 800; letter-spacing: .01em; line-height: 1.2; min-height: 26px; }
     .line { border-bottom: 1px solid #111827; min-height: 20px; padding: 0 6px 2px; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
     th, td { border: 1px solid #334155; padding: 6px 7px; vertical-align: top; }
     th { background: #f8fafc; font-size: 12px; text-align: center; }
     td { height: 34px; }
-    .rownum { text-align: center; width: 30px; }
-    .time { text-align: center; width: 72px; }
-    .client { width: 160px; }
-    .wo { width: 118px; }
-    .total { text-align: center; width: 76px; }
-    .map-est { text-align: center; width: 74px; }
+    .time { text-align: center; width: 62px; }
+    .client { width: 120px; }
+    .total { text-align: center; width: 54px; }
     .desc { width: auto; }
+    .wo-number { font-size: 10px; font-weight: 800; margin-top: 3px; }
     .muted { color: #64748b; font-size: 9px; font-weight: 700; margin-top: 2px; }
     .entry-kind { border: 1px solid #cbd5e1; border-radius: 999px; color: #0f766e; display: inline-block; font-size: 8px; font-weight: 800; margin: 0 4px 3px 0; padding: 1px 5px; text-transform: uppercase; }
     .entry-kind.travel { color: #0369a1; }
     .entry-kind.route-stop { color: #7c2d12; }
     .entry-kind.worker-activity { color: #6d28d9; }
-    .notes { border: 1px solid #334155; border-top: 0; min-height: 128px; padding: 8px; }
-    .notes strong { display: block; font-size: 13px; margin-bottom: 8px; }
+    .notes { border: 1px solid #334155; border-top: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; min-height: 128px; padding: 10px 12px; }
+    .notes-title { border-bottom: 1px solid #cbd5e1; font-size: 13px; font-weight: 800; letter-spacing: .06em; margin-bottom: 6px; padding-bottom: 6px; }
+    .note-row { align-items: baseline; border-bottom: 1px dashed #e2e8f0; display: grid; grid-template-columns: 112px 120px 1fr; gap: 12px; padding: 5px 0; }
+    .note-row:last-child { border-bottom: 0; }
+    .note-ref { font-weight: 800; white-space: nowrap; }
+    .note-ref small { color: #475569; display: block; font-size: 9px; font-weight: 700; margin-top: 2px; white-space: normal; }
+    .note-kind { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .note-kind small { color: #64748b; display: block; font-size: 9px; font-weight: 700; margin-top: 1px; text-transform: none; }
+    .note-text { line-height: 1.35; overflow-wrap: anywhere; }
+    .notes-empty { color: #64748b; font-size: 10px; font-weight: 700; padding: 6px 0; }
     .footer { align-items: end; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; }
-    .footer .line { min-height: 24px; }
-    .vehicle { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .vehicle { align-items: end; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .footer span, .vehicle span { color: #475569; display: block; font-size: 9px; font-weight: 800; letter-spacing: .06em; margin-bottom: 4px; text-transform: uppercase; }
+    .footer .line, .vehicle .line { font-size: 14px; font-weight: 800; min-height: 24px; padding: 0 2px 3px; }
     .clock-sessions { border-top: 1px solid #cbd5e1; display: grid; gap: 4px; margin-top: 12px; padding-top: 8px; }
     .clock-session-row { align-items: center; display: grid; grid-template-columns: 70px 1fr 1fr 70px; gap: 8px; }
     .clock-session-row span { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
     .adjusted-badge { color: #b45309; display: inline-block; font-size: 8px; font-weight: 800; margin-left: 4px; text-transform: uppercase; }
-    .hint { color: #475569; font-size: 10px; font-weight: 700; margin-top: 16px; text-align: center; }
     .schedule-fallback { color: #92400e; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
     .override-badge { color: #b45309; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
+    .hint { color: #475569; font-size: 10px; font-weight: 700; margin-top: 16px; text-align: center; }
     .legend { color: #92400e; font-size: 9px; font-weight: 800; margin: 6px 0 12px; text-align: left; text-transform: uppercase; }
     @media print {
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .sheet { break-after: avoid; }
+      tr, .note-row, .footer, .vehicle, header, .fields { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
   <main class="sheet">
     <header>
-      <div>
-        <div class="brand-wrap">
-          ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
-          <div>
-            <div class="brand">${escapeHtml(brand.name)}</div>
-          </div>
-        </div>
-        <div class="brand-meta ${brand.logoUrl ? '' : 'no-logo'}">
-          ${brand.subtitle ? `<div class="subbrand">${escapeHtml(brand.subtitle)}</div>` : ''}
+      <div class="brand-wrap">
+        ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : ''}
+        <div class="brand-text">
+          <div class="brand">${escapeHtml(brand.name)}</div>
           ${brand.address ? `<div class="subbrand">${escapeHtml(brand.address)}</div>` : ''}
         </div>
       </div>
-      <h1>DAY TICKET</h1>
-      <div class="ticket-number">Page 1 of 1</div>
+      <div class="title-block">
+        <h1>DAY TICKET</h1>
+      </div>
     </header>
 
     <section class="fields">
@@ -463,40 +478,32 @@ export function dayTicketHtml(input: {
     <table>
       <thead>
         <tr>
-          <th class="rownum"></th>
           <th class="time">Clock<br>In</th>
           <th class="time">Clock<br>Out</th>
           <th class="client">Client</th>
-          <th class="wo">W.O #</th>
           <th class="desc">Job Description</th>
-          <th class="map-est">Map<br>Est.</th>
           <th class="total">Total<br>Time</th>
         </tr>
       </thead>
       <tbody>
-        ${rowSlots.map((row, index) => row ? `
+        ${rowSlots.map((row) => row ? `
           <tr>
-            <td class="rownum">${index + 1}</td>
             <td class="time">${escapeHtml(ticketTimeLabel(row.timeIn, input.dateFrom, input.dateTo, ''))}${row.timeInFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
             <td class="time">${escapeHtml(ticketTimeLabel(row.timeOut, input.dateFrom, input.dateTo, ''))}${row.timeOutFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
-            <td class="client">${escapeHtml(dayTicketClient(row))}<div class="muted">${escapeHtml(dayTicketClientMeta(row))}</div></td>
-            <td class="wo">${escapeHtml(dayTicketWorkOrderNumber(row))}</td>
+            <td class="client">${escapeHtml(dayTicketClient(row))}<div class="muted">${escapeHtml(dayTicketClientMeta(row))}</div>${workOrderLabel(row) ? `<div class="wo-number">${escapeHtml(workOrderLabel(row))}</div>` : ''}</td>
             <td class="desc">
               <span class="entry-kind ${escapeAttribute(row.rowType.toLowerCase().replaceAll('_', '-'))}">${escapeHtml(dayTicketRowTypeLabel(row))}</span>
               ${escapeHtml(dayTicketDescription(row, input.options))}
               ${row.rowType === 'TRAVEL' ? '<div class="muted">Sequence: travel started -> arrived on site / work started</div>' : ''}
               ${row.timingWarning ? `<div class="override-badge">${escapeHtml(row.timingWarning)}</div>` : ''}
-              ${row.rowType === 'WORK_ORDER' && input.options.includeService && row.workOrder?.serviceName ? `<div class="muted">${escapeHtml(row.workOrder.serviceName)}</div>` : ''}
-              ${row.rowType === 'WORK_ORDER' && input.options.includeStatus && row.workOrder ? `<div class="muted">${escapeHtml(statusLabel(row.workOrder.status))}</div>` : ''}
               ${row.rowType === 'ROUTE_STOP' && input.options.includeStatus ? `<div class="muted">${escapeHtml(routeStopStatusLabel(row.routeStop))}</div>` : ''}
               ${row.rowType === 'WORKER_ACTIVITY' && input.options.includeStatus ? `<div class="muted">${escapeHtml(row.activity?.open ? 'active' : 'completed')}</div>` : ''}
             </td>
-            <td class="map-est">${escapeHtml(dayTicketEstimatedTravelLabel(row))}</td>
             <td class="total">${escapeHtml(minutesLabel(row.minutes))}</td>
           </tr>
         ` : `
           <tr>
-            <td class="rownum">${index + 1}</td><td class="time"></td><td class="time"></td><td class="client"></td><td class="wo"></td><td class="desc"></td><td class="map-est"></td><td class="total"></td>
+            <td class="time"></td><td class="time"></td><td class="client"></td><td class="desc"></td><td class="total"></td>
           </tr>
         `).join('')}
       </tbody>
@@ -504,8 +511,8 @@ export function dayTicketHtml(input: {
 
     ${input.options.includeWorkerNotes ? `
       <section class="notes">
-        <strong>SPECIAL NOTES</strong>
-        ${dayTicketSpecialNotes(input.rows)}
+        <div class="notes-title">SPECIAL NOTES</div>
+        ${dayTicketSpecialNotes(input.rows, workOrderLabel)}
       </section>
     ` : ''}
     ${input.rows.some((row) => row.timeInFromSchedule || row.timeOutFromSchedule) ? '<p class="legend">* Scheduled fallback used because actual worker timing was not captured.</p>' : ''}
@@ -513,10 +520,10 @@ export function dayTicketHtml(input: {
 
     ${input.options.includeTotals ? `
       <section class="footer">
-        <div><span>Clock-in:</span><div class="line">${escapeHtml(timeOnly(firstStart, ''))}</div></div>
-        <div><span>Clock-out:</span><div class="line">${escapeHtml(timeOnly(lastFinish, ''))}</div></div>
-        <div><span>Down Time:</span><div class="line">${escapeHtml(downTimeMinutes ? minutesLabel(downTimeMinutes) : '')}</div></div>
-        <div><span>Total Time:</span><div class="line">${escapeHtml(minutesLabel(totalMinutes))}</div></div>
+        <div><span>Clock-in</span><div class="line">${escapeHtml(timeOnly(firstStart, ''))}</div></div>
+        <div><span>Clock-out</span><div class="line">${escapeHtml(timeOnly(lastFinish, ''))}</div></div>
+        <div><span>Down Time</span><div class="line">${escapeHtml(downTimeMinutes ? minutesLabel(downTimeMinutes) : '')}</div></div>
+        <div><span>Total Time</span><div class="line">${escapeHtml(minutesLabel(totalMinutes))}</div></div>
       </section>
       ${clockSessions.length ? `
         <section class="clock-sessions">
@@ -534,9 +541,9 @@ export function dayTicketHtml(input: {
         </section>
       ` : ''}
       <section class="vehicle">
-        <div><span>Vehicle:</span><div class="line"></div></div>
-        <div><span>Mileage Start:</span><div class="line"></div></div>
-        <div><span>Mileage End:</span><div class="line"></div></div>
+        <div><span>Vehicle</span><div class="line"></div></div>
+        <div><span>Mileage Start</span><div class="line"></div></div>
+        <div><span>Mileage End</span><div class="line"></div></div>
       </section>
     ` : ''}
 
@@ -789,11 +796,32 @@ function dayTicketClientMeta(row: DayTicketEntry): string {
   return row.workOrder?.ownerName || '';
 }
 
-function dayTicketWorkOrderNumber(row: DayTicketEntry): string {
-  if (row.rowType === 'WORKER_ACTIVITY') {
-    return 'Worker activity';
+// Day-ticket-only W.O labels (YYMMDD-0001), numbered per day in row order.
+// Rows for the same work order on the same day share one label; rows without a work order get ''.
+export function dayTicketWorkOrderLabeler(rows: DayTicketEntry[], fallbackDate: string): (row: DayTicketEntry) => string {
+  const keyOf = (row: DayTicketEntry): { day: string; key: string } | undefined => {
+    if (!row.workOrder) {
+      return undefined;
+    }
+    const when = row.timeIn || row.workOrder.scheduledStart;
+    const day = (when ? dateInputValue(new Date(when)) : fallbackDate || dateInputValue(new Date())).replaceAll('-', '').slice(2);
+    return { day, key: `${day}|${row.workOrder.id}` };
+  };
+  const labels = new Map<string, string>();
+  const dayCounters = new Map<string, number>();
+  for (const row of rows) {
+    const ref = keyOf(row);
+    if (!ref || labels.has(ref.key)) {
+      continue;
+    }
+    const next = (dayCounters.get(ref.day) ?? 0) + 1;
+    dayCounters.set(ref.day, next);
+    labels.set(ref.key, `${ref.day}-${String(next).padStart(4, '0')}`);
   }
-  return row.workOrder?.workOrderNumber || '';
+  return (row) => {
+    const ref = keyOf(row);
+    return ref ? labels.get(ref.key) ?? '' : '';
+  };
 }
 
 function dayTicketEstimateProviderLabel(entry: DayTicketEntry): string {
@@ -813,16 +841,20 @@ function rowSortTime(row: DayTicketEntry): string | undefined {
   return row.timeIn || row.workOrder?.scheduledStart || row.activity?.startedAt || row.routeStop?.plannedArrival;
 }
 
-function dayTicketSpecialNotes(rows: DayTicketEntry[]): string {
+function dayTicketSpecialNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string {
   const notes = [
-    ...dayTicketWorkerNotes(rows),
+    ...dayTicketWorkerNotes(rows, workOrderLabel),
     ...dayTicketActivityNotes(rows),
-    ...dayTicketOverrideNotes(rows)
+    ...dayTicketOverrideNotes(rows, workOrderLabel)
   ];
-  return notes.length ? notes.join('') : '<p class="muted">No special notes recorded for this ticket.</p>';
+  return notes.length ? notes.join('') : '<p class="notes-empty">No special notes recorded for this ticket.</p>';
 }
 
-function dayTicketWorkerNotes(rows: DayTicketEntry[]): string[] {
+function dayTicketNoteRow(ref: string, belongsTo: string, kind: string, text: string, when?: string): string {
+  return `<div class="note-row"><span class="note-ref">${escapeHtml(ref)}${belongsTo ? `<small>${escapeHtml(belongsTo)}</small>` : ''}</span><span class="note-kind">${escapeHtml(kind)}${when ? `<small>${escapeHtml(when)}</small>` : ''}</span><span class="note-text">${escapeHtml(text)}</span></div>`;
+}
+
+function dayTicketWorkerNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string[] {
   const renderedWorkOrders = new Set<string>();
   const notes: string[] = [];
   for (const row of rows) {
@@ -834,13 +866,10 @@ function dayTicketWorkerNotes(rows: DayTicketEntry[]): string[] {
     renderedWorkOrders.add(workOrder.id);
     const workerNotes = (workOrder.fieldNotes ?? [])
       .filter((note) => !note.workerId || note.workerId === assignment.workerId)
-      .map((note) => {
-        const when = note.createdAt ? ` · ${shortDateTime(note.createdAt)}` : '';
-        return `<p>${escapeHtml(workOrder.workOrderNumber)}: <strong>${escapeHtml(note.workerName || assignment.workerName || 'Worker')}</strong>${escapeHtml(when)} - ${escapeHtml(note.note)}</p>`;
-      });
+      .map((note) => dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Field note', note.note, note.createdAt ? shortDateTime(note.createdAt) : undefined));
     notes.push(...workerNotes);
     if (workerNotes.length === 0 && assignment.notes) {
-      notes.push(`<p><strong>Worker note:</strong> ${escapeHtml(workOrder.workOrderNumber)} - ${escapeHtml(assignment.notes)}</p>`);
+      notes.push(dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Worker note', assignment.notes));
     }
   }
   return notes;
@@ -849,10 +878,10 @@ function dayTicketWorkerNotes(rows: DayTicketEntry[]): string[] {
 function dayTicketActivityNotes(rows: DayTicketEntry[]): string[] {
   return rows
     .filter((row) => row.rowType === 'WORKER_ACTIVITY' && row.activity?.notes)
-    .map((row) => `<p><strong>${escapeHtml(activityTypeLabel(row.activity?.activityType || 'OTHER'))}:</strong> ${escapeHtml(row.activity?.notes || '')}</p>`);
+    .map((row) => dayTicketNoteRow('-', dayTicketClient(row), activityTypeLabel(row.activity?.activityType || 'OTHER'), row.activity?.notes || '', row.timeIn ? shortDateTime(row.timeIn) : undefined));
 }
 
-function dayTicketOverrideNotes(rows: DayTicketEntry[]): string[] {
+function dayTicketOverrideNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string[] {
   const rendered = new Set<string>();
   const notes: string[] = [];
   for (const row of rows) {
@@ -860,7 +889,7 @@ function dayTicketOverrideNotes(rows: DayTicketEntry[]): string[] {
       continue;
     }
     rendered.add(row.workOrder.id);
-    notes.push(`<p><strong>Override:</strong> ${escapeHtml(row.workOrder.workOrderNumber)}${row.assignment.overrideReason ? ` - ${escapeHtml(row.assignment.overrideReason)}` : ''}</p>`);
+    notes.push(dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Override', row.assignment.overrideReason || 'Timing corrected by operations'));
   }
   return notes;
 }
@@ -873,11 +902,10 @@ function ticketDateLabel(from: string, to: string): string {
   return formatter.format(localDate(from || to || dateInputValue(new Date())));
 }
 
-function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; subtitle: string; address: string; contact: string; logoUrl: string } {
+function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; address: string; contact: string; logoUrl: string } {
   const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
   return {
     name,
-    subtitle: firstNonBlank(settings?.websiteUrl),
     address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')

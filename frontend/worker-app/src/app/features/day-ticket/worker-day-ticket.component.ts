@@ -11,17 +11,18 @@ import {
   dateInputValue,
   dayTicketActivityRows,
   dayTicketDescription,
-  dayTicketEstimatedTravelLabel,
   dayTicketHtml,
   DayTicketOptions,
   dayTicketRowTypeLabel,
   dayTicketRows,
   dayTicketShiftSummary,
   dayTicketTotalMinutes,
+  dayTicketWorkOrderLabeler,
   minutesLabel,
   printHtmlDocument,
   timeOnly
 } from '../../../../../packages/lorne-contracts/src/lib/report-generation';
+import type { DayTicketEntry } from '../../../../../packages/lorne-contracts/src/lib/report-generation';
 
 const CURRENT_WORKER_ID = 'current-worker';
 
@@ -178,13 +179,12 @@ const CURRENT_WORKER_ID = 'current-worker';
                 <th class="px-3 py-2">Clock-in</th>
                 <th class="px-3 py-2">Clock-out</th>
                 <th class="px-3 py-2">Client</th>
-                <th class="px-3 py-2">W.O #</th>
                 <th class="px-3 py-2">Job description</th>
-                <th class="px-3 py-2">Map est.</th>
                 <th class="px-3 py-2">Total</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
+              @let workOrderLabel = workOrderLabeler();
               @for (entry of rows(); track rowKey(entry)) {
                 <tr>
                   <td class="px-3 py-2 font-black text-slate-500">{{ $index + 1 }}</td>
@@ -193,17 +193,18 @@ const CURRENT_WORKER_ID = 'current-worker';
                   <td class="px-3 py-2">
                     <p class="font-black text-slate-950">{{ entry.rowType === 'WORKER_ACTIVITY' ? entry.activity?.locationName || entry.activity?.title : entry.rowType === 'ROUTE_STOP' ? entry.routeStop?.name : entry.workOrder?.propertyName }}</p>
                     <p class="text-xs font-semibold text-slate-500">{{ entry.rowType === 'WORKER_ACTIVITY' ? activityLabel(entry.activity?.activityType || 'OTHER') : entry.rowType === 'ROUTE_STOP' ? 'Route stop' : entry.rowType === 'TRAVEL' ? 'Travel' : entry.workOrder?.ownerName }}</p>
+                    @if (workOrderLabel(entry)) {
+                      <p class="mt-1 text-xs font-black text-teal-700">{{ workOrderLabel(entry) }}</p>
+                    }
                   </td>
-                  <td class="px-3 py-2 font-black text-teal-700">{{ entry.workOrder?.workOrderNumber || 'Worker activity' }}</td>
                   <td class="px-3 py-2">
                     <p class="mb-1 inline-flex rounded-full border border-slate-200 px-2 py-0.5 text-[0.65rem] font-black uppercase tracking-wide text-teal-700">{{ dayTicketRowTypeLabel(entry) }}</p>
                     <p class="font-semibold text-slate-800">{{ dayTicketDescription(entry, options) }}</p>
                   </td>
-                  <td class="px-3 py-2 font-bold text-slate-600">{{ dayTicketEstimatedTravelLabel(entry) }}</td>
                   <td class="px-3 py-2 font-black text-slate-950">{{ minutesLabel(entry.minutes) }}</td>
                 </tr>
               } @empty {
-                <tr><td colspan="8" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No ticket rows for this date.</td></tr>
+                <tr><td colspan="6" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No ticket rows for this date.</td></tr>
               }
             </tbody>
           </table>
@@ -240,7 +241,6 @@ export class WorkerDayTicketComponent {
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
   protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;
-  protected readonly dayTicketEstimatedTravelLabel = dayTicketEstimatedTravelLabel;
 
   constructor() {
     void this.load();
@@ -257,6 +257,10 @@ export class WorkerDayTicketComponent {
       ...dayTicketRows({ workOrders: this.jobs().map((job) => this.toWorkOrderRecord(job)) } as never, this.loadoutWorkerId(), this.selectedDate, this.selectedDate, this.options),
       ...this.activityRows()
     ].sort((left, right) => new Date(left.timeIn || '').getTime() - new Date(right.timeIn || '').getTime());
+  }
+
+  protected workOrderLabeler(): (row: DayTicketEntry) => string {
+    return dayTicketWorkOrderLabeler(this.rows(), this.selectedDate);
   }
 
   protected totalMinutes(): number {
