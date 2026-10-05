@@ -12,12 +12,12 @@ import {
   dateInputValue,
   dayTicketActivityRows,
   dayTicketDescription,
-  dayTicketEstimatedTravelLabel,
   dayTicketHtml,
   DayTicketOptions,
   dayTicketRowTypeLabel,
   dayTicketRows,
   dayTicketShiftSummary,
+  dayTicketWorkOrderLabeler,
   minutesLabel,
   printHtmlDocument,
   ticketTimeLabel,
@@ -222,13 +222,12 @@ type DayTicketData = ReportGenerationData & { generatedAt: Date; workers: Worker
                   <th class="px-3 py-2">Clock-in</th>
                   <th class="px-3 py-2">Clock-out</th>
                   <th class="px-3 py-2">Client</th>
-                  <th class="px-3 py-2">W.O #</th>
                   <th class="px-3 py-2">Job description</th>
-                  <th class="px-3 py-2">Map est.</th>
                   <th class="px-3 py-2">Total</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
+                @let workOrderLabel = workOrderLabeler(data);
                 @for (entry of rows(data).slice(0, 20); track rowKey(entry)) {
                   <tr>
                     <td class="px-3 py-2 font-black text-slate-500">{{ $index + 1 }}</td>
@@ -253,17 +252,18 @@ type DayTicketData = ReportGenerationData & { generatedAt: Date; workers: Worker
                     <td class="px-3 py-2">
                       <p class="font-black text-slate-950">{{ entry.rowType === 'WORKER_ACTIVITY' ? entry.activity?.locationName || entry.activity?.title : entry.rowType === 'ROUTE_STOP' ? entry.routeStop?.name : entry.workOrder?.propertyName }}</p>
                       <p class="text-xs font-semibold text-slate-500">{{ entry.rowType === 'WORKER_ACTIVITY' ? activityLabel(entry.activity?.activityType || 'OTHER') : entry.rowType === 'ROUTE_STOP' ? 'Route stop' : entry.rowType === 'TRAVEL' ? 'Travel' : entry.workOrder?.ownerName }}</p>
+                      @if (workOrderLabel(entry)) {
+                        <p class="mt-1 text-xs font-black text-teal-700">{{ workOrderLabel(entry) }}</p>
+                      }
                     </td>
-                    <td class="px-3 py-2 font-black text-teal-700">{{ entry.workOrder?.workOrderNumber || 'Worker activity' }}</td>
                     <td class="px-3 py-2">
                       <p class="mb-1 inline-flex rounded-full border border-slate-200 px-2 py-0.5 text-[0.65rem] font-black uppercase tracking-wide text-teal-700">{{ dayTicketRowTypeLabel(entry) }}</p>
                       <p class="font-semibold text-slate-800">{{ dayTicketDescription(entry, dayTicketOptions) }}</p>
                     </td>
-                    <td class="px-3 py-2 font-bold text-slate-600">{{ dayTicketEstimatedTravelLabel(entry) }}</td>
                     <td class="px-3 py-2 font-black text-slate-950">{{ minutesLabel(entry.minutes) }}</td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="8" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No work orders match this worker and date.</td></tr>
+                  <tr><td colspan="6" class="px-3 py-8 text-center text-sm font-semibold text-slate-500">No work orders match this worker and date.</td></tr>
                 }
               </tbody>
             </table>
@@ -306,7 +306,6 @@ export class DayTicketPageComponent {
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
   protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;
-  protected readonly dayTicketEstimatedTravelLabel = dayTicketEstimatedTravelLabel;
 
   constructor() {
     const params = this.route.snapshot.queryParamMap;
@@ -348,6 +347,10 @@ export class DayTicketPageComponent {
     ].sort((left, right) => new Date(left.timeIn || '').getTime() - new Date(right.timeIn || '').getTime());
     const search = this.searchTerm.trim().toLowerCase();
     return search ? rows.filter((row) => dayTicketSearchText(row).includes(search)) : rows;
+  }
+
+  protected workOrderLabeler(data: DayTicketData): (row: DayTicketEntry) => string {
+    return dayTicketWorkOrderLabeler(this.rows(data), this.dayTicketDateFrom || this.dayTicketDateTo);
   }
 
   protected async printDayTicket(data: DayTicketData): Promise<void> {
