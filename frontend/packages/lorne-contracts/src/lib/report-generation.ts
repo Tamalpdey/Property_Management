@@ -397,7 +397,7 @@ export function dayTicketHtml(input: {
       @bottom-right { content: ''; }
     }
     * { box-sizing: border-box; }
-    body { color: #111827; font-family: Arial, sans-serif; font-size: 11px; margin: 0; }
+    body { color: #111827; font-family: Arial, sans-serif; font-size: 9pt; line-height: 1.3; margin: 0; }
     .sheet { border: 2px solid #334155; box-decoration-break: clone; -webkit-box-decoration-break: clone; min-height: 252mm; padding: 16px; }
     header { align-items: center; border-bottom: 2px solid #334155; display: grid; grid-template-columns: 1fr auto; gap: 24px; margin-bottom: 14px; padding-bottom: 12px; }
     .brand-wrap { align-items: center; display: flex; gap: 14px; min-width: 0; }
@@ -409,44 +409,44 @@ export function dayTicketHtml(input: {
     h1 { font-size: 26px; letter-spacing: .08em; line-height: 1; margin: 0; white-space: nowrap; }
     .fields { align-items: end; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin: 12px 0; }
     .field { align-items: end; display: grid; grid-template-columns: auto 1fr; gap: 8px; }
-    .field span { font-size: 16px; font-weight: 800; }
-    .fields .line { color: #0f172a; font-size: 18px; font-weight: 800; letter-spacing: .01em; line-height: 1.2; min-height: 26px; }
+    .field span { font-size: 10pt; font-weight: 800; }
+    .fields .line { color: #0f172a; font-size: 11pt; font-weight: 700; line-height: 1.25; min-height: 22pt; overflow-wrap: anywhere; }
     .line { border-bottom: 1px solid #111827; min-height: 20px; padding: 0 6px 2px; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
-    th, td { border: 1px solid #334155; padding: 6px 7px; vertical-align: top; }
-    th { background: #f8fafc; font-size: 12px; text-align: center; }
-    td { height: 34px; }
-    .time { text-align: center; width: 62px; }
-    .client { width: 120px; }
-    .total { text-align: center; width: 54px; }
+    th, td { border: 1px solid #334155; overflow-wrap: anywhere; padding: 5pt 6pt; vertical-align: top; }
+    th { background: #f8fafc; font-size: 8pt; font-weight: 800; line-height: 1.2; text-align: center; }
+    td { font-size: 8.5pt; height: 28pt; line-height: 1.3; }
+    .time { text-align: center; width: 92px; }
+    .client { width: 160px; }
+    .total { text-align: center; width: 62px; }
     .desc { width: auto; }
-    .wo-number { font-size: 10px; font-weight: 800; margin-top: 3px; }
-    .muted { color: #64748b; font-size: 9px; font-weight: 700; margin-top: 2px; }
-    .entry-kind { border: 1px solid #cbd5e1; border-radius: 999px; color: #0f766e; display: inline-block; font-size: 8px; font-weight: 800; margin: 0 4px 3px 0; padding: 1px 5px; text-transform: uppercase; }
+    .wo-number { font-size: 8pt; font-weight: 800; margin-top: 3pt; }
+    .muted { color: #64748b; font-size: 7.5pt; font-weight: 600; line-height: 1.3; margin-top: 2pt; }
+    .entry-kind { border: 1px solid #cbd5e1; border-radius: 999px; color: #0f766e; display: inline-block; font-size: 6.8pt; font-weight: 800; line-height: 1.2; margin: 0 4pt 3pt 0; padding: 1pt 4pt; text-transform: uppercase; }
     .entry-kind.travel { color: #0369a1; }
     .entry-kind.route-stop { color: #7c2d12; }
     .entry-kind.worker-activity { color: #6d28d9; }
     .notes { border: 1px solid #334155; border-top: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; min-height: 128px; padding: 10px 12px; }
-    .notes-title { border-bottom: 1px solid #cbd5e1; font-size: 13px; font-weight: 800; letter-spacing: .06em; margin-bottom: 6px; padding-bottom: 6px; }
+    .notes-title { border-bottom: 1px solid #cbd5e1; font-size: 9pt; font-weight: 800; letter-spacing: .06em; margin-bottom: 6px; padding-bottom: 6px; }
     .note-row { align-items: baseline; border-bottom: 1px dashed #e2e8f0; display: grid; grid-template-columns: 112px 120px 1fr; gap: 12px; padding: 5px 0; }
     .note-row:last-child { border-bottom: 0; }
     .note-ref { font-weight: 800; white-space: nowrap; }
-    .note-ref small { color: #475569; display: block; font-size: 9px; font-weight: 700; margin-top: 2px; white-space: normal; }
-    .note-kind { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
-    .note-kind small { color: #64748b; display: block; font-size: 9px; font-weight: 700; margin-top: 1px; text-transform: none; }
-    .note-text { line-height: 1.35; overflow-wrap: anywhere; }
-    .notes-empty { color: #64748b; font-size: 10px; font-weight: 700; padding: 6px 0; }
+    .note-ref small { color: #475569; display: block; font-size: 7.5pt; font-weight: 600; margin-top: 2px; white-space: normal; }
+    .note-kind { color: #475569; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
+    .note-kind small { color: #64748b; display: block; font-size: 7.5pt; font-weight: 600; margin-top: 1px; text-transform: none; }
+    .note-text { font-size: 8.5pt; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+    .notes-empty { color: #64748b; font-size: 8pt; font-weight: 600; padding: 6px 0; }
     .footer { align-items: end; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; }
     .vehicle { align-items: end; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 18px; }
-    .footer span, .vehicle span { color: #475569; display: block; font-size: 9px; font-weight: 800; letter-spacing: .06em; margin-bottom: 4px; text-transform: uppercase; }
-    .footer .line, .vehicle .line { font-size: 14px; font-weight: 800; min-height: 24px; padding: 0 2px 3px; }
+    .footer span, .vehicle span { color: #475569; display: block; font-size: 7pt; font-weight: 800; letter-spacing: .06em; margin-bottom: 4px; text-transform: uppercase; }
+    .footer .line, .vehicle .line { font-size: 9pt; font-weight: 700; line-height: 1.25; min-height: 20pt; padding: 0 2px 3px; }
     .clock-sessions { border-top: 1px solid #cbd5e1; display: grid; gap: 4px; margin-top: 12px; padding-top: 8px; }
     .clock-session-row { align-items: center; display: grid; grid-template-columns: 70px 1fr 1fr 70px; gap: 8px; }
-    .clock-session-row span { color: #475569; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .clock-session-row span { color: #475569; font-size: 7pt; font-weight: 800; text-transform: uppercase; }
     .adjusted-badge { color: #b45309; display: inline-block; font-size: 8px; font-weight: 800; margin-left: 4px; text-transform: uppercase; }
     .schedule-fallback { color: #92400e; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
     .override-badge { color: #b45309; display: block; font-size: 8px; font-weight: 800; margin-top: 1px; text-transform: uppercase; }
-    .hint { color: #475569; font-size: 10px; font-weight: 700; margin-top: 16px; text-align: center; }
+    .hint { color: #475569; font-size: 7pt; font-weight: 600; margin-top: 16px; text-align: center; }
     .legend { color: #92400e; font-size: 9px; font-weight: 800; margin: 6px 0 12px; text-align: left; text-transform: uppercase; }
     @media print {
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -908,10 +908,18 @@ function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; ad
   const name = showName ? firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services') : '';
   return {
     name,
-    address: showAddress ? joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode) : '',
+    address: showAddress ? tenantAddress(settings) : '',
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
   };
+}
+
+function tenantAddress(settings?: TenantSettingsRecord | null): string {
+  const addressParts = [settings?.addressLine1, settings?.addressLine2, settings?.city, settings?.provinceCode, settings?.postalCode];
+  if (!addressParts.some((value) => value?.trim())) {
+    return '';
+  }
+  return joinText(', ', ...addressParts, settings?.countryCode);
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {

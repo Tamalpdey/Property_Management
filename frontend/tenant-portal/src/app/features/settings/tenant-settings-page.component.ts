@@ -80,9 +80,13 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                   <input class="field-input" name="countryCode" maxlength="2" [(ngModel)]="form.countryCode" />
                 </label>
                 <label class="block md:col-span-2">
-                  <span class="field-label">Address</span>
+                  <span class="field-label">Address line 1</span>
                   <input class="field-input" name="addressLine1" [(ngModel)]="form.addressLine1" />
-                  <span class="mt-1 block text-xs font-semibold text-slate-500">The complete address below is displayed under the company name on day tickets.</span>
+                  <span class="mt-1 block text-xs font-semibold text-slate-500">The complete address below is used by enabled print and invoice branding.</span>
+                </label>
+                <label class="block md:col-span-2">
+                  <span class="field-label">Address line 2</span>
+                  <input class="field-input" name="addressLine2" placeholder="Suite, unit, building (optional)" [(ngModel)]="form.addressLine2" />
                 </label>
                 <label class="block">
                   <span class="field-label">City</span>
@@ -96,20 +100,6 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                   <span class="field-label">Postal code</span>
                   <input class="field-input" name="postalCode" [(ngModel)]="form.postalCode" />
                 </label>
-                <section class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2 md:grid-cols-2">
-                  <div class="md:col-span-2">
-                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Day ticket header</p>
-                    <p class="mt-1 text-xs font-semibold text-slate-500">Choose which company details appear next to the logo on admin and worker Day Tickets.</p>
-                  </div>
-                  <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
-                    <input class="mt-1" type="checkbox" name="dayTicketShowCompanyName" [(ngModel)]="form.dayTicketShowCompanyName" />
-                    <span>Show company name</span>
-                  </label>
-                  <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
-                    <input class="mt-1" type="checkbox" name="dayTicketShowCompanyAddress" [(ngModel)]="form.dayTicketShowCompanyAddress" />
-                    <span>Show company address</span>
-                  </label>
-                </section>
               </div>
             }
 
@@ -267,6 +257,55 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
 
             @if (activeTab() === 'settings') {
               <div class="grid gap-3">
+                <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div>
+                    <p class="text-xs font-black uppercase tracking-wide text-teal-700">Document headers</p>
+                    <h2 class="mt-1 text-lg font-black text-slate-950">Company details beside the logo</h2>
+                    <p class="mt-1 text-sm font-semibold leading-6 text-slate-600">Use one common place to control the header shown on generated documents.</p>
+                  </div>
+                  <div class="mt-3 grid gap-3">
+                    <div class="rounded-lg border border-slate-200 bg-white p-3">
+                      <p class="text-sm font-black text-slate-950">Day ticket</p>
+                      <p class="mt-1 text-xs font-semibold text-slate-500">Applies to both admin and worker Day Tickets.</p>
+                      <div class="mt-2 grid gap-2 md:grid-cols-2">
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="dayTicketShowCompanyName" [(ngModel)]="form.dayTicketShowCompanyName" />
+                          <span>Show company name</span>
+                        </label>
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="dayTicketShowCompanyAddress" [(ngModel)]="form.dayTicketShowCompanyAddress" />
+                          <span>Show full company address</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-white p-3">
+                      <p class="text-sm font-black text-slate-950">Service and maintenance records</p>
+                      <div class="mt-2 grid gap-2 md:grid-cols-2">
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="serviceRecordShowCompanyName" [(ngModel)]="form.serviceRecordShowCompanyName" />
+                          <span>Show company name</span>
+                        </label>
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="serviceRecordShowCompanyAddress" [(ngModel)]="form.serviceRecordShowCompanyAddress" />
+                          <span>Show full company address</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-white p-3">
+                      <p class="text-sm font-black text-slate-950">Invoice</p>
+                      <div class="mt-2 grid gap-2 md:grid-cols-2">
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="invoiceShowCompanyName" [(ngModel)]="form.invoiceShowCompanyName" />
+                          <span>Show company name</span>
+                        </label>
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700">
+                          <input class="mt-1" type="checkbox" name="invoiceShowCompanyAddress" [(ngModel)]="form.invoiceShowCompanyAddress" />
+                          <span>Show full company address</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
                 <section class="rounded-lg border border-teal-100 bg-teal-50/60 p-3">
                   <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div class="max-w-2xl">
@@ -491,13 +530,13 @@ export class TenantSettingsPageComponent {
     body: ''
   };
   protected readonly brandName = computed(() => this.form.organizationName || this.settings()?.tenantName || 'Tenant');
-  protected readonly companyAddress = computed(() => [
-    this.form.addressLine1,
-    this.form.city,
-    this.form.provinceCode,
-    this.form.postalCode,
-    this.form.countryCode
-  ].map((value) => value?.trim()).filter(Boolean).join(', '));
+  protected readonly companyAddress = computed(() => {
+    const addressParts = [this.form.addressLine1, this.form.addressLine2, this.form.city, this.form.provinceCode, this.form.postalCode];
+    if (!addressParts.some((value) => value?.trim())) {
+      return '';
+    }
+    return [...addressParts, this.form.countryCode].map((value) => value?.trim()).filter(Boolean).join(', ');
+  });
   protected readonly userPhotoUrl = computed(() => this.auth.currentUser()?.profilePhotoUrl || '');
   protected readonly userDisplayName = computed(() => this.displayName(this.auth.currentUser()));
   protected readonly userEmail = computed(() => this.auth.currentUser()?.email || '');
@@ -523,6 +562,16 @@ export class TenantSettingsPageComponent {
 
   protected async save(): Promise<void> {
     if (this.saving()) {
+      return;
+    }
+    const addressEnabled = this.form.dayTicketShowCompanyAddress
+      || this.form.serviceRecordShowCompanyAddress
+      || this.form.invoiceShowCompanyAddress;
+    const requiredAddress = [this.form.addressLine1, this.form.city, this.form.provinceCode, this.form.postalCode];
+    if (addressEnabled && requiredAddress.some((value) => !value?.trim())) {
+      this.activeTab.set('profile');
+      this.error.set('Complete Address line 1, City, Province/state, and Postal code before showing the company address on documents.');
+      this.message.set('');
       return;
     }
     this.saving.set(true);
@@ -647,6 +696,7 @@ export class TenantSettingsPageComponent {
       phone: settings.phone || '',
       websiteUrl: settings.websiteUrl || '',
       addressLine1: settings.addressLine1 || '',
+      addressLine2: settings.addressLine2 || '',
       city: settings.city || '',
       provinceCode: settings.provinceCode || '',
       postalCode: settings.postalCode || '',
@@ -659,6 +709,10 @@ export class TenantSettingsPageComponent {
       logoUrl: settings.logoUrl || '',
       dayTicketShowCompanyName: settings.dayTicketShowCompanyName !== false,
       dayTicketShowCompanyAddress: settings.dayTicketShowCompanyAddress !== false,
+      serviceRecordShowCompanyName: settings.serviceRecordShowCompanyName === true,
+      serviceRecordShowCompanyAddress: settings.serviceRecordShowCompanyAddress === true,
+      invoiceShowCompanyName: settings.invoiceShowCompanyName === true,
+      invoiceShowCompanyAddress: settings.invoiceShowCompanyAddress === true,
       themePrimaryColor: settings.themePrimaryColor || '#0f766e',
       themeAccentColor: settings.themeAccentColor || '#2563eb',
       emailProvider: settings.emailProvider || 'SYSTEM',

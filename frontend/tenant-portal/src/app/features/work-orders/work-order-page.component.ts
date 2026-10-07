@@ -1423,7 +1423,7 @@ function printTenantBrand(settings?: TenantSettingsRecord | null): { name: strin
   return {
     name,
     legalName: legalName && !sameText(name, legalName) ? legalName : '',
-    address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
+    address: joinText(', ', settings?.addressLine1, settings?.addressLine2, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
   };

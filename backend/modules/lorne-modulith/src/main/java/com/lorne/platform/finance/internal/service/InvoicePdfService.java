@@ -112,10 +112,12 @@ public class InvoicePdfService {
             byte[] logoBytes,
             Color primary,
             Color accent,
-            ZoneId zoneId
+            ZoneId zoneId,
+            boolean showCompanyName,
+            boolean showCompanyAddress
     ) {
         private static Brand defaults() {
-            return new Brand("Lorne PropertyOps", "", "", "", "", "", "", "", BigDecimal.ZERO, "", "Payment due by the invoice due date.", "Thank you for your business.", null, Color.fromHex("#0f766e"), Color.fromHex("#2563eb"), ZoneId.of("America/Toronto"));
+            return new Brand("Lorne PropertyOps", "", "", "", "", "", "", "", BigDecimal.ZERO, "", "Payment due by the invoice due date.", "Thank you for your business.", null, Color.fromHex("#0f766e"), Color.fromHex("#2563eb"), ZoneId.of("America/Toronto"), false, false);
         }
 
         private static Brand from(TenantSettingsView settings, byte[] logoBytes) {
@@ -137,7 +139,9 @@ public class InvoicePdfService {
                     logoBytes,
                     Color.fromHex(settings.themePrimaryColor()),
                     Color.fromHex(settings.themeAccentColor()),
-                    InvoicePdfService.zoneId(settings.timezone())
+                    InvoicePdfService.zoneId(settings.timezone()),
+                    settings.invoiceShowCompanyName(),
+                    settings.invoiceShowCompanyAddress()
             );
         }
 
@@ -151,7 +155,10 @@ public class InvoicePdfService {
         }
 
         private static String address(TenantSettingsView settings) {
-            return join(", ", settings.addressLine1(), settings.city(), settings.provinceCode(), settings.postalCode(), settings.countryCode());
+            if (join("", settings.addressLine1(), settings.addressLine2(), settings.city(), settings.provinceCode(), settings.postalCode()).isBlank()) {
+                return "";
+            }
+            return join(", ", settings.addressLine1(), settings.addressLine2(), settings.city(), settings.provinceCode(), settings.postalCode(), settings.countryCode());
         }
     }
 
@@ -212,10 +219,14 @@ public class InvoicePdfService {
             fill(0.03f, 0.05f, 0.12f);
             rightTextAt("INVOICE", BOLD, 22, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 82);
             logoStamp(MARGIN + 28, PAGE_HEIGHT - 84, 28);
-            fill(brand.primary());
-            textAt(brand.name(), BOLD, 14, MARGIN + 68, PAGE_HEIGHT - 77);
-            fill(0.35f, 0.42f, 0.52f);
-            textAt(firstNonBlank(brand.legalName(), brand.address()), FONT, 8, MARGIN + 68, PAGE_HEIGHT - 91);
+            if (brand.showCompanyName()) {
+                fill(brand.primary());
+                textAt(brand.name(), BOLD, 14, MARGIN + 68, PAGE_HEIGHT - 77);
+            }
+            if (brand.showCompanyAddress() && !brand.address().isBlank()) {
+                fill(0.35f, 0.42f, 0.52f);
+                textAt(brand.address(), FONT, 8, MARGIN + 68, brand.showCompanyName() ? PAGE_HEIGHT - 91 : PAGE_HEIGHT - 82);
+            }
             y = PAGE_HEIGHT - 146;
         }
 

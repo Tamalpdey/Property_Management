@@ -56,6 +56,11 @@ const EMPTY_TEMPLATE: MaintenanceRecordTemplate = {
   noteLabel: 'Client note'
 };
 
+type DeliveryLine = {
+  quantity: string;
+  description: string;
+};
+
 const POOL_TEMPLATE: MaintenanceRecordTemplate = {
   enabled: true,
   title: 'Pool maintenance record',
@@ -97,29 +102,43 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
   );
   const usedMaterials = workOrder.materials.filter((material) => material.used);
   const deliveryRows = deliveryLabels(usedMaterials, templateDeliveries, recordData.deliveries);
-  const fieldNoteText = review.fieldNotes
-    .map((note) => `${note.workerName}: ${note.note}`)
-    .join('\n');
-  const serviceDetails = recordData.serviceDetails || fieldNoteText || workOrder.description || '';
+  const serviceDetailsHtml = recordData.serviceDetails
+    ? escapeHtml(recordData.serviceDetails)
+    : review.fieldNotes.length
+      ? review.fieldNotes
+        .map((note) => `<div><strong class="worker-name">${escapeHtml(note.workerName)}:</strong> ${escapeHtml(note.note)}</div>`)
+        .join('')
+      : escapeHtml(workOrder.description || '');
   const clientNote = recordData.clientNote || '';
+  const printedAt = formatPrintTimestamp(new Date(), settings?.timezone);
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${escapeHtml(workOrder.workOrderNumber)} ${escapeHtml(recordTitle)}</title>
+  <title>${escapeHtml(recordTitle)}</title>
   <style>
-    @page { size: letter; margin: 0.35in; }
+    @page {
+      size: letter;
+      margin: 0.35in;
+      @top-left { content: ''; }
+      @top-center { content: ''; }
+      @top-right { content: ''; }
+      @bottom-left { content: ''; }
+      @bottom-center { content: ''; }
+      @bottom-right { color: #475569; content: 'Page ' counter(page) ' of ' counter(pages); font: 700 7pt Arial, sans-serif; }
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: #111827;
       font-family: Arial, Helvetica, sans-serif;
       font-size: 9pt;
-      line-height: 1.2;
+      line-height: 1.35;
     }
+    .print-meta { color: #475569; font-size: 7pt; font-weight: 600; height: 12pt; line-height: 10pt; }
     .sheet {
-      min-height: 10.25in;
+      min-height: 10.08in;
       border: 1.5pt solid #1f2937;
       padding: 12pt 16pt 10pt;
     }
@@ -132,8 +151,8 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     }
     .brand { display: flex; align-items: center; gap: 10pt; min-width: 0; }
     .logo {
-      width: 46pt;
-      height: 34pt;
+      width: 70pt;
+      height: 46pt;
       object-fit: contain;
       border: 1px solid #d1d5db;
       padding: 2pt;
@@ -141,39 +160,41 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     .logo-placeholder {
       display: grid;
       place-items: center;
-      width: 46pt;
-      height: 34pt;
+      width: 70pt;
+      height: 46pt;
       border: 1px solid #9ca3af;
       color: #0f766e;
-      font-size: 15pt;
+      font-size: 8pt;
       font-weight: 900;
     }
     .company { min-width: 0; }
     .company-name {
       margin: 0;
-      font-size: 16pt;
+      font-size: 13pt;
       font-weight: 900;
       letter-spacing: 0.03em;
       text-transform: uppercase;
     }
     .company-subtitle { margin: 2pt 0 0; color: #475569; font-size: 7.5pt; font-weight: 700; }
     .title { text-align: right; }
-    h1 { margin: 2pt 0 8pt; font-size: 17pt; letter-spacing: 0.01em; }
-    .ticket-no { font-size: 10pt; font-weight: 800; }
+    h1 { margin: 2pt 0 7pt; font-size: 15pt; letter-spacing: 0.01em; }
+    .ticket-no { font-size: 9pt; font-weight: 800; letter-spacing: 0.03em; }
     .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 100pt minmax(0, 1fr); column-gap: 12pt; row-gap: 6pt; }
     .form-grid.generic { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
-    .field { display: grid; grid-template-columns: auto 1fr; align-items: end; gap: 6pt; min-width: 0; }
-    .field strong { white-space: nowrap; }
+    .field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 6pt; min-width: 0; }
+    .field strong { font-size: 8.5pt; font-weight: 800; white-space: nowrap; }
     .line {
-      min-height: 14pt;
+      min-height: 16pt;
       border-bottom: 1.2pt solid #111827;
-      padding: 0 4pt 2pt;
-      font-size: 9pt;
-      font-weight: 700;
+      padding: 0 4pt 2.5pt;
+      font-size: 10pt;
+      font-weight: 600;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
     }
     .date-line { display: grid; grid-template-columns: 1fr; text-align: center; }
-    .date-value { border-bottom: 1.2pt solid #111827; padding-bottom: 2pt; font-size: 9pt; font-weight: 700; }
-    .date-labels { display: flex; justify-content: space-around; color: #475569; font-size: 6.5pt; font-weight: 800; text-transform: uppercase; }
+    .date-value { border-bottom: 1.2pt solid #111827; padding-bottom: 2.5pt; font-size: 10pt; font-weight: 600; line-height: 1.25; }
+    .date-labels { display: grid; grid-template-columns: 1.25fr repeat(3, .7fr) 1fr; color: #475569; font-size: 6.5pt; font-weight: 800; text-align: center; text-transform: uppercase; }
     h2 { margin: 8pt 0 4pt; font-size: 8.5pt; letter-spacing: 0.03em; text-transform: uppercase; }
     .call-types { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10pt; margin-bottom: 4pt; }
     .check-row { display: grid; grid-template-columns: 1fr 12pt; align-items: center; gap: 6pt; min-height: 17pt; }
@@ -213,58 +234,77 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     .service-details {
       min-height: 142pt;
       border-bottom: 1.2pt solid #111827;
-      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 19pt, #6b7280 19.5pt);
-      padding: 3pt 5pt 0;
+      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 20.5pt, #9ca3af 20.5pt, #9ca3af 21pt);
+      background-position: 0 3pt;
+      padding: 2pt 5pt 5pt;
       white-space: pre-wrap;
-      font-size: 9pt;
-      font-weight: 700;
-      line-height: 19pt;
+      overflow-wrap: anywhere;
+      font-size: 9.5pt;
+      font-weight: 400;
+      line-height: 21pt;
     }
+    .service-details .worker-name { font-weight: 700; }
     .delivery-ledger {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      column-gap: 28pt;
-      min-height: 170pt;
+      grid-template-columns: 64pt minmax(0, 1fr);
+      min-height: 166pt;
+      border-top: 1px solid #6b7280;
+      border-left: 1px solid #6b7280;
+    }
+    .delivery-heading {
+      background: #f3f4f6;
+      border-right: 1px solid #6b7280;
+      border-bottom: 1px solid #6b7280;
+      padding: 4pt 5pt;
+      font-size: 7.5pt;
+      font-weight: 800;
+      text-transform: uppercase;
     }
     .delivery-entry {
-      min-height: 23pt;
+      min-height: 20pt;
+      border-right: 1px solid #6b7280;
       border-bottom: 1px solid #6b7280;
-      padding: 5pt 4pt 1pt;
-      font-size: 8.5pt;
-      font-weight: 700;
+      padding: 4pt 5pt 2pt;
+      font-size: 9pt;
+      font-weight: 400;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
     }
     .delivery-line { display: grid; grid-template-columns: 70pt 1fr; align-items: end; gap: 6pt; min-height: 16pt; }
     .notes {
       min-height: 82pt;
       border-bottom: 1.2pt solid #111827;
-      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 19pt, #9ca3af 19.5pt);
-      padding: 4pt 4pt 0;
+      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 20.5pt, #c0c7d0 20.5pt, #c0c7d0 21pt);
+      background-position: 0 3pt;
+      padding: 2pt 5pt 5pt;
       white-space: pre-wrap;
-      font-size: 9pt;
-      font-weight: 700;
-      line-height: 19pt;
+      overflow-wrap: anywhere;
+      font-size: 9.5pt;
+      font-weight: 400;
+      line-height: 21pt;
     }
     footer {
       margin-top: 8pt;
-      border-top: 2pt solid #111827;
       padding-top: 5pt;
       text-align: center;
       color: #4b5563;
       font-size: 8pt;
       font-weight: 700;
     }
+    footer span { display: block; margin-top: 2pt; }
   </style>
 </head>
 <body>
+  <div class="print-meta">${escapeHtml(printedAt)}</div>
   <main class="sheet">
     <header>
       <div class="brand">
-        ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : `<div class="logo-placeholder">${escapeHtml(initials(brand.name))}</div>`}
-        <div class="company">
-          <p class="company-name">${escapeHtml(brand.name)}</p>
+        ${brand.logoUrl ? `<img class="logo" src="${escapeAttribute(brand.logoUrl)}" alt="Company logo">` : `<div class="logo-placeholder">LOGO</div>`}
+        ${brand.name || brand.address ? `<div class="company">
+          ${brand.name ? `<p class="company-name">${escapeHtml(brand.name)}</p>` : ''}
           ${brand.legalName ? `<p class="company-subtitle">${escapeHtml(brand.legalName)}</p>` : ''}
           ${brand.address ? `<p class="company-subtitle">${escapeHtml(brand.address)}</p>` : ''}
-        </div>
+        </div>` : ''}
       </div>
       <div class="title">
         <h1>${escapeHtml(recordTitle)}</h1>
@@ -275,12 +315,12 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     <section class="form-grid${generalServiceRecord ? ' generic' : ''}">
       ${generalServiceRecord ? `
         <div class="field"><strong>Client Name:</strong><span class="line">${escapeHtml(workOrder.ownerName || workOrder.propertyName)}</span></div>
-        <div class="date-line"><span class="date-value">${escapeHtml(formatDateOnly(workOrder.scheduledStart))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span></span></div>
+        <div class="date-line"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span><span>Time</span></span></div>
         <div class="field"><strong>Client Street:</strong><span class="line">${escapeHtml(workOrder.propertyAddress || '')}</span></div>
         <div class="field"><strong>Staff:</strong><span class="line">${escapeHtml(workerNames(review))}</span></div>
       ` : `
         <div class="field"><strong>Client Name:</strong><span class="line">${escapeHtml(workOrder.ownerName || workOrder.propertyName)}</span></div>
-        <div class="date-line"><span class="date-value">${escapeHtml(formatDateOnly(workOrder.scheduledStart))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span></span></div>
+        <div class="date-line"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span><span>Time</span></span></div>
         <div class="field"><strong>Staff:</strong><span class="line">${escapeHtml(workerNames(review))}</span></div>
         <div class="field"><strong>Client Street:</strong><span class="line">${escapeHtml(workOrder.propertyAddress || '')}</span></div>
         <div class="field"><strong>#</strong><span class="line">${escapeHtml(workOrder.workOrderNumber)}</span></div>
@@ -290,7 +330,7 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
 
     ${generalServiceRecord ? `
     <h2>Service Details</h2>
-    <section class="service-details">${escapeHtml(serviceDetails)}</section>
+    <section class="service-details">${serviceDetailsHtml}</section>
     ` : `
     <h2>Call Type</h2>
     <section class="call-types">
@@ -327,19 +367,23 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     ${generalServiceRecord ? `
       <h2>Deliveries</h2>
       <section class="delivery-ledger">
+        <div class="delivery-heading">Quantity</div><div class="delivery-heading">Delivery / Material</div>
         ${genericDeliveryRows(deliveryRows)}
       </section>
     ` : deliveryRows.length ? `
       <h2>Deliveries</h2>
       <section class="deliveries">
-        ${deliveryRows.map((label) => deliveryRow(label)).join('')}
+        ${deliveryRows.map((delivery) => deliveryRow(delivery)).join('')}
       </section>
     ` : ''}
 
     <h2>${escapeHtml(template.noteLabel || 'Client note')}</h2>
     <section class="notes">${escapeHtml(clientNote)}</section>
 
-    <footer>${escapeHtml(brand.contact || [settings?.phone, settings?.supportEmail, settings?.websiteUrl].filter(Boolean).join(' | ') || '')}</footer>
+    <footer>
+      ${brand.website ? `<span>${escapeHtml(brand.website)}</span>` : ''}
+      ${brand.phone ? `<span>${escapeHtml(brand.phone)}</span>` : ''}
+    </footer>
   </main>
 </body>
 </html>`;
@@ -403,26 +447,29 @@ export function maintenanceRecordDisplayTitle(template: MaintenanceRecordTemplat
   return aquatic ? 'Pool Maintenance Record' : 'Service Record';
 }
 
-function deliveryLabels(materials: WorkOrderMaterial[], templateDeliveries: MaintenanceTemplateDelivery[], savedDeliveries?: Record<string, string>): string[] {
+function deliveryLabels(materials: WorkOrderMaterial[], templateDeliveries: MaintenanceTemplateDelivery[], savedDeliveries?: Record<string, string>): DeliveryLine[] {
   const saved = templateDeliveries.flatMap((delivery) => {
     const quantity = savedDeliveries?.[delivery.key]?.trim();
-    return quantity ? [`${quantity} ${delivery.label}`] : [];
+    return quantity ? [{ quantity, description: delivery.label }] : [];
   });
-  const used = materials.map((material) => {
+  const used = materials.map((material): DeliveryLine => {
     const quantity = [material.quantity, material.unit].filter((part) => part !== undefined && part !== null && String(part).trim()).join(' ');
-    return [quantity, material.itemName || material.description].filter(Boolean).join(' ');
-  }).filter(Boolean);
-  return [...new Set([...saved, ...used])].slice(0, 12);
+    return { quantity, description: material.itemName || material.description };
+  }).filter((delivery) => delivery.quantity || delivery.description);
+  const unique = new Map<string, DeliveryLine>();
+  [...saved, ...used].forEach((delivery) => unique.set(`${delivery.quantity}|${delivery.description}`.toLowerCase(), delivery));
+  return [...unique.values()].slice(0, 12);
 }
 
-function deliveryRow(label: string): string {
-  return `<div class="delivery-line"><span class="short-line"></span><span>${escapeHtml(label)}</span></div>`;
+function deliveryRow(delivery: DeliveryLine): string {
+  return `<div class="delivery-line"><span class="short-line">${escapeHtml(delivery.quantity)}</span><span>${escapeHtml(delivery.description)}</span></div>`;
 }
 
-function genericDeliveryRows(deliveries: string[]): string {
-  return Array.from({ length: Math.max(12, deliveries.length) }, (_, index) =>
-    `<div class="delivery-entry">${escapeHtml(deliveries[index] || '')}</div>`
-  ).join('');
+function genericDeliveryRows(deliveries: DeliveryLine[]): string {
+  return Array.from({ length: Math.max(7, deliveries.length) }, (_, index) => {
+    const delivery = deliveries[index];
+    return `<div class="delivery-entry">${escapeHtml(delivery?.quantity || '')}</div><div class="delivery-entry">${escapeHtml(delivery?.description || '')}</div>`;
+  }).join('');
 }
 
 function workerNames(review: WorkOrderReview): string {
@@ -652,17 +699,34 @@ function mergeTextValues(
   return merged;
 }
 
-function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; legalName: string; address: string; contact: string; logoUrl: string } {
-  const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
-  const legalName = firstNonBlank(settings?.legalName);
-  const contact = [settings?.phone, settings?.supportEmail, settings?.websiteUrl].filter(Boolean).join(' | ');
+function tenantBrand(settings?: TenantSettingsRecord | null): {
+  name: string;
+  legalName: string;
+  address: string;
+  phone: string;
+  website: string;
+  logoUrl: string;
+} {
+  const showName = settings?.serviceRecordShowCompanyName === true;
+  const showAddress = settings?.serviceRecordShowCompanyAddress === true;
+  const name = showName ? firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services') : '';
+  const legalName = showName ? firstNonBlank(settings?.legalName) : '';
   return {
     name,
     legalName: legalName && !sameText(name, legalName) ? legalName : '',
-    address: joinText(', ', settings?.addressLine1, settings?.city, settings?.provinceCode, settings?.postalCode, settings?.countryCode),
-    contact,
+    address: showAddress ? tenantAddress(settings) : '',
+    phone: firstNonBlank(settings?.phone),
+    website: firstNonBlank(settings?.websiteUrl),
     logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
   };
+}
+
+function tenantAddress(settings?: TenantSettingsRecord | null): string {
+  const addressParts = [settings?.addressLine1, settings?.addressLine2, settings?.city, settings?.provinceCode, settings?.postalCode];
+  if (!addressParts.some((value) => value?.trim())) {
+    return '';
+  }
+  return joinText(', ', ...addressParts, settings?.countryCode);
 }
 
 function absoluteAssetUrl(value: string): string {
@@ -676,21 +740,44 @@ function absoluteAssetUrl(value: string): string {
   }
 }
 
-function formatDateOnly(value?: string): string {
+function formatServiceTimestamp(value?: string, timezone?: string): string {
   if (!value) {
     return '';
   }
-  return new Date(value).toLocaleDateString([], { weekday: 'short', month: '2-digit', day: '2-digit', year: 'numeric' });
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'long',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  };
+  return formatTimestamp(new Date(value), options, timezone);
 }
 
-function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase() || 'PS';
+function formatPrintTimestamp(value: Date, timezone?: string): string {
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  };
+  return formatTimestamp(value, options, timezone);
+}
+
+function formatTimestamp(value: Date, options: Intl.DateTimeFormatOptions, timezone?: string): string {
+  const localizedOptions = { ...options };
+  if (timezone) {
+    localizedOptions.timeZone = timezone;
+  }
+  try {
+    return new Intl.DateTimeFormat('en-US', localizedOptions).format(value);
+  } catch {
+    delete localizedOptions.timeZone;
+    return new Intl.DateTimeFormat('en-US', localizedOptions).format(value);
+  }
 }
 
 function normalize(value: string): string {

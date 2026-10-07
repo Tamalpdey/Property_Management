@@ -38,7 +38,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
         var settings = jdbcTemplate.query("""
                 SELECT t.display_name AS tenant_name, t.legal_name, t.timezone, t.country_code AS tenant_country_code,
                        ts.organization_name, ts.billing_email, ts.support_email, ts.phone, ts.website_url,
-                       ts.address_line1, ts.city, ts.province_code, ts.postal_code, ts.country_code,
+                       ts.address_line1, ts.address_line2, ts.city, ts.province_code, ts.postal_code, ts.country_code,
                        coalesce(ts.invoice_prefix, 'INV') AS invoice_prefix,
                        coalesce(ts.invoice_tax_rate, 0.13) AS invoice_tax_rate,
                        ts.tax_registration_number,
@@ -46,6 +46,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                        ts.logo_url,
                        coalesce(ts.day_ticket_show_company_name, true) AS day_ticket_show_company_name,
                        coalesce(ts.day_ticket_show_company_address, true) AS day_ticket_show_company_address,
+                       coalesce(ts.service_record_show_company_name, false) AS service_record_show_company_name,
+                       coalesce(ts.service_record_show_company_address, false) AS service_record_show_company_address,
+                       coalesce(ts.invoice_show_company_name, false) AS invoice_show_company_name,
+                       coalesce(ts.invoice_show_company_address, false) AS invoice_show_company_address,
                        coalesce(ts.theme_primary_color, '#0f766e') AS theme_primary_color,
                        coalesce(ts.theme_accent_color, '#2563eb') AS theme_accent_color,
                        coalesce(ts.email_provider, 'SYSTEM') AS email_provider,
@@ -83,9 +87,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
     public TenantSettingsDto update(UUID tenantId, UUID actorUserId, UpdateTenantSettingsRequest request) {
         var safeRequest = request == null ? new UpdateTenantSettingsRequest(
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, null
         ) : request;
         var provider = provider(safeRequest.emailProvider());
         var primaryColor = color(safeRequest.themePrimaryColor(), "#0f766e", "Primary color must use #RRGGBB format.");
@@ -108,9 +113,11 @@ public class TenantSettingsService implements TenantSettingsOperations {
         jdbcTemplate.update("""
                 UPDATE tenant_settings
                 SET organization_name = ?, billing_email = ?, support_email = ?, phone = ?, website_url = ?,
-                    address_line1 = ?, city = ?, province_code = ?, postal_code = ?, country_code = ?,
+                    address_line1 = ?, address_line2 = ?, city = ?, province_code = ?, postal_code = ?, country_code = ?,
                     invoice_prefix = ?, invoice_tax_rate = ?, tax_registration_number = ?, invoice_footer = ?, payment_terms = ?, logo_url = ?,
                     day_ticket_show_company_name = ?, day_ticket_show_company_address = ?,
+                    service_record_show_company_name = ?, service_record_show_company_address = ?,
+                    invoice_show_company_name = ?, invoice_show_company_address = ?,
                     theme_primary_color = ?, theme_accent_color = ?,
                     email_provider = ?, email_sender_name = ?, email_from_address = ?, email_reply_to_address = ?,
                     smtp_host = ?, smtp_port = ?, smtp_username = ?, smtp_use_tls = ?,
@@ -137,6 +144,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 text(safeRequest.phone()),
                 text(safeRequest.websiteUrl()),
                 text(safeRequest.addressLine1()),
+                text(safeRequest.addressLine2()),
                 text(safeRequest.city()),
                 text(safeRequest.provinceCode()),
                 text(safeRequest.postalCode()),
@@ -149,6 +157,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 text(safeRequest.logoUrl()),
                 safeRequest.dayTicketShowCompanyName() == null || safeRequest.dayTicketShowCompanyName(),
                 safeRequest.dayTicketShowCompanyAddress() == null || safeRequest.dayTicketShowCompanyAddress(),
+                Boolean.TRUE.equals(safeRequest.serviceRecordShowCompanyName()),
+                Boolean.TRUE.equals(safeRequest.serviceRecordShowCompanyAddress()),
+                Boolean.TRUE.equals(safeRequest.invoiceShowCompanyName()),
+                Boolean.TRUE.equals(safeRequest.invoiceShowCompanyAddress()),
                 primaryColor,
                 accentColor,
                 provider,
@@ -200,6 +212,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("phone"),
                 rs.getString("website_url"),
                 rs.getString("address_line1"),
+                rs.getString("address_line2"),
                 rs.getString("city"),
                 rs.getString("province_code"),
                 rs.getString("postal_code"),
@@ -211,6 +224,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("logo_url"),
                 rs.getBoolean("day_ticket_show_company_name"),
                 rs.getBoolean("day_ticket_show_company_address"),
+                rs.getBoolean("service_record_show_company_name"),
+                rs.getBoolean("service_record_show_company_address"),
+                rs.getBoolean("invoice_show_company_name"),
+                rs.getBoolean("invoice_show_company_address"),
                 rs.getString("theme_primary_color"),
                 rs.getString("theme_accent_color"),
                 rs.getString("email_provider"),
@@ -246,6 +263,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.phone(),
                 settings.websiteUrl(),
                 settings.addressLine1(),
+                settings.addressLine2(),
                 settings.city(),
                 settings.provinceCode(),
                 settings.postalCode(),
@@ -257,6 +275,10 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.logoUrl(),
                 settings.dayTicketShowCompanyName(),
                 settings.dayTicketShowCompanyAddress(),
+                settings.serviceRecordShowCompanyName(),
+                settings.serviceRecordShowCompanyAddress(),
+                settings.invoiceShowCompanyName(),
+                settings.invoiceShowCompanyAddress(),
                 settings.themePrimaryColor(),
                 settings.themeAccentColor(),
                 settings.emailProvider(),

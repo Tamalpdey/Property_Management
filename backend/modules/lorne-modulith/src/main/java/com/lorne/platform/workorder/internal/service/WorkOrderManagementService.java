@@ -223,7 +223,7 @@ public class WorkOrderManagementService {
         validatePickupRouteStops(workOrderType, request.routeStops());
         var status = status(request.status(), source, assignedWorkerIds, request.scheduledStart());
         var priority = request.priority() == null || request.priority().isBlank() ? "NORMAL" : request.priority();
-        var workOrderNumber = workOrderNumberGenerator.nextNumber();
+        var workOrderNumber = workOrderNumberGenerator.nextNumber(tenantId, LocalDate.now());
         var workOrderId = jdbcTemplate.queryForObject("""
                 INSERT INTO work_orders (
                     tenant_id, work_order_number, work_order_type, customer_id, property_id, service_type_id, title, description, status, priority,

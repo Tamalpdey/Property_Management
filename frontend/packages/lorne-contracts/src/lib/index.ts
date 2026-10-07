@@ -1254,6 +1254,7 @@ export interface TenantSettingsRecord {
   phone?: string;
   websiteUrl?: string;
   addressLine1?: string;
+  addressLine2?: string;
   city?: string;
   provinceCode?: string;
   postalCode?: string;
@@ -1265,6 +1266,10 @@ export interface TenantSettingsRecord {
   logoUrl?: string;
   dayTicketShowCompanyName: boolean;
   dayTicketShowCompanyAddress: boolean;
+  serviceRecordShowCompanyName: boolean;
+  serviceRecordShowCompanyAddress: boolean;
+  invoiceShowCompanyName: boolean;
+  invoiceShowCompanyAddress: boolean;
   themePrimaryColor: string;
   themeAccentColor: string;
   emailProvider: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
@@ -1292,6 +1297,7 @@ export interface UpdateTenantSettingsRequest {
   phone?: string;
   websiteUrl?: string;
   addressLine1?: string;
+  addressLine2?: string;
   city?: string;
   provinceCode?: string;
   postalCode?: string;
@@ -1304,6 +1310,10 @@ export interface UpdateTenantSettingsRequest {
   logoUrl?: string;
   dayTicketShowCompanyName?: boolean;
   dayTicketShowCompanyAddress?: boolean;
+  serviceRecordShowCompanyName?: boolean;
+  serviceRecordShowCompanyAddress?: boolean;
+  invoiceShowCompanyName?: boolean;
+  invoiceShowCompanyAddress?: boolean;
   themePrimaryColor?: string;
   themeAccentColor?: string;
   emailProvider?: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';

@@ -164,7 +164,7 @@ public class RecurringWorkTemplateService {
         var end = start == null ? null : start.plusMinutes(template.durationMinutes());
         var scheduledStart = start == null ? null : Timestamp.valueOf(start);
         var scheduledEnd = end == null ? null : Timestamp.valueOf(end);
-        var workOrderNumber = workOrderNumberGenerator.nextNumber();
+        var workOrderNumber = workOrderNumberGenerator.nextNumber(tenantId, LocalDate.now());
         var inserted = jdbcTemplate.query("""
                 INSERT INTO work_orders (
                     tenant_id, work_order_number, customer_id, property_id, service_type_id, title, description, status, priority,

@@ -1521,8 +1521,9 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
     .brand-bar.top { top: 0; }
     .brand-bar.bottom { bottom: 0; height: 14pt; }
     .invoice-title { margin: 42pt 0 26pt; text-align: right; font-size: 24pt; font-weight: 800; letter-spacing: 0.01em; }
-    .brand-name { position: absolute; top: 68pt; left: 124pt; max-width: 250pt; margin: 0; color: ${escapeHtml(brand.primary)}; font-size: 15pt; font-weight: 800; }
-    .logo { position: absolute; top: 45pt; left: 54pt; display: grid; width: 58pt; height: 58pt; place-items: center; background: #fff; border: 1px solid #cbd5e1; color: ${escapeHtml(brand.primary)}; font-size: 8pt; font-weight: 800; padding: 4pt; }
+    .brand-name { position: absolute; top: 61pt; left: 108pt; max-width: 270pt; margin: 0; color: ${escapeHtml(brand.primary)}; font-size: 15pt; font-weight: 800; }
+    .brand-address { position: absolute; top: 82pt; left: 108pt; max-width: 270pt; margin: 0; color: #475569; font-size: 8pt; font-weight: 700; }
+    .logo { position: absolute; top: 45pt; left: 38pt; display: grid; width: 58pt; height: 58pt; place-items: center; background: #fff; border: 1px solid #cbd5e1; color: ${escapeHtml(brand.primary)}; font-size: 8pt; font-weight: 800; padding: 4pt; }
     .logo img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
     .columns { display: grid; grid-template-columns: 1fr 1.15fr 0.88fr; gap: 24pt; min-height: 88pt; }
     .label { margin: 0 0 4pt; color: ${escapeHtml(brand.primary)}; font-size: 7.5pt; font-weight: 800; text-transform: uppercase; }
@@ -1576,7 +1577,8 @@ function invoicePrintHtml(invoice: InvoiceRecord, settings?: TenantSettingsRecor
       <div class="brand-bar bottom"></div>
       <div class="logo">${brand.logoUrl ? `<img src="${escapeAttribute(brand.logoUrl)}" alt="${escapeAttribute(brand.name)} logo">` : escapeHtml(initials(brand.name))}</div>
       <h1 class="invoice-title">INVOICE</h1>
-      <p class="brand-name">${escapeHtml(brand.name)}</p>
+      ${brand.showCompanyName ? `<p class="brand-name">${escapeHtml(brand.name)}</p>` : ''}
+      ${brand.showCompanyAddress && brand.address ? `<p class="brand-address">${escapeHtml(brand.address)}</p>` : ''}
       <div class="columns">
         <section>
           <p class="label">Bill from</p>
@@ -1648,13 +1650,15 @@ function invoiceBrand(settings?: TenantSettingsRecord | null): {
   primary: string;
   accent: string;
   logoUrl: string;
+  showCompanyName: boolean;
+  showCompanyAddress: boolean;
 } {
   const name = firstNonBlank(settings?.organizationName, settings?.tenantName, settings?.legalName, 'Property Services');
   const legalName = firstNonBlank(settings?.legalName);
   return {
     name,
     legalName: legalName && !sameText(name, legalName) ? legalName : '',
-    address: joinText(', ', settings?.addressLine1 || '', settings?.city || '', settings?.provinceCode || '', settings?.postalCode || '', settings?.countryCode || ''),
+    address: tenantAddress(settings),
     contact: firstNonBlank(settings?.billingEmail, settings?.supportEmail, settings?.phone),
     website: firstNonBlank(settings?.websiteUrl),
     taxRegistrationNumber: firstNonBlank(settings?.taxRegistrationNumber),
@@ -1664,8 +1668,18 @@ function invoiceBrand(settings?: TenantSettingsRecord | null): {
     paymentTerms: firstNonBlank(settings?.paymentTerms, 'Payment due by the invoice due date.'),
     primary: /^#[0-9A-Fa-f]{6}$/.test(settings?.themePrimaryColor || '') ? settings?.themePrimaryColor || '#0f766e' : '#0f766e',
     accent: /^#[0-9A-Fa-f]{6}$/.test(settings?.themeAccentColor || '') ? settings?.themeAccentColor || '#2563eb' : '#2563eb',
-    logoUrl: absoluteAssetUrl(settings?.logoUrl || '')
+    logoUrl: absoluteAssetUrl(settings?.logoUrl || ''),
+    showCompanyName: settings?.invoiceShowCompanyName === true,
+    showCompanyAddress: settings?.invoiceShowCompanyAddress === true
   };
+}
+
+function tenantAddress(settings?: TenantSettingsRecord | null): string {
+  const addressParts = [settings?.addressLine1, settings?.addressLine2, settings?.city, settings?.provinceCode, settings?.postalCode];
+  if (!addressParts.some((value) => value?.trim())) {
+    return '';
+  }
+  return joinText(', ', ...addressParts.map((value) => value || ''), settings?.countryCode || '');
 }
 
 function invoiceTaxLabel(brand: ReturnType<typeof invoiceBrand>): string {
