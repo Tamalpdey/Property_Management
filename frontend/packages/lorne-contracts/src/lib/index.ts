@@ -558,6 +558,62 @@ export interface SuperAdminOverviewResponse {
   }>;
 }
 
+export type NewTenantStatus = 'TRIAL' | 'ACTIVE';
+
+export interface CreateTenantOnboardingRequest {
+  legalName: string;
+  displayName: string;
+  portalSubdomain: string;
+  planCode: string;
+  status: NewTenantStatus;
+  timezone: string;
+  countryCode: string;
+  provinceCode?: string;
+  adminDisplayName: string;
+  adminEmail: string;
+  adminPhone?: string;
+  temporaryPassword: string;
+  billingEmail?: string;
+  supportEmail?: string;
+  companyPhone?: string;
+  websiteUrl?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  postalCode?: string;
+  themePrimaryColor?: string;
+  themeAccentColor?: string;
+  themeNavigationColor?: string;
+  loginHeadline?: string;
+  loginMessage?: string;
+}
+
+export interface TenantOnboardingResult {
+  tenantId: string;
+  displayName: string;
+  portalSubdomain: string;
+  status: NewTenantStatus;
+  planCode: string;
+  administratorUserId: string;
+  administratorEmail: string;
+}
+
+export interface SuperAdminTenantSummary {
+  id: string;
+  legalName: string;
+  displayName: string;
+  portalSubdomain: string;
+  status: string;
+  planCode: string;
+  timezone: string;
+  countryCode: string;
+  provinceCode?: string;
+  administratorEmail?: string;
+  activeUsers: number;
+  activeProperties: number;
+  createdAt: string;
+}
+
 export interface PropertyOwner {
   id: string;
   ownerCode: string;
@@ -1248,6 +1304,7 @@ export interface TenantSettingsRecord {
   legalName: string;
   timezone: string;
   countryCode: string;
+  portalSubdomain: string;
   organizationName?: string;
   billingEmail?: string;
   supportEmail?: string;
@@ -1266,12 +1323,25 @@ export interface TenantSettingsRecord {
   logoUrl?: string;
   dayTicketShowCompanyName: boolean;
   dayTicketShowCompanyAddress: boolean;
+  dayTicketShowDailyLoadout: boolean;
   serviceRecordShowCompanyName: boolean;
   serviceRecordShowCompanyAddress: boolean;
   invoiceShowCompanyName: boolean;
   invoiceShowCompanyAddress: boolean;
   themePrimaryColor: string;
   themeAccentColor: string;
+  themeNavigationColor: string;
+  themeSurfaceColor: string;
+  themePageBackgroundColor: string;
+  themeDensity: 'COMPACT' | 'COMFORTABLE' | 'SPACIOUS';
+  themeRadius: 'SHARP' | 'SMALL' | 'ROUNDED';
+  dashboardWidgetOrder: DashboardWidgetId[];
+  dashboardHiddenWidgets: DashboardWidgetId[];
+  loginStyle: 'SPLIT' | 'FOCUSED' | 'MINIMAL';
+  loginHeadline: string;
+  loginMessage: string;
+  loginBackgroundPattern: 'GRID' | 'SUBTLE' | 'NONE';
+  loginShowPreview: boolean;
   emailProvider: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
   emailSenderName?: string;
   emailFromAddress?: string;
@@ -1292,6 +1362,7 @@ export interface TenantSettingsRecord {
 
 export interface UpdateTenantSettingsRequest {
   organizationName?: string;
+  portalSubdomain?: string;
   billingEmail?: string;
   supportEmail?: string;
   phone?: string;
@@ -1310,12 +1381,25 @@ export interface UpdateTenantSettingsRequest {
   logoUrl?: string;
   dayTicketShowCompanyName?: boolean;
   dayTicketShowCompanyAddress?: boolean;
+  dayTicketShowDailyLoadout?: boolean;
   serviceRecordShowCompanyName?: boolean;
   serviceRecordShowCompanyAddress?: boolean;
   invoiceShowCompanyName?: boolean;
   invoiceShowCompanyAddress?: boolean;
   themePrimaryColor?: string;
   themeAccentColor?: string;
+  themeNavigationColor?: string;
+  themeSurfaceColor?: string;
+  themePageBackgroundColor?: string;
+  themeDensity?: 'COMPACT' | 'COMFORTABLE' | 'SPACIOUS';
+  themeRadius?: 'SHARP' | 'SMALL' | 'ROUNDED';
+  dashboardWidgetOrder?: DashboardWidgetId[];
+  dashboardHiddenWidgets?: DashboardWidgetId[];
+  loginStyle?: 'SPLIT' | 'FOCUSED' | 'MINIMAL';
+  loginHeadline?: string;
+  loginMessage?: string;
+  loginBackgroundPattern?: 'GRID' | 'SUBTLE' | 'NONE';
+  loginShowPreview?: boolean;
   emailProvider?: 'SYSTEM' | 'TENANT_SMTP' | 'TENANT_GRAPH';
   emailSenderName?: string;
   emailFromAddress?: string;
@@ -1334,6 +1418,34 @@ export interface UpdateTenantSettingsRequest {
   autoSendWorkCompletedEmail?: boolean;
   autoSendInvoiceEmail?: boolean;
   liveWorkerTrackingEnabled?: boolean;
+}
+
+export type DashboardWidgetId =
+  | 'metrics'
+  | 'actionQueue'
+  | 'clockedIn'
+  | 'workMix'
+  | 'topServices'
+  | 'finance'
+  | 'workerLoad'
+  | 'inventoryRisk';
+
+export interface TenantLoginBrandingRecord {
+  tenantId: string;
+  portalSubdomain: string;
+  organizationName: string;
+  websiteUrl?: string;
+  logoUrl?: string;
+  themePrimaryColor: string;
+  themeAccentColor: string;
+  themeNavigationColor: string;
+  themePageBackgroundColor: string;
+  themeRadius: 'SHARP' | 'SMALL' | 'ROUNDED';
+  loginStyle: 'SPLIT' | 'FOCUSED' | 'MINIMAL';
+  loginHeadline: string;
+  loginMessage: string;
+  loginBackgroundPattern: 'GRID' | 'SUBTLE' | 'NONE';
+  loginShowPreview: boolean;
 }
 
 export interface TestTenantEmailRequest {

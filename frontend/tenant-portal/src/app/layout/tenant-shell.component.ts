@@ -6,6 +6,7 @@ import { catchError, firstValueFrom, interval, map, of, startWith, switchMap } f
 import type { CurrentUser, TenantSettingsRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
+import { TenantThemeService } from '../core/services/tenant-theme.service';
 import { CommunicationService } from '../features/messages/services/communication.service';
 import { TenantSettingsService } from '../features/settings/services/tenant-settings.service';
 
@@ -15,20 +16,20 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
   imports: [ButtonModule, NgTemplateOutlet, RouterLink, RouterLinkActive, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="min-h-screen bg-slate-100 lg:grid lg:grid-cols-[17rem_1fr]">
-      <aside class="sticky top-0 hidden h-screen border-r border-slate-200 bg-white lg:flex lg:flex-col">
+    <div class="tenant-shell min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
+      <aside class="tenant-sidebar sticky top-0 hidden h-screen border-r lg:flex lg:flex-col">
         <ng-container *ngTemplateOutlet="sidebarContent" />
       </aside>
 
       @if (mobileMenuOpen()) {
         <div class="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden" (click)="mobileMenuOpen.set(false)"></div>
-        <aside class="fixed inset-y-0 left-0 z-50 flex w-[19rem] max-w-[86vw] flex-col border-r border-slate-200 bg-white shadow-2xl lg:hidden">
+        <aside class="tenant-sidebar fixed inset-y-0 left-0 z-50 flex w-[19rem] max-w-[86vw] flex-col border-r shadow-2xl lg:hidden">
           <ng-container *ngTemplateOutlet="sidebarContent" />
         </aside>
       }
 
       <div class="min-w-0">
-        <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/90 shadow-sm backdrop-blur">
+        <header class="tenant-topbar sticky top-0 z-30 border-b shadow-sm backdrop-blur">
           <div class="flex items-center justify-between gap-3 px-3 py-1.5 lg:px-3.5">
             <div class="flex min-w-0 items-center gap-2.5">
               <div class="lg:hidden">
@@ -56,7 +57,7 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
           </div>
         </header>
 
-        <main class="w-full px-2.5 py-2.5 md:px-3 md:py-3">
+        <main class="tenant-content w-full px-2.5 py-2.5 md:px-3 md:py-3">
           <router-outlet />
         </main>
       </div>
@@ -87,9 +88,9 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
                 @for (item of section.items; track item.path) {
                   <a
                     [routerLink]="item.path"
-                    routerLinkActive="border-teal-500 bg-teal-600 text-white shadow-sm shadow-teal-200"
+                    routerLinkActive="tenant-nav-link-active"
                     [routerLinkActiveOptions]="{ exact: true }"
-                    class="flex items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-[0.92rem] font-semibold text-slate-600 no-underline transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950"
+                    class="tenant-nav-link flex items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-[0.92rem] font-semibold no-underline transition"
                     (click)="mobileMenuOpen.set(false)"
                   >
                     <i [class]="item.icon + ' w-4 shrink-0 text-center'"></i>
@@ -109,20 +110,33 @@ import { TenantSettingsService } from '../features/settings/services/tenant-sett
           }
         </nav>
 
-        <div class="border-t border-slate-200 p-2">
-          <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+        <div class="tenant-sidebar-footer border-t p-2">
+          <div class="tenant-sidebar-note rounded-lg border p-2">
             <p class="text-xs font-bold text-slate-950">Next billing run</p>
             <p class="mt-1 text-xs font-semibold text-slate-500">Work, materials, taxes, approvals</p>
           </div>
         </div>
       </div>
     </ng-template>
-  `
+  `,
+  styles: [`
+    .tenant-shell { background: var(--tenant-page-background); }
+    .tenant-sidebar { background: var(--tenant-navigation); border-color: color-mix(in srgb, var(--tenant-navigation-contrast) 16%, transparent); color: var(--tenant-navigation-contrast); }
+    .tenant-sidebar a, .tenant-sidebar p { color: inherit; }
+    .tenant-sidebar .tenant-nav-link { color: color-mix(in srgb, var(--tenant-navigation-contrast) 76%, transparent); border-radius: var(--tenant-radius); }
+    .tenant-sidebar .tenant-nav-link:hover { background: color-mix(in srgb, var(--tenant-navigation-contrast) 10%, transparent); color: var(--tenant-navigation-contrast); }
+    .tenant-sidebar .tenant-nav-link-active { background: var(--tenant-primary); border-color: color-mix(in srgb, var(--tenant-primary) 74%, white); color: var(--tenant-primary-contrast); box-shadow: 0 4px 12px color-mix(in srgb, var(--tenant-primary) 28%, transparent); }
+    .tenant-sidebar-footer { border-color: color-mix(in srgb, var(--tenant-navigation-contrast) 16%, transparent); }
+    .tenant-sidebar-note { background: color-mix(in srgb, var(--tenant-navigation-contrast) 8%, transparent); border-color: color-mix(in srgb, var(--tenant-navigation-contrast) 14%, transparent); color: color-mix(in srgb, var(--tenant-navigation-contrast) 82%, transparent); }
+    .tenant-topbar { background: color-mix(in srgb, var(--tenant-surface) 92%, transparent); border-color: color-mix(in srgb, var(--tenant-navigation) 12%, transparent); }
+    .tenant-content { padding: var(--tenant-content-padding, .75rem); }
+  `]
 })
 export class TenantShellComponent {
   private readonly auth = inject(AuthService);
   private readonly communicationService = inject(CommunicationService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
+  private readonly tenantThemeService = inject(TenantThemeService);
   protected readonly mobileMenuOpen = signal(false);
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly unreadMessageCount = signal(0);
@@ -228,7 +242,9 @@ export class TenantShellComponent {
 
   private async loadTenantSettings(): Promise<void> {
     try {
-      this.tenantSettings.set(await firstValueFrom(this.tenantSettingsService.get()));
+      const settings = await firstValueFrom(this.tenantSettingsService.get());
+      this.tenantSettings.set(settings);
+      this.tenantThemeService.apply(settings);
     } catch {
       this.tenantSettings.set(null);
     }

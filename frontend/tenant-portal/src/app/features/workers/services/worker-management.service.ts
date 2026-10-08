@@ -9,6 +9,7 @@ import type {
   WorkerClockEntryOverrideRequest,
   WorkerClockEntryRecord,
   WorkerClockedInTodayRecord,
+  WorkerDailyLoadout,
   WorkerRecord
 } from '@lorne/contracts';
 import { map } from 'rxjs';
@@ -47,6 +48,14 @@ export class WorkerManagementService {
   activities(workerId: string, from: string, to: string) {
     return this.http
       .get<ApiResponse<WorkerActivityRecord[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/activities`, {
+        params: { from, to }
+      })
+      .pipe(map((response) => response.data));
+  }
+
+  loadouts(workerId: string, from: string, to: string) {
+    return this.http
+      .get<ApiResponse<WorkerDailyLoadout[]>>(`${environment.apiBaseUrl}/tenant/workers/${workerId}/loadouts`, {
         params: { from, to }
       })
       .pipe(map((response) => response.data));

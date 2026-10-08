@@ -19,8 +19,8 @@ import { AuthService } from '../core/services/auth.service';
           </span>
         </a>
         <nav class="mt-8 space-y-1">
-          <a routerLink="/dashboard" routerLinkActive="bg-white text-slate-950" class="block rounded-lg px-3 py-2 text-sm font-bold text-slate-300 no-underline hover:bg-white/10">Dashboard</a>
-          <span class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-500">Tenants</span>
+          <a routerLink="/dashboard" routerLinkActive="bg-white text-slate-950" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-300 no-underline hover:bg-white/10"><i class="pi pi-chart-bar"></i> Dashboard</a>
+          <a routerLink="/tenants" routerLinkActive="bg-white text-slate-950" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-300 no-underline hover:bg-white/10"><i class="pi pi-building"></i> Tenants</a>
           <span class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-500">Plans</span>
           <span class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-500">Audit</span>
         </nav>
@@ -33,7 +33,10 @@ import { AuthService } from '../core/services/auth.service';
 
       <main>
         <header class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
-          <span class="font-bold text-slate-950 md:hidden">Lorne Admin</span>
+          <nav class="flex items-center gap-1 md:hidden" aria-label="Admin navigation">
+            <a routerLink="/dashboard" routerLinkActive="bg-slate-950 text-white" class="rounded px-3 py-2 text-sm font-bold text-slate-600 no-underline">Dashboard</a>
+            <a routerLink="/tenants" routerLinkActive="bg-slate-950 text-white" class="rounded px-3 py-2 text-sm font-bold text-slate-600 no-underline">Tenants</a>
+          </nav>
           <span class="hidden text-sm font-semibold text-slate-500 md:inline">Platform administration</span>
           <button pButton type="button" severity="secondary" size="small" icon="pi pi-sign-out" label="Sign out" (click)="signOut()"></button>
         </header>

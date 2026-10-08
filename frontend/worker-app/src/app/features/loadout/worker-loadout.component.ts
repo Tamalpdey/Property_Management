@@ -114,11 +114,11 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
             (click)="saveVehicleUse()"
           ></button>
         </div>
-        <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(12rem,1.35fr)_minmax(10rem,1fr)_9rem_9rem_minmax(12rem,1.4fr)]">
-          <label class="grid gap-1 text-sm font-bold text-slate-700">
+        <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,.65fr)_minmax(0,.65fr)_minmax(0,1.4fr)]">
+          <label class="grid min-w-0 gap-1 text-sm font-bold text-slate-700">
             Fleet vehicle
             <p-select
-              styleClass="w-full"
+              styleClass="w-full min-w-0"
               [options]="loadout()?.vehicles ?? []"
               optionLabel="name"
               optionValue="id"
@@ -139,21 +139,21 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
               </ng-template>
             </p-select>
           </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-700">
+          <label class="grid min-w-0 gap-1 text-sm font-bold text-slate-700">
             Other vehicle
-            <input class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Vehicle or plate" [(ngModel)]="vehicleForm.vehicleLabel" [disabled]="!!vehicleForm.vehicleAssetId" />
+            <input class="h-10 min-w-0 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Vehicle or plate" [(ngModel)]="vehicleForm.vehicleLabel" [disabled]="!!vehicleForm.vehicleAssetId" />
           </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-700">
+          <label class="grid min-w-0 gap-1 text-sm font-bold text-slate-700">
             Start km
-            <input type="number" min="0" step="0.1" class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.startKm" />
+            <input type="number" min="0" step="0.1" class="h-10 min-w-0 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.startKm" />
           </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-700">
+          <label class="grid min-w-0 gap-1 text-sm font-bold text-slate-700">
             End km
-            <input type="number" min="0" step="0.1" class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.endKm" />
+            <input type="number" min="0" step="0.1" class="h-10 min-w-0 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold" [(ngModel)]="vehicleForm.endKm" />
           </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-700">
+          <label class="grid min-w-0 gap-1 text-sm font-bold text-slate-700">
             Notes
-            <input class="h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Optional notes" [(ngModel)]="vehicleForm.notes" />
+            <input class="h-10 min-w-0 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold" placeholder="Optional notes" [(ngModel)]="vehicleForm.notes" />
           </label>
         </div>
       </section>

@@ -4,7 +4,10 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { PasswordModule } from 'primeng/password';
+import type { TenantLoginBrandingRecord } from '@lorne/contracts';
+import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { TenantLoginBrandingService } from './tenant-login-branding.service';
 
 @Component({
   selector: 'lorne-login',
@@ -29,6 +32,12 @@ import { AuthService } from '../../core/services/auth.service';
         linear-gradient(180deg, #f8fbfa 0%, #eef5f7 100%);
       background-size: 42px 42px, 42px 42px, auto, auto, auto;
     }
+
+    .tenant-login[data-pattern='SUBTLE'] {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--login-primary) 12%, white), transparent 32rem), linear-gradient(180deg, #fbfdfc, var(--login-page));
+    }
+
+    .tenant-login[data-pattern='NONE'] { background: var(--login-page); }
 
     .tenant-login::before,
     .tenant-login::after {
@@ -60,7 +69,7 @@ import { AuthService } from '../../core/services/auth.service';
       background:
         linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
         linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
-        linear-gradient(145deg, #073b37 0%, #0f4f55 52%, #163d64 100%);
+        linear-gradient(145deg, var(--login-nav) 0%, color-mix(in srgb, var(--login-nav) 78%, var(--login-primary)) 58%, color-mix(in srgb, var(--login-nav) 76%, var(--login-accent)) 100%);
       background-size: 36px 36px, 36px 36px, auto;
     }
 
@@ -75,40 +84,51 @@ import { AuthService } from '../../core/services/auth.service';
     :host ::ng-deep .login-card {
       box-shadow: none;
     }
+
+    .login-shell-focused { max-width: 34rem; }
+    .login-shell-focused .login-grid { grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 1024px) { .login-grid-split { grid-template-columns: .9fr 1.1fr; } }
   `],
   template: `
     <main
       class="tenant-login grid min-h-screen place-items-center overflow-hidden px-4 py-6 sm:px-6 lg:px-8"
+      [attr.data-pattern]="branding()?.loginBackgroundPattern || 'GRID'"
+      [style.--login-primary]="primaryColor()"
+      [style.--login-accent]="accentColor()"
+      [style.--login-nav]="navigationColor()"
+      [style.--login-page]="pageColor()"
     >
-      <section class="w-full max-w-5xl">
+      <section class="w-full max-w-5xl" [class.login-shell-focused]="branding()?.loginStyle && branding()?.loginStyle !== 'SPLIT'">
         <header class="mb-5 flex items-center justify-between gap-4">
           <div class="flex items-center gap-3">
-            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-teal-100 text-teal-800 ring-1 ring-teal-200">
-              <span class="maple-leaf h-6 w-6 bg-teal-700"></span>
-            </span>
+            @if (branding()?.logoUrl) {
+              <span class="grid h-11 w-14 shrink-0 place-items-center rounded-lg bg-white p-1 ring-1 ring-slate-200"><img class="max-h-full max-w-full object-contain" [src]="branding()?.logoUrl" alt="Company logo" /></span>
+            } @else {
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl ring-1" [style.background]="primarySoft()" [style.color]="primaryColor()"><span class="maple-leaf h-6 w-6" [style.background]="primaryColor()"></span></span>
+            }
             <span>
-              <span class="block text-sm font-black text-slate-950">Maple Property Services</span>
+              <span class="block text-sm font-black text-slate-950">{{ organizationName() }}</span>
               <span class="block text-xs font-bold text-slate-500">Operations workspace</span>
             </span>
           </div>
-          <span class="hidden rounded-full border border-teal-100 bg-white/70 px-3 py-1 text-xs font-black text-teal-700 shadow-sm sm:inline-flex">
-            maplepropertyservices.ca
+          <span class="hidden rounded-full border bg-white/70 px-3 py-1 text-xs font-black shadow-sm sm:inline-flex" [style.border-color]="primarySoft()" [style.color]="primaryColor()">
+            {{ websiteLabel() }}
           </span>
         </header>
 
-        <div class="grid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/80 lg:grid-cols-[0.9fr_1.1fr]">
+        <div class="login-grid grid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/80" [class.login-grid-split]="!branding() || branding()?.loginStyle === 'SPLIT'">
           <section class="grid place-items-center bg-gradient-to-br from-white via-white to-teal-50/45 p-5 sm:p-8">
             <div class="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/70 sm:p-6">
               <div class="space-y-5">
                 <div>
-                  <p class="text-xs font-black uppercase text-teal-700">Secure sign in</p>
-                  <h1 class="mt-2 text-3xl font-black leading-tight text-slate-950">Welcome back</h1>
-                  <p class="mt-2 text-sm font-semibold leading-6 text-slate-600">Access your Maple operations workspace.</p>
+                  <p class="text-xs font-black uppercase" [style.color]="primaryColor()">Secure sign in</p>
+                  <h1 class="mt-2 text-3xl font-black leading-tight text-slate-950">{{ loginHeadline() }}</h1>
+                  <p class="mt-2 text-sm font-semibold leading-6 text-slate-600">{{ loginMessage() }}</p>
                 </div>
                 <form class="space-y-4" (ngSubmit)="login()">
                   <label class="block">
                     <span class="mb-1 block text-sm font-semibold text-slate-700">Email</span>
-                    <input pInputText class="h-11 w-full" name="email" autocomplete="username" [(ngModel)]="email" />
+                    <input pInputText class="h-11 w-full" name="email" autocomplete="username" [disabled]="!loginAllowed()" [(ngModel)]="email" />
                   </label>
                   <label class="block">
                     <span class="mb-1 block text-sm font-semibold text-slate-700">Password</span>
@@ -119,6 +139,7 @@ import { AuthService } from '../../core/services/auth.service';
                       autocomplete="current-password"
                       [feedback]="false"
                       [toggleMask]="true"
+                      [disabled]="!loginAllowed()"
                       [(ngModel)]="password"
                     />
                   </label>
@@ -128,9 +149,11 @@ import { AuthService } from '../../core/services/auth.service';
                   <button
                     pButton
                     type="submit"
-                    class="w-full touch-action !border-teal-600 !bg-teal-600 hover:!border-teal-700 hover:!bg-teal-700"
+                    class="w-full touch-action"
+                    [style.background]="primaryColor()"
+                    [style.border-color]="primaryColor()"
                     icon="pi pi-sign-in"
-                    [disabled]="loading()"
+                    [disabled]="loading() || !loginAllowed()"
                     [loading]="loading()"
                     label="Sign in"
                   ></button>
@@ -144,6 +167,7 @@ import { AuthService } from '../../core/services/auth.service';
             </div>
           </section>
 
+          @if ((!branding() || branding()?.loginStyle === 'SPLIT') && (!branding() || branding()?.loginShowPreview)) {
           <section class="product-panel relative hidden min-h-[34rem] overflow-hidden p-8 text-white lg:block">
             <div aria-hidden="true" class="maple-leaf absolute -right-14 top-10 h-52 w-52 bg-teal-200/12"></div>
             <div aria-hidden="true" class="maple-leaf absolute bottom-10 left-10 h-14 w-14 rotate-12 bg-amber-200/25"></div>
@@ -206,6 +230,7 @@ import { AuthService } from '../../core/services/auth.service';
               <span class="rounded-lg bg-white/10 px-3 py-2 ring-1 ring-white/10">Invoices</span>
             </div>
           </section>
+          }
         </div>
       </section>
     </main>
@@ -215,6 +240,9 @@ export class LoginComponent {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly brandingService = inject(TenantLoginBrandingService);
+  protected readonly branding = signal<TenantLoginBrandingRecord | null>(null);
+  protected readonly loginAllowed = signal(this.brandingService.isTenantLoginHost());
   protected email = '';
   protected password = '';
   protected readonly loading = signal(false);
@@ -222,14 +250,43 @@ export class LoginComponent {
     ? 'Your session expired. Sign in again to continue.'
     : '');
 
+  constructor() {
+    void this.loadBranding();
+  }
+
+  protected organizationName(): string { return this.branding()?.organizationName || 'Maple Property Services'; }
+  protected loginHeadline(): string { return this.branding()?.loginHeadline || 'Welcome back'; }
+  protected loginMessage(): string { return this.branding()?.loginMessage || 'Access your operations workspace.'; }
+  protected primaryColor(): string { return this.branding()?.themePrimaryColor || '#0f766e'; }
+  protected accentColor(): string { return this.branding()?.themeAccentColor || '#2563eb'; }
+  protected navigationColor(): string { return this.branding()?.themeNavigationColor || '#0f172a'; }
+  protected pageColor(): string { return this.branding()?.themePageBackgroundColor || '#f4f7fb'; }
+  protected primarySoft(): string { return `color-mix(in srgb, ${this.primaryColor()} 14%, white)`; }
+  protected websiteLabel(): string {
+    return (this.branding()?.websiteUrl || 'maplepropertyservices.ca').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  }
+
+  private async loadBranding(): Promise<void> {
+    if (!this.loginAllowed()) {
+      this.error.set('Use the company-specific tenant sign-in address provided by your administrator.');
+      return;
+    }
+    const branding = await firstValueFrom(this.brandingService.load());
+    this.branding.set(branding);
+    if (!branding && !this.brandingService.isLocalDevelopmentHost()) {
+      this.loginAllowed.set(false);
+      this.error.set('This tenant sign-in address is not active. Contact your administrator.');
+    }
+  }
+
   async login(): Promise<void> {
-    if (this.loading()) {
+    if (this.loading() || !this.loginAllowed()) {
       return;
     }
     this.loading.set(true);
     this.error.set('');
     try {
-      const user = await this.auth.login({ email: this.email, password: this.password });
+      const user = await this.auth.login({ email: this.email, password: this.password, tenantId: this.branding()?.tenantId });
       const canUseTenantPortal = user.roles.some((role) => ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'].includes(role));
       if (!canUseTenantPortal) {
         this.auth.clearSession();
@@ -237,10 +294,15 @@ export class LoginComponent {
         return;
       }
       await this.router.navigateByUrl('/dashboard');
-    } catch {
-      this.error.set('Unable to sign in. Check credentials and backend status.');
+    } catch (error) {
+      this.error.set(this.loginError(error));
     } finally {
       this.loading.set(false);
     }
+  }
+
+  private loginError(error: unknown): string {
+    const message = (error as { error?: { error?: { message?: string } } })?.error?.error?.message;
+    return message || 'Unable to sign in. Check your credentials or contact your administrator.';
   }
 }

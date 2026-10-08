@@ -5,6 +5,7 @@ import { catchError, firstValueFrom, interval, of, startWith, switchMap } from '
 import type { ConversationRecord, TenantSettingsRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
+import { TenantThemeService } from '../core/services/tenant-theme.service';
 import { WorkerCommunicationService } from '../features/messages/services/worker-communication.service';
 import { WorkerJobService } from '../features/today/services/worker-job.service';
 import { WorkerShiftClockComponent } from './worker-shift-clock.component';
@@ -16,7 +17,7 @@ import { WorkerShiftClockComponent } from './worker-shift-clock.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="min-h-screen">
-      <header class="sticky top-0 z-20 border-b border-slate-800 bg-slate-950 text-white shadow-lg shadow-slate-950/20">
+      <header class="worker-header sticky top-0 z-20 border-b text-white shadow-lg shadow-slate-950/20">
         <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-2.5 sm:px-5 sm:py-3">
           <a routerLink="/today" class="flex min-w-0 items-center gap-2.5 text-white no-underline sm:gap-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 bg-white p-1 text-xs font-black text-teal-900 shadow-lg shadow-teal-950/30 sm:h-11 sm:w-11">
@@ -67,7 +68,7 @@ import { WorkerShiftClockComponent } from './worker-shift-clock.component';
         <router-outlet />
       </main>
 
-      <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-teal-100 bg-white/95 shadow-[0_-12px_30px_rgba(15,118,110,0.12)] backdrop-blur">
+      <nav class="worker-nav fixed inset-x-0 bottom-0 z-30 border-t bg-white/95 shadow-[0_-12px_30px_rgba(15,118,110,0.12)] backdrop-blur">
         <div class="mx-auto grid max-w-xl grid-cols-6 gap-1 px-1 py-1">
           <a routerLink="/today" routerLinkActive="bg-teal-700 text-white shadow-lg shadow-teal-900/20" [routerLinkActiveOptions]="{ exact: true }" class="touch-action grid min-h-12 place-items-center gap-0.5 rounded-xl px-1 py-1.5 text-xs font-black text-slate-500 no-underline transition sm:gap-1 sm:py-2 sm:text-sm">
             <i class="pi" [class.pi-calendar]="!loadingFor('/today')" [class.pi-spinner]="loadingFor('/today')" [class.pi-spin]="loadingFor('/today')"></i>
@@ -122,6 +123,8 @@ import { WorkerShiftClockComponent } from './worker-shift-clock.component';
       }
     </div>
     <style>
+      .worker-header { background: var(--tenant-navigation); border-color: color-mix(in srgb, var(--tenant-navigation-contrast) 16%, transparent); color: var(--tenant-navigation-contrast); }
+      .worker-nav { border-color: color-mix(in srgb, var(--tenant-primary) 20%, white); }
       @keyframes workerRouteProgress {
         0% {
           transform: translateX(-110%);
@@ -141,6 +144,7 @@ export class WorkerShellComponent {
   private readonly router = inject(Router);
   private readonly communicationService = inject(WorkerCommunicationService);
   private readonly workerJobService = inject(WorkerJobService);
+  private readonly tenantThemeService = inject(TenantThemeService);
   protected readonly routeLoading = signal(false);
   protected readonly loadingUrl = signal('');
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
@@ -241,7 +245,9 @@ export class WorkerShellComponent {
 
   private async loadTenantSettings(): Promise<void> {
     try {
-      this.tenantSettings.set(await firstValueFrom(this.workerJobService.settings()));
+      const settings = await firstValueFrom(this.workerJobService.settings());
+      this.tenantSettings.set(settings);
+      this.tenantThemeService.apply(settings);
     } catch {
       this.tenantSettings.set(null);
     }

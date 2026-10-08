@@ -361,12 +361,13 @@ export class DayTicketPageComponent {
     this.error.set('');
     const worker = data.workers.find((item) => item.id === this.dayTicketWorkerId);
     try {
-      const [clockEntries, activities] = worker
+      const [clockEntries, activities, loadouts] = worker
         ? await Promise.all([
           firstValueFrom(this.workerManagementService.clockEntries(worker.id, this.dayTicketDateFrom, this.dayTicketDateTo)),
-          firstValueFrom(this.workerManagementService.activities(worker.id, this.dayTicketDateFrom, this.dayTicketDateTo))
+          firstValueFrom(this.workerManagementService.activities(worker.id, this.dayTicketDateFrom, this.dayTicketDateTo)),
+          firstValueFrom(this.workerManagementService.loadouts(worker.id, this.dayTicketDateFrom, this.dayTicketDateTo))
         ])
-        : [[], []];
+        : [[], [], []];
       this.clockEntries.set(clockEntries);
       this.workerActivities.set(activities);
       printHtmlDocument(dayTicketHtml({
@@ -378,10 +379,11 @@ export class DayTicketPageComponent {
         rows: this.rows(data),
         options: this.dayTicketOptions,
         shiftSummary: dayTicketShiftSummary(clockEntries),
+        loadouts,
         settings: this.settings()
       }));
     } catch {
-      this.error.set('Unable to load worker timing for the day ticket.');
+      this.error.set('Unable to load worker timing and loadout details for the day ticket.');
     } finally {
       this.printing.set(false);
     }

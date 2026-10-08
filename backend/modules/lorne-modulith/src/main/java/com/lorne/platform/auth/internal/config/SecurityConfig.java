@@ -32,13 +32,16 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final String allowedOrigins;
+    private final String allowedOriginPatterns;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
-            @Value("${lorne.security.allowed-origins:}") String allowedOrigins
+            @Value("${lorne.security.allowed-origins:}") String allowedOrigins,
+            @Value("${lorne.security.allowed-origin-patterns:}") String allowedOriginPatterns
     ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.allowedOrigins = allowedOrigins;
+        this.allowedOriginPatterns = allowedOriginPatterns;
     }
 
     @Bean
@@ -79,6 +82,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/maintenance-requests").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/tenant-branding").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/tenant-domains/allow").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/profile-photo/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/tenant/settings/logo/**").permitAll()
                         .anyRequest().authenticated()
@@ -99,6 +104,7 @@ public class SecurityConfig {
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(parseAllowedOrigins());
+        configuration.setAllowedOriginPatterns(parseCommaSeparated(allowedOriginPatterns));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "X-Request-Source"));
         configuration.setExposedHeaders(List.of("Content-Disposition", "Location"));
@@ -111,7 +117,11 @@ public class SecurityConfig {
     }
 
     private List<String> parseAllowedOrigins() {
-        return Arrays.stream(allowedOrigins.split(","))
+        return parseCommaSeparated(allowedOrigins);
+    }
+
+    private List<String> parseCommaSeparated(String values) {
+        return Arrays.stream(values.split(","))
                 .map(String::trim)
                 .filter(Predicate.not(String::isBlank))
                 .toList();

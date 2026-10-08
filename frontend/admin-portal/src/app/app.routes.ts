@@ -15,6 +15,10 @@ export const routes: Routes = [
       {
         path: 'dashboard',
         loadComponent: () => import('./features/dashboard/admin-dashboard.component').then((m) => m.AdminDashboardComponent)
+      },
+      {
+        path: 'tenants',
+        loadComponent: () => import('./features/tenants/tenant-onboarding-page.component').then((m) => m.TenantOnboardingPageComponent)
       }
     ]
   },

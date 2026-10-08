@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 import { TagModule } from 'primeng/tag';
 import { AdminActionListComponent } from './components/admin-action-list.component';
 import { PlatformMetricCardComponent } from './components/platform-metric-card.component';
@@ -9,7 +10,7 @@ import { SuperAdminOverviewService } from './services/super-admin-overview.servi
 @Component({
   selector: 'lorne-admin-dashboard',
   standalone: true,
-  imports: [AdminActionListComponent, PlatformMetricCardComponent, TagModule, TenantHealthListComponent],
+  imports: [AdminActionListComponent, PlatformMetricCardComponent, RouterLink, TagModule, TenantHealthListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-6">
@@ -20,9 +21,14 @@ import { SuperAdminOverviewService } from './services/super-admin-overview.servi
             <h1 class="mt-3 text-3xl font-bold leading-tight text-slate-950 md:text-4xl">Admin dashboard</h1>
             <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Tenant health, worker readiness, audit visibility, and runtime controls for the property-management platform.</p>
           </div>
-          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-            <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Environment</p>
-            <p class="mt-1 text-lg font-bold text-emerald-950">Operational</p>
+          <div class="flex items-center gap-3">
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Environment</p>
+              <p class="mt-1 text-lg font-bold text-emerald-950">Operational</p>
+            </div>
+            <a routerLink="/tenants" class="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white no-underline hover:bg-slate-800">
+              <i class="pi pi-plus"></i> Onboard tenant
+            </a>
           </div>
         </div>
       </div>

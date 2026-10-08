@@ -11,6 +11,8 @@ import com.lorne.platform.auth.internal.entity.UserStatus;
 import com.lorne.platform.auth.internal.repository.UserAccountRepository;
 import com.lorne.platform.auth.internal.repository.UserTenantRoleRepository;
 import com.lorne.platform.auth.internal.security.TokenProvider;
+import com.lorne.platform.auth.internal.service.PortalLoginPolicy.Portal;
+import com.lorne.platform.auth.internal.service.PortalLoginPolicy.PortalAccess;
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.security.LorneRole;
 import com.lorne.platform.security.RolePermissionRegistry;
@@ -79,7 +81,7 @@ public class AuthService {
     }
 
     @Transactional
-    public LoginResponse login(LoginRequest request, String source) {
+    public LoginResponse login(LoginRequest request, String source, PortalAccess portalAccess) {
         var email = request.email().trim();
         var user = userAccountRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> {
@@ -97,6 +99,7 @@ public class AuthService {
         }
 
         var currentUser = buildCurrentUser(user, request.tenantId());
+        requirePortalRole(currentUser, portalAccess.portal());
         user.recordSuccessfulLogin();
         log.info("auth_login_success userId={} email={} tenantId={} roles={}", user.id(), email, currentUser.tenantId(), currentUser.roles());
 
@@ -104,7 +107,7 @@ public class AuthService {
     }
 
     @Transactional
-    public LoginResponse refresh(RefreshTokenRequest request, String source) {
+    public LoginResponse refresh(RefreshTokenRequest request, String source, PortalAccess portalAccess) {
         var refreshToken = request.refreshToken().trim();
         var tokenHash = tokenHash(refreshToken);
         var session = findRefreshSession(tokenHash);
@@ -120,6 +123,11 @@ public class AuthService {
         }
 
         var currentUser = buildCurrentUser(user, session.tenantId());
+        if (portalAccess.tenantId() != null && !portalAccess.tenantId().equals(session.tenantId())) {
+            revokeRefreshSession(session.id());
+            throw new LorneException(ErrorCode.FORBIDDEN, "This session belongs to a different tenant sign-in address.");
+        }
+        requirePortalRole(currentUser, portalAccess.portal());
         revokeRefreshSession(session.id());
         log.info("auth_refresh_success userId={} tenantId={} clientType={}", user.id(), currentUser.tenantId(), session.clientType());
         return sessionResponse(currentUser, issueRefreshToken(currentUser, source == null ? session.source() : source));
@@ -205,6 +213,22 @@ public class AuthService {
                 .toList();
 
         return new CurrentUserResponse(user.id(), tenantId, user.displayName(), user.profilePhotoUrl(), user.email(), roles, permissions);
+    }
+
+    private void requirePortalRole(CurrentUserResponse currentUser, Portal portal) {
+        var allowed = switch (portal) {
+            case ADMIN -> currentUser.roles().contains("SUPER_ADMIN");
+            case WORKER -> currentUser.roles().contains("FIELD_WORKER");
+            case TENANT -> currentUser.roles().stream()
+                    .anyMatch(role -> role.equals("TENANT_ADMIN") || role.equals("OPERATIONS") || role.equals("FINANCE"));
+        };
+        if (!allowed) {
+            throw new LorneException(ErrorCode.FORBIDDEN, switch (portal) {
+                case ADMIN -> "This account is not enabled for the administration portal.";
+                case WORKER -> "This account is not enabled for the worker portal.";
+                case TENANT -> "This account is not enabled for the tenant portal.";
+            });
+        }
     }
 
     private LoginResponse sessionResponse(CurrentUserResponse currentUser, IssuedRefreshToken refreshToken) {

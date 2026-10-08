@@ -49,8 +49,8 @@ class LocalAuthDataBootstrap implements ApplicationRunner {
 
     private void seedTenant() {
         jdbcTemplate.update("""
-                INSERT INTO tenants (id, legal_name, display_name, status, plan_code, timezone, country_code, province_code)
-                VALUES (?, 'Lorne Demo Property Services Inc.', 'Lorne Demo', 'ACTIVE', 'platform-demo', 'America/Toronto', 'CA', 'ON')
+                INSERT INTO tenants (id, legal_name, display_name, status, plan_code, timezone, country_code, province_code, portal_subdomain)
+                VALUES (?, 'Lorne Demo Property Services Inc.', 'Lorne Demo', 'ACTIVE', 'platform-demo', 'America/Toronto', 'CA', 'ON', 'lorne-demo')
                 ON CONFLICT (id) DO NOTHING
                 """, DEMO_TENANT_ID);
     }

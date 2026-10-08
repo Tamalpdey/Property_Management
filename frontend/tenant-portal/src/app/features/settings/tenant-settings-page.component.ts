@@ -1,14 +1,16 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
-import type { TenantSettingsRecord, UpdateTenantSettingsRequest } from '@lorne/contracts';
+import type { DashboardWidgetId, TenantSettingsRecord, UpdateTenantSettingsRequest } from '@lorne/contracts';
 import { AuthService } from '../../core/services/auth.service';
+import { TenantThemeService } from '../../core/services/tenant-theme.service';
 import { TenantSettingsService } from './services/tenant-settings.service';
 
-type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
+type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
 
 @Component({
   selector: 'lorne-tenant-settings-page',
@@ -34,10 +36,10 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
       }
 
-      <section class="grid gap-3 xl:grid-cols-[1fr_24rem]">
+      <section class="settings-layout grid gap-3" [class.settings-layout-with-sidebar]="activeTab() !== 'branding'">
         <form class="rounded-lg border border-slate-200 bg-white shadow-sm" (ngSubmit)="save()">
           <div class="border-b border-slate-200 p-3">
-            <div class="settings-tabs grid grid-cols-4 rounded-lg border border-slate-200 bg-slate-100 p-1 text-sm font-bold">
+            <div class="settings-tabs grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-100 p-1 text-sm font-bold sm:grid-cols-5">
               @for (tab of tabs; track tab.key) {
                 <button
                   type="button"
@@ -103,6 +105,151 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
               </div>
             }
 
+            @if (activeTab() === 'branding') {
+              <div class="grid gap-3">
+                <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p class="text-xs font-black uppercase tracking-wide text-teal-700">Portal appearance</p>
+                      <h2 class="mt-1 text-lg font-black text-slate-950">Brand colors and visual density</h2>
+                      <p class="mt-1 text-sm font-semibold text-slate-600">Applied to the tenant workspace and worker app after saving.</p>
+                    </div>
+                    <button pButton type="button" severity="secondary" size="small" icon="pi pi-undo" label="Reset defaults" (click)="resetExperience()"></button>
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    @for (control of colorControls; track control.key) {
+                      <label class="block">
+                        <span class="field-label">{{ control.label }}</span>
+                        <span class="color-control">
+                          <input class="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-slate-300 bg-white p-1" [name]="control.key + 'Picker'" type="color" [(ngModel)]="form[control.key]" />
+                          <input class="field-input font-mono uppercase" [name]="control.key" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$" [(ngModel)]="form[control.key]" />
+                        </span>
+                      </label>
+                    }
+                  </div>
+                  <div class="mt-3 grid gap-3 md:grid-cols-2">
+                    <fieldset>
+                      <legend class="field-label">Information density</legend>
+                      <div class="option-grid">
+                        @for (option of densityOptions; track option.value) {
+                          <label class="option-choice" [class.option-choice-active]="form.themeDensity === option.value">
+                            <input class="sr-only" type="radio" name="themeDensity" [value]="option.value" [(ngModel)]="form.themeDensity" />
+                            <span class="font-black">{{ option.label }}</span><span class="text-xs font-semibold text-slate-500">{{ option.detail }}</span>
+                          </label>
+                        }
+                      </div>
+                    </fieldset>
+                    <fieldset>
+                      <legend class="field-label">Corner style</legend>
+                      <div class="option-grid">
+                        @for (option of radiusOptions; track option.value) {
+                          <label class="option-choice" [class.option-choice-active]="form.themeRadius === option.value">
+                            <input class="sr-only" type="radio" name="themeRadius" [value]="option.value" [(ngModel)]="form.themeRadius" />
+                            <span class="font-black">{{ option.label }}</span><span class="text-xs font-semibold text-slate-500">{{ option.detail }}</span>
+                          </label>
+                        }
+                      </div>
+                    </fieldset>
+                  </div>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-3">
+                  <p class="text-xs font-black uppercase tracking-wide text-teal-700">Login experience</p>
+                  <h2 class="mt-1 text-lg font-black text-slate-950">Branded tenant sign-in</h2>
+                  <p class="mt-1 text-sm font-semibold text-slate-600">Used automatically when the portal is opened from this tenant's subdomain.</p>
+                  <div class="mt-3 grid gap-4 xl:grid-cols-[minmax(0,.85fr)_minmax(28rem,1.15fr)]">
+                    <div class="grid content-start gap-3">
+                      <label class="block">
+                        <span class="field-label">Portal subdomain</span>
+                        <input class="field-input lowercase" name="portalSubdomain" maxlength="40" pattern="^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$" placeholder="Example: platinum" [(ngModel)]="form.portalSubdomain" />
+                        <span class="mt-1 block text-xs font-semibold text-slate-500">Lowercase letters, numbers, and hyphens. The value must be unique.</span>
+                      </label>
+                      <div class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                        <p><span class="font-black text-slate-800">Tenant portal:</span> {{ portalHost('app') }}</p>
+                        <p><span class="font-black text-slate-800">Worker portal:</span> {{ portalHost('worker') }}</p>
+                      </div>
+                      <label class="block">
+                        <span class="field-label">Welcome headline</span>
+                        <input class="field-input" name="loginHeadline" maxlength="120" [(ngModel)]="form.loginHeadline" />
+                      </label>
+                      <label class="block">
+                        <span class="field-label">Supporting message</span>
+                        <textarea class="field-input min-h-20" name="loginMessage" maxlength="300" [(ngModel)]="form.loginMessage"></textarea>
+                      </label>
+                      <label class="block">
+                        <span class="field-label">Login layout</span>
+                        <select class="field-input" name="loginStyle" [(ngModel)]="form.loginStyle">
+                          <option value="SPLIT">Split product panel</option>
+                          <option value="FOCUSED">Focused sign-in</option>
+                          <option value="MINIMAL">Minimal</option>
+                        </select>
+                      </label>
+                      <label class="block">
+                        <span class="field-label">Background treatment</span>
+                        <select class="field-input" name="loginBackgroundPattern" [(ngModel)]="form.loginBackgroundPattern">
+                          <option value="GRID">Light grid</option>
+                          <option value="SUBTLE">Soft brand wash</option>
+                          <option value="NONE">Plain</option>
+                        </select>
+                      </label>
+                      <label class="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                        <input class="mt-1" type="checkbox" name="loginShowPreview" [(ngModel)]="form.loginShowPreview" />
+                        <span><span class="block">Show operations preview</span><span class="block text-xs font-semibold text-slate-500">Available in the split layout on wider screens.</span></span>
+                      </label>
+                    </div>
+                    <div class="login-design-preview" [attr.data-pattern]="form.loginBackgroundPattern" [style.--preview-primary]="form.themePrimaryColor" [style.--preview-nav]="form.themeNavigationColor" [style.--preview-page]="form.themePageBackgroundColor">
+                      <div class="login-preview-card" [class.login-preview-focused]="form.loginStyle !== 'SPLIT'">
+                        <div class="login-preview-form">
+                          <div class="flex items-center gap-2">
+                            @if (form.logoUrl) { <img class="h-9 w-12 object-contain" [src]="form.logoUrl" alt="Login logo preview" /> }
+                            <strong>{{ brandName() }}</strong>
+                          </div>
+                          <div class="mt-7"><p class="text-xs font-black uppercase" [style.color]="form.themePrimaryColor">Secure sign in</p><p class="mt-1 text-xl font-black">{{ form.loginHeadline || 'Welcome back' }}</p><p class="mt-1 text-xs font-semibold text-slate-500">{{ form.loginMessage || 'Access your operations workspace.' }}</p></div>
+                          <div class="mt-5 grid gap-2"><span class="h-9 rounded-md border bg-white"></span><span class="h-9 rounded-md border bg-white"></span><span class="h-9 rounded-md" [style.background]="form.themePrimaryColor"></span></div>
+                        </div>
+                        @if (form.loginStyle === 'SPLIT' && form.loginShowPreview) {
+                          <div class="login-preview-product" [style.background]="form.themeNavigationColor"><p class="text-xs font-black uppercase opacity-70">Operations workspace</p><p class="mt-2 text-2xl font-black">Run service work from one clear command center.</p><div class="mt-6 grid grid-cols-3 gap-2"><span></span><span></span><span></span></div></div>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="rounded-lg border border-slate-200 bg-white p-3">
+                  <p class="text-xs font-black uppercase tracking-wide text-teal-700">Dashboard layout</p>
+                  <h2 class="mt-1 text-lg font-black text-slate-950">Choose dashboard widgets</h2>
+                  <p class="mt-1 text-sm font-semibold text-slate-600">Show the operational information this tenant needs and hide the rest.</p>
+                  <div class="mt-3 grid gap-2 md:grid-cols-2">
+                    @for (widget of dashboardWidgets; track widget.id) {
+                      <div class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <label class="flex min-w-0 flex-1 items-center gap-3">
+                          <input type="checkbox" [name]="'widget-' + widget.id" [checked]="!widgetHidden(widget.id)" (change)="toggleDashboardWidget(widget.id)" />
+                          <span class="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-teal-700"><i [class]="widget.icon"></i></span>
+                          <span class="min-w-0"><span class="block font-black text-slate-950">{{ widget.label }}</span><span class="block truncate text-xs font-semibold text-slate-500">{{ widget.detail }}</span></span>
+                        </label>
+                      </div>
+                    }
+                  </div>
+                </section>
+
+                <section class="brand-workspace-preview" [style.background]="form.themePageBackgroundColor">
+                  <div class="brand-preview-nav" [style.background]="form.themeNavigationColor">
+                    <span class="brand-preview-mark" [style.background]="form.themePrimaryColor"></span>
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="brand-preview-content">
+                    <p class="text-xs font-black uppercase text-slate-500">Live preview</p>
+                    <div class="mt-3 grid grid-cols-3 gap-2">
+                      @for (value of [12, 4, 9]; track value) {
+                        <div class="border p-3" [style.background]="form.themeSurfaceColor" [style.border-radius]="previewRadius()"><p class="text-xl font-black" [style.color]="form.themePrimaryColor">{{ value }}</p><span class="text-xs font-bold text-slate-500">Operations</span></div>
+                      }
+                    </div>
+                    <button type="button" class="mt-3 px-3 py-2 text-sm font-black" [style.background]="form.themePrimaryColor" [style.color]="previewContrast()" [style.border-radius]="previewRadius()">Primary action</button>
+                  </div>
+                </section>
+              </div>
+            }
+
             @if (activeTab() === 'invoice') {
               <div class="grid gap-3 md:grid-cols-2">
                 <label class="block">
@@ -149,20 +296,6 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                     ></button>
                   </div>
                   <span class="mt-1 block text-xs font-semibold text-slate-500">Paste a public logo URL or upload PNG, JPG, WEBP, or GIF. Save settings after upload.</span>
-                </label>
-                <label class="block">
-                  <span class="field-label">Primary color</span>
-                  <span class="color-control">
-                    <input class="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-slate-300 bg-white p-1" name="themePrimaryColorPicker" type="color" [(ngModel)]="form.themePrimaryColor" />
-                    <input class="field-input font-mono uppercase" name="themePrimaryColor" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$" [(ngModel)]="form.themePrimaryColor" />
-                  </span>
-                </label>
-                <label class="block">
-                  <span class="field-label">Accent color</span>
-                  <span class="color-control">
-                    <input class="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-slate-300 bg-white p-1" name="themeAccentColorPicker" type="color" [(ngModel)]="form.themeAccentColor" />
-                    <input class="field-input font-mono uppercase" name="themeAccentColor" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$" [(ngModel)]="form.themeAccentColor" />
-                  </span>
                 </label>
                 <label class="block md:col-span-2">
                   <span class="field-label">Payment terms</span>
@@ -276,6 +409,10 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
                           <input class="mt-1" type="checkbox" name="dayTicketShowCompanyAddress" [(ngModel)]="form.dayTicketShowCompanyAddress" />
                           <span>Show full company address</span>
                         </label>
+                        <label class="flex items-start gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                          <input class="mt-1" type="checkbox" name="dayTicketShowDailyLoadout" [(ngModel)]="form.dayTicketShowDailyLoadout" />
+                          <span>Show daily load details (tools and materials)</span>
+                        </label>
                       </div>
                     </div>
                     <div class="rounded-lg border border-slate-200 bg-white p-3">
@@ -367,6 +504,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
           </div>
         </form>
 
+        @if (activeTab() !== 'branding') {
         <aside class="space-y-3">
           <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <p class="text-xs font-black uppercase tracking-wide text-teal-700">Your profile</p>
@@ -482,6 +620,7 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
           </div>
 
         </aside>
+        }
       </section>
     </section>
   `,
@@ -500,21 +639,72 @@ type SettingsTab = 'profile' | 'invoice' | 'email' | 'settings';
     .settings-tab:hover { color: #0f172a; background: rgba(255, 255, 255, 0.72); }
     .settings-tab-active { background: #0f766e; color: #ffffff; box-shadow: 0 1px 4px rgba(15, 118, 110, 0.24); }
     .settings-tab-active:hover { background: #0f766e; color: #ffffff; }
+    .option-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+    .option-choice { display: grid; cursor: pointer; gap: .15rem; border: 1px solid #cbd5e1; border-radius: .5rem; background: #fff; padding: .65rem; color: #334155; }
+    .option-choice-active { border-color: var(--tenant-primary); box-shadow: 0 0 0 2px var(--tenant-primary-soft); color: var(--tenant-primary); }
+    .brand-workspace-preview { display: grid; min-height: 15rem; grid-template-columns: 8rem 1fr; overflow: hidden; border: 1px solid #cbd5e1; border-radius: .5rem; }
+    .brand-preview-nav { display: grid; align-content: start; gap: .75rem; padding: 1rem; }
+    .brand-preview-nav > span:not(.brand-preview-mark) { height: .5rem; border-radius: 999px; background: rgba(255,255,255,.3); }
+    .brand-preview-mark { height: 2rem; width: 2rem; border-radius: .4rem; }
+    .brand-preview-content { padding: 1rem; }
+    .login-design-preview { min-height: 24rem; overflow: hidden; border: 1px solid #cbd5e1; border-radius: .6rem; background-color: var(--preview-page); padding: 1.25rem; }
+    .login-design-preview[data-pattern='GRID'] { background-image: linear-gradient(color-mix(in srgb, var(--preview-primary) 8%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--preview-primary) 8%, transparent) 1px, transparent 1px); background-size: 26px 26px; }
+    .login-design-preview[data-pattern='SUBTLE'] { background-image: linear-gradient(145deg, color-mix(in srgb, var(--preview-primary) 13%, transparent), transparent 62%); }
+    .login-preview-card { display: grid; min-height: 21rem; overflow: hidden; border: 1px solid #dbe3ec; border-radius: .55rem; background: #fff; box-shadow: 0 16px 35px rgba(15,23,42,.12); grid-template-columns: .9fr 1.1fr; }
+    .login-preview-focused { margin-inline: auto; max-width: 24rem; grid-template-columns: 1fr; }
+    .login-preview-form { padding: 1.5rem; }
+    .login-preview-product { padding: 2rem; color: #fff; }
+    .login-preview-product span { display: block; height: 4rem; border: 1px solid rgba(255,255,255,.16); border-radius: .4rem; background: rgba(255,255,255,.1); }
+    @media (min-width: 1280px) {
+      .settings-layout-with-sidebar { grid-template-columns: minmax(0, 1fr) 24rem; }
+    }
     @media (max-width: 640px) {
       .logo-url-row { grid-template-columns: 1fr; }
+      .option-grid { grid-template-columns: 1fr; }
+      .brand-workspace-preview { grid-template-columns: 4.5rem minmax(0, 1fr); }
     }
   `]
 })
 export class TenantSettingsPageComponent {
   private readonly auth = inject(AuthService);
+  private readonly route = inject(ActivatedRoute);
   private readonly tenantSettingsService = inject(TenantSettingsService);
+  private readonly tenantThemeService = inject(TenantThemeService);
   protected readonly tabs: Array<{ key: SettingsTab; label: string; icon: string }> = [
     { key: 'profile', label: 'Profile', icon: 'pi pi-building' },
+    { key: 'branding', label: 'Branding', icon: 'pi pi-palette' },
     { key: 'invoice', label: 'Invoice', icon: 'pi pi-file-edit' },
     { key: 'email', label: 'Email', icon: 'pi pi-envelope' },
     { key: 'settings', label: 'Settings', icon: 'pi pi-sliders-h' }
   ];
   protected readonly activeTab = signal<SettingsTab>('profile');
+  protected readonly colorControls = [
+    { key: 'themePrimaryColor', label: 'Primary action' },
+    { key: 'themeAccentColor', label: 'Accent' },
+    { key: 'themeNavigationColor', label: 'Navigation' },
+    { key: 'themeSurfaceColor', label: 'Cards and surfaces' },
+    { key: 'themePageBackgroundColor', label: 'Page background' }
+  ] as const;
+  protected readonly densityOptions = [
+    { value: 'COMPACT', label: 'Compact', detail: 'More visible data' },
+    { value: 'COMFORTABLE', label: 'Comfortable', detail: 'Balanced spacing' },
+    { value: 'SPACIOUS', label: 'Spacious', detail: 'More breathing room' }
+  ] as const;
+  protected readonly radiusOptions = [
+    { value: 'SHARP', label: 'Sharp', detail: 'Crisp edges' },
+    { value: 'SMALL', label: 'Soft', detail: 'Subtle rounding' },
+    { value: 'ROUNDED', label: 'Rounded', detail: 'Friendly shape' }
+  ] as const;
+  protected readonly dashboardWidgets: Array<{ id: DashboardWidgetId; label: string; detail: string; icon: string }> = [
+    { id: 'metrics', label: 'Summary metrics', detail: 'Top operational totals', icon: 'pi pi-chart-line' },
+    { id: 'actionQueue', label: 'Action queue', detail: 'Draft, review, schedule, and invoice work', icon: 'pi pi-list-check' },
+    { id: 'clockedIn', label: 'Clocked-in workers', detail: 'Workers active today', icon: 'pi pi-clock' },
+    { id: 'workMix', label: 'Work mix', detail: 'Work order status distribution', icon: 'pi pi-chart-pie' },
+    { id: 'topServices', label: 'Top services', detail: 'Most requested services', icon: 'pi pi-wrench' },
+    { id: 'finance', label: 'Finance exposure', detail: 'Receivables, drafts, sent, and paid', icon: 'pi pi-dollar' },
+    { id: 'workerLoad', label: 'Worker load', detail: 'Active worker assignments', icon: 'pi pi-users' },
+    { id: 'inventoryRisk', label: 'Inventory risk', detail: 'Low-stock material alerts', icon: 'pi pi-box' }
+  ];
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
@@ -543,6 +733,10 @@ export class TenantSettingsPageComponent {
   protected readonly userInitials = computed(() => this.initials(this.userDisplayName()));
 
   constructor() {
+    const requestedTab = this.route.snapshot.queryParamMap.get('tab') as SettingsTab | null;
+    if (requestedTab && this.tabs.some((tab) => tab.key === requestedTab)) {
+      this.activeTab.set(requestedTab);
+    }
     void this.load();
   }
 
@@ -581,6 +775,7 @@ export class TenantSettingsPageComponent {
       const saved = await firstValueFrom(this.tenantSettingsService.update(this.form));
       this.settings.set(saved);
       this.populate(saved);
+      this.tenantThemeService.apply(saved);
       this.message.set('Tenant settings saved.');
     } catch (exception) {
       this.error.set(apiErrorMessage(exception, 'Unable to save tenant settings.'));
@@ -628,6 +823,67 @@ export class TenantSettingsPageComponent {
 
   protected clearLogo(): void {
     this.form.logoUrl = '';
+  }
+
+  protected widgetHidden(id: DashboardWidgetId): boolean {
+    return (this.form.dashboardHiddenWidgets || []).includes(id);
+  }
+
+  protected toggleDashboardWidget(id: DashboardWidgetId): void {
+    const hidden = new Set(this.form.dashboardHiddenWidgets || []);
+    hidden.has(id) ? hidden.delete(id) : hidden.add(id);
+    this.form.dashboardHiddenWidgets = [...hidden];
+  }
+
+  protected resetExperience(): void {
+    Object.assign(this.form, {
+      themePrimaryColor: '#0f766e',
+      themeAccentColor: '#2563eb',
+      themeNavigationColor: '#0f172a',
+      themeSurfaceColor: '#ffffff',
+      themePageBackgroundColor: '#f4f7fb',
+      themeDensity: 'COMFORTABLE',
+      themeRadius: 'SMALL',
+      dashboardWidgetOrder: this.dashboardWidgets.map((widget) => widget.id),
+      dashboardHiddenWidgets: [],
+      loginStyle: 'SPLIT',
+      loginHeadline: 'Welcome back',
+      loginMessage: 'Access your operations workspace.',
+      loginBackgroundPattern: 'GRID',
+      loginShowPreview: true
+    });
+  }
+
+  protected previewRadius(): string {
+    return { SHARP: '.2rem', SMALL: '.5rem', ROUNDED: '.85rem' }[this.form.themeRadius || 'SMALL'];
+  }
+
+  protected previewContrast(): string {
+    const value = this.form.themePrimaryColor || '#0f766e';
+    if (!/^#[0-9a-f]{6}$/i.test(value)) {
+      return '#ffffff';
+    }
+    const channels = [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+    return channels[0] * 0.299 + channels[1] * 0.587 + channels[2] * 0.114 > 150 ? '#0f172a' : '#ffffff';
+  }
+
+  protected portalHost(surface: 'app' | 'worker'): string {
+    return `${this.form.portalSubdomain || 'tenant'}.${surface}.${this.productRootDomain()}`;
+  }
+
+  private productRootDomain(): string {
+    const hostname = window.location.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost')) {
+      return 'yourproduct.com';
+    }
+    const parts = hostname.split('.');
+    if (['app', 'worker'].includes(parts[0])) {
+      return parts.slice(1).join('.');
+    }
+    if (parts.length > 3 && ['app', 'worker'].includes(parts[1])) {
+      return parts.slice(2).join('.');
+    }
+    return hostname;
   }
 
   protected async selectProfilePhoto(event: Event): Promise<void> {
@@ -691,6 +947,7 @@ export class TenantSettingsPageComponent {
   private populate(settings: TenantSettingsRecord): void {
     Object.assign(this.form, {
       organizationName: settings.organizationName || settings.tenantName,
+      portalSubdomain: settings.portalSubdomain || '',
       billingEmail: settings.billingEmail || '',
       supportEmail: settings.supportEmail || '',
       phone: settings.phone || '',
@@ -709,12 +966,25 @@ export class TenantSettingsPageComponent {
       logoUrl: settings.logoUrl || '',
       dayTicketShowCompanyName: settings.dayTicketShowCompanyName !== false,
       dayTicketShowCompanyAddress: settings.dayTicketShowCompanyAddress !== false,
+      dayTicketShowDailyLoadout: settings.dayTicketShowDailyLoadout === true,
       serviceRecordShowCompanyName: settings.serviceRecordShowCompanyName === true,
       serviceRecordShowCompanyAddress: settings.serviceRecordShowCompanyAddress === true,
       invoiceShowCompanyName: settings.invoiceShowCompanyName === true,
       invoiceShowCompanyAddress: settings.invoiceShowCompanyAddress === true,
       themePrimaryColor: settings.themePrimaryColor || '#0f766e',
       themeAccentColor: settings.themeAccentColor || '#2563eb',
+      themeNavigationColor: settings.themeNavigationColor || '#0f172a',
+      themeSurfaceColor: settings.themeSurfaceColor || '#ffffff',
+      themePageBackgroundColor: settings.themePageBackgroundColor || '#f4f7fb',
+      themeDensity: settings.themeDensity || 'COMFORTABLE',
+      themeRadius: settings.themeRadius || 'SMALL',
+      dashboardWidgetOrder: settings.dashboardWidgetOrder || this.dashboardWidgets.map((widget) => widget.id),
+      dashboardHiddenWidgets: settings.dashboardHiddenWidgets || [],
+      loginStyle: settings.loginStyle || 'SPLIT',
+      loginHeadline: settings.loginHeadline || 'Welcome back',
+      loginMessage: settings.loginMessage || 'Access your operations workspace.',
+      loginBackgroundPattern: settings.loginBackgroundPattern || 'GRID',
+      loginShowPreview: settings.loginShowPreview !== false,
       emailProvider: settings.emailProvider || 'SYSTEM',
       emailSenderName: settings.emailSenderName || settings.organizationName || settings.tenantName,
       emailFromAddress: settings.emailFromAddress || '',

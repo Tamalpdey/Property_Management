@@ -12,6 +12,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class WorkerDailyLoadoutService {
+    private static final UUID UNRECORDED_LOADOUT_ID = new UUID(0L, 0L);
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final WorkerShiftClockService workerShiftClockService;
@@ -44,6 +46,27 @@ public class WorkerDailyLoadoutService {
         closeStaleOpenActivities(tenantId, worker, userId, LocalDate.now(tenantZoneId(tenantId)), Instant.now());
         var loadoutId = ensureLoadout(tenantId, worker.id(), loadoutDate, userId);
         return loadout(tenantId, worker, loadoutId, loadoutDate);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkerDailyLoadoutDto> loadouts(UUID tenantId, UUID workerId, LocalDate from, LocalDate to) {
+        var worker = worker(tenantId, workerId);
+        var defaultDate = LocalDate.now(tenantZoneId(tenantId));
+        var rangeStart = from == null ? defaultDate : from;
+        var rangeEnd = to == null ? rangeStart : to;
+        if (rangeEnd.isBefore(rangeStart)) {
+            throw new BadRequestException("The loadout end date must be on or after the start date.");
+        }
+        if (rangeEnd.isAfter(rangeStart.plusDays(366))) {
+            throw new BadRequestException("Loadout reports are limited to 367 days.");
+        }
+
+        var loadouts = new ArrayList<WorkerDailyLoadoutDto>();
+        for (var date = rangeStart; !date.isAfter(rangeEnd); date = date.plusDays(1)) {
+            var loadoutId = existingLoadoutId(tenantId, worker.id(), date);
+            loadouts.add(loadout(tenantId, worker, loadoutId == null ? UNRECORDED_LOADOUT_ID : loadoutId, date));
+        }
+        return loadouts;
     }
 
     @Transactional(readOnly = true)
@@ -580,11 +603,14 @@ public class WorkerDailyLoadoutService {
 
     private WorkerRef worker(UUID tenantId, UUID userId, String email) {
         return jdbcTemplate.query("""
-                SELECT id, user_id, display_name, email
-                FROM workers
-                WHERE tenant_id = ? AND status = 'ACTIVE'
-                  AND (user_id = ? OR lower(email::text) = lower(?))
-                ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END
+                SELECT w.id, w.user_id,
+                       coalesce(nullif(btrim(u.display_name), ''), w.display_name) AS display_name,
+                       coalesce(u.email, w.email) AS email
+                FROM workers w
+                LEFT JOIN app_users u ON u.id = w.user_id
+                WHERE w.tenant_id = ? AND w.status = 'ACTIVE'
+                  AND (w.user_id = ? OR lower(w.email::text) = lower(?))
+                ORDER BY CASE WHEN w.user_id = ? THEN 0 ELSE 1 END
                 LIMIT 1
                 """, rs -> {
             if (!rs.next()) {
@@ -597,6 +623,35 @@ public class WorkerDailyLoadoutService {
                     rs.getString("email")
             );
         }, tenantId, userId, email, userId);
+    }
+
+    private WorkerRef worker(UUID tenantId, UUID workerId) {
+        return jdbcTemplate.query("""
+                SELECT w.id, w.user_id,
+                       coalesce(nullif(btrim(u.display_name), ''), w.display_name) AS display_name,
+                       coalesce(u.email, w.email) AS email
+                FROM workers w
+                LEFT JOIN app_users u ON u.id = w.user_id
+                WHERE w.tenant_id = ? AND w.id = ?
+                """, rs -> {
+            if (!rs.next()) {
+                throw new ResourceNotFoundException("Worker was not found.");
+            }
+            return new WorkerRef(
+                    rs.getObject("id", UUID.class),
+                    rs.getObject("user_id", UUID.class),
+                    rs.getString("display_name"),
+                    rs.getString("email")
+            );
+        }, tenantId, workerId);
+    }
+
+    private UUID existingLoadoutId(UUID tenantId, UUID workerId, LocalDate loadoutDate) {
+        return jdbcTemplate.query("""
+                SELECT id
+                FROM worker_daily_loadouts
+                WHERE tenant_id = ? AND worker_id = ? AND loadout_date = ?
+                """, rs -> rs.next() ? rs.getObject("id", UUID.class) : null, tenantId, workerId, loadoutDate);
     }
 
     private ZoneId tenantZoneId(UUID tenantId) {

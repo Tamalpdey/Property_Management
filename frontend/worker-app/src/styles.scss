@@ -21,6 +21,15 @@
   --p-primary-active-color: #0a4f4a;
   --p-primary-contrast-color: #ffffff;
   --p-focus-ring-color: rgba(20, 184, 166, 0.24);
+  --tenant-primary: #0f766e;
+  --tenant-primary-hover: #0b5f59;
+  --tenant-primary-soft: #ecfdf8;
+  --tenant-primary-contrast: #ffffff;
+  --tenant-navigation: #0f172a;
+  --tenant-navigation-contrast: #ffffff;
+  --tenant-surface: #ffffff;
+  --tenant-page-background: #eef7f5;
+  --tenant-radius: 0.5rem;
 }
 
 html,
@@ -29,7 +38,7 @@ body {
   margin: 0;
   background:
     linear-gradient(180deg, rgba(15, 118, 110, 0.14) 0, rgba(238, 247, 245, 0) 16rem),
-    #eef7f5;
+    var(--tenant-page-background);
   color: #162033;
 }
 
@@ -46,9 +55,13 @@ select {
 
 .p-card {
   border: 1px solid #ccfbf1;
-  border-radius: 8px;
+  border-radius: var(--tenant-radius);
   box-shadow: 0 14px 32px rgba(15, 118, 110, 0.12);
 }
+
+.bg-teal-700 { background-color: var(--tenant-primary) !important; }
+.bg-teal-50 { background-color: var(--tenant-primary-soft) !important; }
+.text-teal-700, .text-teal-800 { color: var(--tenant-primary) !important; }
 
 .p-card .p-card-body {
   padding: 1.15rem;

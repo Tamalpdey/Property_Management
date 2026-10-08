@@ -66,8 +66,10 @@ lorne:
       admin-expiration-days: ${LORNE_REFRESH_TOKEN_ADMIN_EXPIRATION_DAYS:1}
   security:
     allowed-origins: ${LORNE_ALLOWED_ORIGINS:http://localhost:4500,http://localhost:4501,http://localhost:4502}
+    allowed-origin-patterns: ${LORNE_ALLOWED_ORIGIN_PATTERNS:https://*.app.maplepropertyservices.ca,https://*.worker.maplepropertyservices.ca}
   public-urls:
     tenant-portal: ${LORNE_TENANT_PORTAL_URL:http://localhost:4500}
+    root-domain: ${LORNE_PUBLIC_ROOT_DOMAIN:maplepropertyservices.ca}
   storage:
     provider: ${LORNE_STORAGE_PROVIDER:r2}
     bucket: ${LORNE_R2_BUCKET:${LORNE_S3_BUCKET:lorne-local-documents}}

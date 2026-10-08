@@ -1,4 +1,4 @@
-import type { InvoiceRecord, TenantSettingsRecord, WorkerActivityRecord, WorkerClockEntryRecord, WorkOrderRecord } from './index';
+import type { InvoiceRecord, TenantSettingsRecord, WorkerActivityRecord, WorkerClockEntryRecord, WorkerDailyLoadout, WorkOrderRecord } from './index';
 
 export type ReportType = 'WORKER' | 'PROPERTY';
 
@@ -369,6 +369,7 @@ export function dayTicketHtml(input: {
   rows: DayTicketEntry[];
   options: DayTicketOptions;
   shiftSummary?: DayTicketShiftSummary;
+  loadouts?: WorkerDailyLoadout[];
   settings?: TenantSettingsRecord | null;
 }): string {
   const downTimeMinutes = (input.shiftSummary?.pauseMinutes ?? 0) + dayTicketDownTimeMinutes(input.rows);
@@ -380,6 +381,8 @@ export function dayTicketHtml(input: {
   const brand = tenantBrand(input.settings);
   const rangeLabel = ticketDateLabel(input.dateFrom, input.dateTo);
   const workOrderLabel = dayTicketWorkOrderLabeler(input.rows, input.dateFrom || input.dateTo);
+  const loadouts = (input.loadouts ?? []).filter(hasLoadoutDetails);
+  const primaryVehicle = loadouts.length === 1 ? loadouts[0] : undefined;
   return `<!doctype html>
 <html>
 <head>
@@ -411,6 +414,8 @@ export function dayTicketHtml(input: {
     .field { align-items: end; display: grid; grid-template-columns: auto 1fr; gap: 8px; }
     .field span { font-size: 10pt; font-weight: 800; }
     .fields .line { color: #0f172a; font-size: 11pt; font-weight: 700; line-height: 1.25; min-height: 22pt; overflow-wrap: anywhere; }
+    .date-field { justify-self: end; max-width: 360px; width: 100%; }
+    .date-field .line { text-align: right; }
     .line { border-bottom: 1px solid #111827; min-height: 20px; padding: 0 6px 2px; }
     table { border-collapse: collapse; table-layout: fixed; width: 100%; }
     th, td { border: 1px solid #334155; overflow-wrap: anywhere; padding: 5pt 6pt; vertical-align: top; }
@@ -436,6 +441,18 @@ export function dayTicketHtml(input: {
     .note-kind small { color: #64748b; display: block; font-size: 7.5pt; font-weight: 600; margin-top: 1px; text-transform: none; }
     .note-text { font-size: 8.5pt; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
     .notes-empty { color: #64748b; font-size: 8pt; font-weight: 600; padding: 6px 0; }
+    .loadout { border: 1px solid #334155; border-top: 0; padding: 10px 12px; }
+    .loadout-title { border-bottom: 1px solid #cbd5e1; font-size: 9pt; font-weight: 800; letter-spacing: .06em; margin-bottom: 8px; padding-bottom: 6px; }
+    .loadout-day { margin-top: 10px; }
+    .loadout-day:first-of-type { margin-top: 0; }
+    .loadout-date { color: #0f766e; font-size: 8pt; font-weight: 800; margin-bottom: 5px; text-transform: uppercase; }
+    .loadout-groups { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .loadout-group { background: #f8fafc; border: 1px solid #cbd5e1; min-width: 0; padding: 7px 8px; }
+    .loadout-group h3 { font-size: 7pt; letter-spacing: .06em; margin: 0 0 5px; text-transform: uppercase; }
+    .loadout-row { border-top: 1px solid #e2e8f0; font-size: 7.5pt; line-height: 1.35; overflow-wrap: anywhere; padding: 4px 0; }
+    .loadout-row:first-of-type { border-top: 0; padding-top: 0; }
+    .loadout-row strong { font-size: 8pt; }
+    .loadout-meta { color: #64748b; font-size: 7pt; margin-top: 1px; }
     .footer { align-items: end; display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; }
     .vehicle { align-items: end; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 18px; }
     .footer span, .vehicle span { color: #475569; display: block; font-size: 7pt; font-weight: 800; letter-spacing: .06em; margin-bottom: 4px; text-transform: uppercase; }
@@ -451,7 +468,7 @@ export function dayTicketHtml(input: {
     @media print {
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .sheet { break-after: avoid; }
-      tr, .note-row, .footer, .vehicle, header, .fields { break-inside: avoid; }
+      tr, .note-row, .loadout-group, .footer, .vehicle, header, .fields { break-inside: avoid; }
     }
   </style>
 </head>
@@ -471,8 +488,8 @@ export function dayTicketHtml(input: {
     </header>
 
     <section class="fields">
-      <div class="field"><span>Name:</span><div class="line">${escapeHtml(input.workerName)}</div></div>
-      <div class="field"><span>Date:</span><div class="line">${escapeHtml(rangeLabel)}</div></div>
+      <div class="field"><span>Worker Name:</span><div class="line">${escapeHtml(input.workerName)}</div></div>
+      <div class="field date-field"><span>Date:</span><div class="line">${escapeHtml(rangeLabel)}</div></div>
     </section>
 
     <table>
@@ -509,6 +526,8 @@ export function dayTicketHtml(input: {
       </tbody>
     </table>
 
+    ${input.settings?.dayTicketShowDailyLoadout === true && loadouts.length ? dayTicketLoadoutHtml(loadouts) : ''}
+
     ${input.options.includeWorkerNotes ? `
       <section class="notes">
         <div class="notes-title">SPECIAL NOTES</div>
@@ -541,9 +560,9 @@ export function dayTicketHtml(input: {
         </section>
       ` : ''}
       <section class="vehicle">
-        <div><span>Vehicle</span><div class="line"></div></div>
-        <div><span>Mileage Start</span><div class="line"></div></div>
-        <div><span>Mileage End</span><div class="line"></div></div>
+        <div><span>Vehicle</span><div class="line">${escapeHtml(primaryVehicle ? loadoutVehicleLabel(primaryVehicle) : loadouts.length > 1 ? 'Multiple vehicles' : '')}</div></div>
+        <div><span>Mileage Start</span><div class="line">${escapeHtml(primaryVehicle?.vehicleUse?.startKm?.toString() ?? '')}</div></div>
+        <div><span>Mileage End</span><div class="line">${escapeHtml(primaryVehicle?.vehicleUse?.endKm?.toString() ?? '')}</div></div>
       </section>
     ` : ''}
 
@@ -895,11 +914,103 @@ function dayTicketOverrideNotes(rows: DayTicketEntry[], workOrderLabel: (row: Da
 }
 
 function ticketDateLabel(from: string, to: string): string {
-  const formatter = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: '2-digit', day: '2-digit', year: 'numeric' });
+  const formatter = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: '2-digit', day: '2-digit', year: 'numeric' });
   if (from && to && from !== to) {
     return `${formatter.format(localDate(from))} - ${formatter.format(localDate(to))}`;
   }
   return formatter.format(localDate(from || to || dateInputValue(new Date())));
+}
+
+function hasLoadoutDetails(loadout: WorkerDailyLoadout): boolean {
+  const vehicle = loadout.vehicleUse;
+  return Boolean(
+    vehicle?.vehicleAssetId
+    || vehicle?.vehicleLabel
+    || vehicle?.startKm != null
+    || vehicle?.endKm != null
+    || vehicle?.notes
+    || loadout.tools?.length
+    || loadout.materials?.length
+  );
+}
+
+function loadoutVehicleLabel(loadout: WorkerDailyLoadout): string {
+  const use = loadout.vehicleUse;
+  if (!use) {
+    return '';
+  }
+  if (use.vehicleLabel) {
+    return use.vehicleLabel;
+  }
+  const vehicle = loadout.vehicles?.find((item) => item.id === use.vehicleAssetId);
+  return vehicle ? [vehicle.name, vehicle.identifier].filter(Boolean).join(' - ') : '';
+}
+
+function dayTicketLoadoutHtml(loadouts: WorkerDailyLoadout[]): string {
+  return `
+    <section class="loadout">
+      <div class="loadout-title">DAILY LOADOUT</div>
+      ${loadouts.map((loadout) => {
+        const use = loadout.vehicleUse;
+        const vehicleLabel = loadoutVehicleLabel(loadout);
+        const distance = use?.startKm != null && use?.endKm != null
+          ? Math.max(0, Number(use.endKm) - Number(use.startKm))
+          : undefined;
+        const vehicleRows = vehicleLabel || use?.startKm != null || use?.endKm != null || use?.notes
+          ? `<div class="loadout-row">
+              <strong>${escapeHtml(vehicleLabel || 'Vehicle use')}</strong>
+              <div class="loadout-meta">${escapeHtml([
+                use?.startKm != null ? `Start ${use.startKm} km` : '',
+                use?.endKm != null ? `End ${use.endKm} km` : '',
+                distance != null ? `${formatLoadoutQuantity(distance)} km travelled` : ''
+              ].filter(Boolean).join(' · '))}</div>
+              ${use?.notes ? `<div>${escapeHtml(use.notes)}</div>` : ''}
+            </div>`
+          : '<div class="loadout-row loadout-meta">No vehicle use recorded.</div>';
+        const toolRows = loadout.tools?.length
+          ? loadout.tools.map((tool) => `
+              <div class="loadout-row">
+                <strong>${escapeHtml(tool.name)}${tool.identifier ? ` · ${escapeHtml(tool.identifier)}` : ''}</strong>
+                <div class="loadout-meta">${escapeHtml(statusLabel(tool.status))} · ${escapeHtml(tool.workOrderNumber)} · ${escapeHtml(tool.propertyName)}</div>
+                ${tool.issueNote ? `<div>${escapeHtml(tool.issueNote)}</div>` : ''}
+              </div>
+            `).join('')
+          : '<div class="loadout-row loadout-meta">No equipment assigned.</div>';
+        const materialRows = loadout.materials?.length
+          ? loadout.materials.map((material) => `
+              <div class="loadout-row">
+                <strong>${escapeHtml(material.itemName || material.description || 'Material')}</strong>
+                <div class="loadout-meta">${escapeHtml(`${formatLoadoutQuantity(material.quantity)}${material.unit ? ` ${material.unit}` : ''} · ${material.used ? 'used' : 'planned'} · ${material.workOrderNumber}`)}</div>
+                <div>${escapeHtml(material.propertyName)}</div>
+              </div>
+            `).join('')
+          : '<div class="loadout-row loadout-meta">No materials recorded.</div>';
+        return `
+          <div class="loadout-day">
+            <div class="loadout-date">${escapeHtml(longDateLabel(loadout.date))}</div>
+            <div class="loadout-groups">
+              <div class="loadout-group"><h3>Vehicle</h3>${vehicleRows}</div>
+              <div class="loadout-group"><h3>Tools and equipment</h3>${toolRows}</div>
+              <div class="loadout-group"><h3>Materials</h3>${materialRows}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </section>
+  `;
+}
+
+function formatLoadoutQuantity(value: number): string {
+  return new Intl.NumberFormat('en-CA', { maximumFractionDigits: 2 }).format(Number(value));
+}
+
+function longDateLabel(value: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(new Date(`${value}T12:00:00`));
 }
 
 function tenantBrand(settings?: TenantSettingsRecord | null): { name: string; address: string; contact: string; logoUrl: string } {

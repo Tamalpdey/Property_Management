@@ -7,12 +7,14 @@ import com.lorne.platform.auth.internal.dto.LogoutRequest;
 import com.lorne.platform.auth.internal.dto.RefreshTokenRequest;
 import com.lorne.platform.auth.internal.dto.UpdateProfilePhotoRequest;
 import com.lorne.platform.auth.internal.service.AuthService;
+import com.lorne.platform.auth.internal.service.PortalLoginPolicy;
 import com.lorne.platform.document.DocumentStorageService;
 import com.lorne.platform.document.PhotoUploadRequest;
 import com.lorne.platform.document.PresignedPhotoUpload;
 import com.lorne.platform.shared.response.ApiResponse;
 import com.lorne.platform.shared.security.JwtPrincipal;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -32,26 +34,33 @@ import org.springframework.web.bind.annotation.RestController;
 class AuthController {
     private final AuthService authService;
     private final DocumentStorageService documentStorageService;
+    private final PortalLoginPolicy portalLoginPolicy;
 
-    AuthController(AuthService authService, DocumentStorageService documentStorageService) {
+    AuthController(AuthService authService, DocumentStorageService documentStorageService, PortalLoginPolicy portalLoginPolicy) {
         this.authService = authService;
         this.documentStorageService = documentStorageService;
+        this.portalLoginPolicy = portalLoginPolicy;
     }
 
     @PostMapping("/login")
     ApiResponse<LoginResponse> login(
             @Valid @RequestBody LoginRequest request,
-            @RequestHeader(value = "X-Request-Source", required = false) String source
+            @RequestHeader(value = "X-Request-Source", required = false) String source,
+            HttpServletRequest servletRequest
     ) {
-        return ApiResponse.ok(authService.login(request, source));
+        var portalAccess = portalLoginPolicy.resolve(servletRequest.getHeader(HttpHeaders.HOST), source);
+        portalLoginPolicy.requireRequestedTenant(portalAccess, request.tenantId());
+        return ApiResponse.ok(authService.login(request, source, portalAccess));
     }
 
     @PostMapping("/refresh")
     ApiResponse<LoginResponse> refresh(
             @Valid @RequestBody RefreshTokenRequest request,
-            @RequestHeader(value = "X-Request-Source", required = false) String source
+            @RequestHeader(value = "X-Request-Source", required = false) String source,
+            HttpServletRequest servletRequest
     ) {
-        return ApiResponse.ok(authService.refresh(request, source));
+        var portalAccess = portalLoginPolicy.resolve(servletRequest.getHeader(HttpHeaders.HOST), source);
+        return ApiResponse.ok(authService.refresh(request, source, portalAccess));
     }
 
     @PostMapping("/logout")

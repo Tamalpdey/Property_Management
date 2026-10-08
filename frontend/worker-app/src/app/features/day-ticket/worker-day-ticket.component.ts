@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
-import type { TenantSettingsRecord, WorkerActivityRecord, WorkerAssignedJob, WorkerClockEntryRecord, WorkOrderRecord } from '@lorne/contracts';
+import type { TenantSettingsRecord, WorkerActivityRecord, WorkerAssignedJob, WorkerClockEntryRecord, WorkerDailyLoadout, WorkOrderRecord } from '@lorne/contracts';
 import { WorkerShiftClockService } from '../../core/services/worker-shift-clock.service';
 import { WorkerJobService } from '../today/services/worker-job.service';
 import { workerErrorMessage } from '../today/worker-job-ui';
@@ -38,7 +38,7 @@ const CURRENT_WORKER_ID = 'current-worker';
           <div>
             <div class="flex flex-wrap items-center gap-2">
               <span class="rounded-md bg-teal-300 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-slate-950">Day ticket</span>
-              <span class="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-xs font-bold text-teal-50">{{ selectedDate | date:'EEE, MMM d' }}</span>
+              <span class="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-xs font-bold text-teal-50">{{ selectedDate | date:'EEEE, MMMM d' }}</span>
             </div>
             <h1 class="mt-2 text-2xl font-black leading-tight sm:text-4xl">Printable field day ticket</h1>
             <p class="mt-1 max-w-2xl text-sm font-semibold leading-6 text-slate-300">
@@ -222,6 +222,7 @@ export class WorkerDayTicketComponent {
   protected readonly error = signal('');
   protected readonly loadoutWorkerName = signal('Worker');
   protected readonly loadoutWorkerId = signal(CURRENT_WORKER_ID);
+  protected readonly dailyLoadout = signal<WorkerDailyLoadout | null>(null);
   protected readonly loadoutActivities = signal<WorkerActivityRecord[]>([]);
   protected readonly clockEntries = signal<WorkerClockEntryRecord[]>([]);
   protected readonly settings = signal<TenantSettingsRecord | null>(null);
@@ -296,6 +297,7 @@ export class WorkerDayTicketComponent {
       this.settings.set(settings);
       this.loadoutWorkerId.set(loadout.workerId || CURRENT_WORKER_ID);
       this.loadoutWorkerName.set(loadout.workerName || 'Worker');
+      this.dailyLoadout.set(loadout);
       this.clockEntries.set(clockEntries);
       this.loadoutActivities.set((loadout.activities ?? []).map((activity) => ({
         ...activity,
@@ -317,6 +319,7 @@ export class WorkerDayTicketComponent {
       rows: this.rows(),
       options: this.options,
       shiftSummary: this.shiftSummary(),
+      loadouts: this.dailyLoadout() ? [this.dailyLoadout()!] : [],
       settings: this.settings()
     }));
   }

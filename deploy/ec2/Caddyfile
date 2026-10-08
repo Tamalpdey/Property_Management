@@ -1,3 +1,9 @@
+{
+  on_demand_tls {
+    ask http://lorne-modulith:8091/api/v1/public/tenant-domains/allow
+  }
+}
+
 (security_headers) {
   header {
     X-Content-Type-Options "nosniff"
@@ -10,6 +16,28 @@
     -Server
   }
   encode gzip zstd
+}
+
+(tenant_portal_routes) {
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    reverse_proxy tenant-portal:80
+  }
+}
+
+(worker_portal_routes) {
+  @api path /api/v1/*
+  handle @api {
+    reverse_proxy lorne-modulith:8091
+  }
+
+  handle {
+    reverse_proxy worker-app:80
+  }
 }
 
 (security_headers_admin) {
@@ -83,15 +111,7 @@ platinumservices.ca, www.platinumservices.ca {
 
 {$APP_DOMAIN}, app.maplepropertyservices.ca {
   import security_headers
-
-  @api path /api/v1/*
-  handle @api {
-    reverse_proxy lorne-modulith:8091
-  }
-
-  handle {
-    reverse_proxy tenant-portal:80
-  }
+  import tenant_portal_routes
 }
 
 {$ADMIN_DOMAIN}, admin.maplepropertyservices.ca {
@@ -109,14 +129,39 @@ platinumservices.ca, www.platinumservices.ca {
 
 {$WORKER_DOMAIN}, worker.maplepropertyservices.ca {
   import security_headers
+  import worker_portal_routes
+}
 
-  @api path /api/v1/*
-  handle @api {
-    reverse_proxy lorne-modulith:8091
+https:// {
+  tls {
+    on_demand
+  }
+  import security_headers
+
+  @tenant_app host *.app.{$ROOT_DOMAIN}
+  handle @tenant_app {
+    @tenant_app_api path /api/v1/*
+    handle @tenant_app_api {
+      reverse_proxy lorne-modulith:8091
+    }
+    handle {
+      reverse_proxy tenant-portal:80
+    }
+  }
+
+  @tenant_worker host *.worker.{$ROOT_DOMAIN}
+  handle @tenant_worker {
+    @tenant_worker_api path /api/v1/*
+    handle @tenant_worker_api {
+      reverse_proxy lorne-modulith:8091
+    }
+    handle {
+      reverse_proxy worker-app:80
+    }
   }
 
   handle {
-    reverse_proxy worker-app:80
+    respond "Not found" 404
   }
 }
 

@@ -1,14 +1,16 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { TagModule } from 'primeng/tag';
-import type { WorkOrderRecord, WorkerClockedInTodayRecord } from '@lorne/contracts';
+import type { DashboardWidgetId, TenantSettingsRecord, WorkOrderRecord, WorkerClockedInTodayRecord } from '@lorne/contracts';
 import { CountBucket, TenantAnalytics, TenantAnalyticsService, TenantMetricSummary } from '../analytics/services/tenant-analytics.service';
 import { WorkerManagementService } from '../workers/services/worker-management.service';
 import { TenantMetricCardComponent } from './components/tenant-metric-card.component';
+import { TenantSettingsService } from '../settings/services/tenant-settings.service';
 
 type DashboardQueueMode = 'ATTENTION' | 'DRAFT' | 'TODAY' | 'REVIEW' | 'INVOICE';
 
@@ -240,6 +242,63 @@ export class StatusDonutComponent {
   }
 }
 
+@Component({
+  selector: 'work-pipeline',
+  standalone: true,
+  template: `
+    <div class="flex flex-1 flex-col justify-between gap-4 pt-1">
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        @for (stage of stages(); track stage.label) {
+          <div class="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full" [style.background]="stage.color"></span>
+              <p class="truncate text-[0.72rem] font-black uppercase text-slate-500">{{ stage.label }}</p>
+            </div>
+            <p class="mt-1 text-xl font-black leading-none text-slate-950">{{ stage.count }}</p>
+            <p class="mt-1 text-[0.72rem] font-bold text-slate-500">{{ percent(stage.count) }}% of work</p>
+          </div>
+        }
+      </div>
+      <div>
+        <div class="flex h-3 overflow-hidden rounded-full bg-slate-100" aria-label="Work order workflow distribution">
+          @for (stage of stages(); track stage.label) {
+            @if (stage.count > 0) {
+              <span [style.background]="stage.color" [style.width.%]="percent(stage.count)" [attr.title]="stage.label + ': ' + stage.count"></span>
+            }
+          }
+        </div>
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">
+          <span>{{ activeCount() }} still moving through operations</span>
+          @if (cancelledCount() > 0) { <span class="text-red-600">{{ cancelledCount() }} cancelled</span> }
+        </div>
+      </div>
+    </div>
+  `
+})
+export class WorkPipelineComponent {
+  readonly buckets = input.required<CountBucket[]>();
+
+  stages() {
+    return [
+      { label: 'Planned', count: this.count('draft', 'assigned'), color: '#2563eb' },
+      { label: 'Active', count: this.count('in progress'), color: '#0891b2' },
+      { label: 'Review', count: this.count('pending completion'), color: '#d97706' },
+      { label: 'Ready', count: this.count('approved', 'customer notified'), color: '#0f766e' },
+      { label: 'Closed', count: this.count('invoiced', 'paid'), color: '#64748b' }
+    ];
+  }
+
+  total(): number { return this.buckets().reduce((sum, bucket) => sum + bucket.count, 0); }
+  activeCount(): number { return this.stages().slice(0, 4).reduce((sum, stage) => sum + stage.count, 0); }
+  cancelledCount(): number { return this.count('cancelled'); }
+  percent(count: number): number { return Math.round((count / Math.max(1, this.total())) * 100); }
+
+  private count(...labels: string[]): number {
+    const accepted = new Set(labels);
+    return this.buckets().filter((bucket) => accepted.has(bucket.label.toLowerCase())).reduce((sum, bucket) => sum + bucket.count, 0);
+  }
+}
+
 interface StatusChartSegment {
   label: string;
   count: number;
@@ -320,11 +379,11 @@ export class FinanceBarComponent {
 @Component({
   selector: 'lorne-dashboard',
   standalone: true,
-  imports: [ButtonModule, ChartBarRowComponent, DashboardPanelComponent, DatePipe, DialogModule, FinanceBarComponent, RouterLink, StatusDonutComponent, TagModule, TenantMetricCardComponent],
+  imports: [ButtonModule, ChartBarRowComponent, DashboardPanelComponent, DatePipe, DialogModule, DragDropModule, FinanceBarComponent, RouterLink, TagModule, TenantMetricCardComponent, WorkPipelineComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="space-y-2.5">
-      <div class="overflow-hidden rounded-lg border border-slate-200 bg-slate-950 text-white shadow-lg">
+    <section class="flex flex-col gap-2.5">
+      <div class="dashboard-hero overflow-hidden rounded-lg border text-white shadow-lg">
         <div class="grid gap-2.5 p-3 md:grid-cols-[1fr_auto] md:items-center">
           <div class="min-w-0">
             <p-tag value="Tenant workspace" severity="info" />
@@ -334,6 +393,8 @@ export class FinanceBarComponent {
             }
           </div>
           <div class="flex flex-wrap gap-2">
+            <button pButton type="button" severity="secondary" icon="pi pi-arrows-alt" [label]="layoutEditing() ? 'Done arranging' : 'Arrange cards'" (click)="layoutEditing.set(!layoutEditing())"></button>
+            <a pButton routerLink="/settings" [queryParams]="{ tab: 'branding' }" type="button" severity="secondary" icon="pi pi-palette" label="Customize" class="no-underline"></a>
             <a pButton routerLink="/work-orders" type="button" severity="secondary" icon="pi pi-plus" label="Work order" class="no-underline"></a>
             <button pButton type="button" icon="pi pi-refresh" label="Refresh" [loading]="loading()" (click)="load()"></button>
           </div>
@@ -343,19 +404,30 @@ export class FinanceBarComponent {
       @if (error()) {
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ error() }}</p>
       }
+      @if (layoutMessage()) {
+        <p class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-800">{{ layoutMessage() }}</p>
+      }
 
       @if (analytics(); as data) {
-        <div class="grid gap-2.5 md:grid-cols-3">
-          @for (metric of data.metrics; track metric.label) {
-            <lorne-tenant-metric-card [metric]="metric" />
+        @if (widgetVisible('metrics')) {
+          <div class="grid gap-2.5 md:grid-cols-3">
+            @for (metric of data.metrics; track metric.label) {
+              <lorne-tenant-metric-card [metric]="metric" />
+            }
+          </div>
+        }
+
+        <section class="grid items-stretch gap-2.5 xl:grid-cols-[1.15fr_.95fr_.9fr]" cdkDropList cdkDropListOrientation="horizontal" [cdkDropListDisabled]="!layoutEditing()" (cdkDropListDropped)="dropDashboardWidget($event, insightWidgetIds)">
+          @if (widgetVisible('workMix')) {
+          <div cdkDrag class="dashboard-draggable relative h-full min-w-0" [style.order]="widgetOrder('workMix')" [class.dashboard-draggable-active]="layoutEditing()">
+            @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Work mix"><i class="pi pi-bars"></i></button> }
+            <dashboard-panel eyebrow="Workflow" title="Work pipeline" [badge]="data.workOrders.length + ' total'"><work-pipeline [buckets]="data.statusBuckets" /></dashboard-panel>
+          </div>
           }
-        </div>
 
-        <section class="grid items-stretch gap-2.5 xl:grid-cols-[1.3fr_.9fr_.95fr]">
-          <dashboard-panel eyebrow="Work mix" title="Status distribution" [badge]="data.workOrders.length + ' total'">
-            <status-donut [buckets]="data.statusBuckets" />
-          </dashboard-panel>
-
+          @if (widgetVisible('topServices')) {
+          <div cdkDrag class="dashboard-draggable relative h-full min-w-0" [style.order]="widgetOrder('topServices')" [class.dashboard-draggable-active]="layoutEditing()">
+            @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Top services"><i class="pi pi-bars"></i></button> }
           <dashboard-panel eyebrow="Demand" title="Top services" [badge]="data.serviceBuckets.length + ' services'">
             <div class="grid gap-2">
               @for (bucket of data.serviceBuckets.slice(0, 6); track bucket.label) {
@@ -365,7 +437,12 @@ export class FinanceBarComponent {
               }
             </div>
           </dashboard-panel>
+          </div>
+          }
 
+          @if (widgetVisible('finance')) {
+          <div cdkDrag class="dashboard-draggable relative h-full min-w-0" [style.order]="widgetOrder('finance')" [class.dashboard-draggable-active]="layoutEditing()">
+            @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Finance"><i class="pi pi-bars"></i></button> }
           <dashboard-panel eyebrow="Finance" title="Revenue exposure" [badge]="data.finance.overdueCount + ' overdue'">
             <div class="grid gap-2">
               <finance-bar label="Receivables" [amount]="data.finance.receivables" [max]="financeMax(data)" tone="amber" />
@@ -374,9 +451,12 @@ export class FinanceBarComponent {
               <finance-bar label="Paid" [amount]="data.finance.paidTotal" [max]="financeMax(data)" tone="teal" />
             </div>
           </dashboard-panel>
+          </div>
+          }
         </section>
 
-        <section class="grid gap-2.5 xl:grid-cols-[1.35fr_.9fr]">
+        <section class="grid items-start gap-2.5 xl:grid-cols-[1.35fr_.9fr]">
+          @if (widgetVisible('actionQueue')) {
           <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <div class="flex items-center justify-between gap-2">
               <div>
@@ -417,9 +497,9 @@ export class FinanceBarComponent {
                 <a pButton routerLink="/email-audit" type="button" size="small" severity="secondary" icon="pi pi-send" label="Email audit" class="no-underline"></a>
               </div>
             </div>
-            <div class="mt-2 overflow-hidden rounded-lg border border-slate-200">
+            <div class="mt-2 max-h-[32rem] overflow-auto rounded-lg border border-slate-200">
               <table class="w-full min-w-[42rem] border-collapse text-sm">
-                <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                <thead class="sticky top-0 z-10 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                   <tr><th class="px-3 py-2">Work order</th><th class="px-3 py-2">Property</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Schedule</th></tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -437,9 +517,12 @@ export class FinanceBarComponent {
               </table>
             </div>
           </div>
+          }
 
-          <aside class="space-y-2.5">
-            <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <aside class="grid content-start gap-2.5" cdkDropList [cdkDropListDisabled]="!layoutEditing()" (cdkDropListDropped)="dropDashboardWidget($event, sideWidgetIds)">
+            @if (widgetVisible('clockedIn')) {
+            <div cdkDrag class="dashboard-draggable relative rounded-lg border border-slate-200 bg-white p-3 shadow-sm" [style.order]="widgetOrder('clockedIn')" [class.dashboard-draggable-active]="layoutEditing()">
+              @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Clocked-in workers"><i class="pi pi-bars"></i></button> }
               <div class="flex items-center justify-between gap-2">
                 <div>
                   <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Working today</p>
@@ -468,8 +551,11 @@ export class FinanceBarComponent {
                 }
               </div>
             </div>
+            }
 
-            <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            @if (widgetVisible('workerLoad')) {
+            <div cdkDrag class="dashboard-draggable relative rounded-lg border border-slate-200 bg-white p-3 shadow-sm" [style.order]="widgetOrder('workerLoad')" [class.dashboard-draggable-active]="layoutEditing()">
+              @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Worker load"><i class="pi pi-bars"></i></button> }
               <div class="flex items-center justify-between gap-2">
                 <div>
                   <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Worker load</p>
@@ -477,8 +563,8 @@ export class FinanceBarComponent {
                 </div>
                 <a pButton routerLink="/workers" type="button" text icon="pi pi-users" label="Workers" class="no-underline"></a>
               </div>
-              <div class="mt-1.5 grid gap-1.5">
-                @for (worker of data.workerLoad.slice(0, 6); track worker.workerId) {
+              <div class="mt-1.5 grid max-h-[28rem] gap-1.5 overflow-y-auto pr-1">
+                @for (worker of data.workerLoad.slice(0, 4); track worker.workerId) {
                   <div class="rounded-lg bg-slate-50 px-2.5 py-1.5">
                     <div class="flex items-center justify-between gap-2">
                       <p class="font-black text-slate-950">{{ worker.workerName }}</p>
@@ -494,11 +580,17 @@ export class FinanceBarComponent {
                 }
               </div>
             </div>
+            }
 
-            <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-              <p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Inventory risk</p>
-              <div class="mt-2 grid gap-2">
-                @for (item of data.lowInventory.slice(0, 5); track item.id) {
+            @if (widgetVisible('inventoryRisk')) {
+            <div cdkDrag class="dashboard-draggable relative rounded-lg border border-slate-200 bg-white p-3 shadow-sm" [style.order]="widgetOrder('inventoryRisk')" [class.dashboard-draggable-active]="layoutEditing()">
+              @if (layoutEditing()) { <button cdkDragHandle type="button" class="dashboard-drag-handle" title="Drag Inventory risk"><i class="pi pi-bars"></i></button> }
+              <div class="flex items-center justify-between gap-2">
+                <div><p class="text-[0.8rem] font-black uppercase tracking-wide text-teal-700">Inventory risk</p><h2 class="mt-0.5 text-lg font-black text-slate-950">Low stock</h2></div>
+                <a pButton routerLink="/inventory" type="button" text icon="pi pi-box" label="Inventory" class="no-underline"></a>
+              </div>
+              <div class="mt-2 grid max-h-[18rem] gap-2 overflow-y-auto pr-1">
+                @for (item of data.lowInventory.slice(0, 3); track item.id) {
                   <div class="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2">
                     <div><p class="font-black text-slate-950">{{ item.name }}</p><p class="text-[0.82rem] font-semibold text-slate-500">{{ item.storageLocation || 'No location' }}</p></div>
                     <p class="text-sm font-black text-amber-700">{{ item.quantityOnHand }} {{ item.unit }}</p>
@@ -508,6 +600,7 @@ export class FinanceBarComponent {
                 }
               </div>
             </div>
+            }
           </aside>
         </section>
       } @else if (!loading()) {
@@ -571,11 +664,20 @@ export class FinanceBarComponent {
         </div>
       </p-dialog>
     </section>
-  `
+  `,
+  styles: [`
+    .dashboard-hero { background: var(--tenant-navigation); border-color: color-mix(in srgb, var(--tenant-navigation-contrast) 16%, transparent); border-radius: var(--tenant-radius); }
+    .dashboard-draggable-active { outline: 2px dashed color-mix(in srgb, var(--tenant-primary) 55%, transparent); outline-offset: 2px; }
+    .dashboard-drag-handle { position: absolute; right: .75rem; top: -.75rem; z-index: 5; display: grid; height: 2rem; width: 2rem; cursor: grab; place-items: center; border: 1px solid color-mix(in srgb, var(--tenant-primary) 28%, white); border-radius: .4rem; background: var(--tenant-primary-soft); color: var(--tenant-primary); box-shadow: 0 4px 12px rgba(15, 23, 42, .12); }
+    .dashboard-drag-handle:active { cursor: grabbing; }
+    .cdk-drag-preview { border-radius: var(--tenant-radius); box-shadow: 0 18px 45px rgba(15, 23, 42, .24); }
+    .cdk-drag-placeholder { opacity: .25; }
+  `]
 })
 export class DashboardComponent {
   private readonly analyticsService = inject(TenantAnalyticsService);
   private readonly workerManagementService = inject(WorkerManagementService);
+  private readonly tenantSettingsService = inject(TenantSettingsService);
   protected readonly analytics = signal<TenantAnalytics | null>(null);
   protected readonly clockedInToday = signal<WorkerClockedInTodayRecord[]>([]);
   protected readonly selectedClockedInWorker = signal<WorkerClockedInTodayRecord | null>(null);
@@ -583,6 +685,11 @@ export class DashboardComponent {
   protected readonly queueMode = signal<DashboardQueueMode>('ATTENTION');
   protected readonly loading = signal(false);
   protected readonly error = signal('');
+  protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
+  protected readonly layoutEditing = signal(false);
+  protected readonly layoutMessage = signal('');
+  protected readonly insightWidgetIds: DashboardWidgetId[] = ['workMix', 'topServices', 'finance'];
+  protected readonly sideWidgetIds: DashboardWidgetId[] = ['clockedIn', 'workerLoad', 'inventoryRisk'];
   protected readonly todayDate = dateInput(new Date());
 
   constructor() {
@@ -593,16 +700,52 @@ export class DashboardComponent {
     this.loading.set(true);
     this.error.set('');
     try {
-      const [analytics, clockedInToday] = await Promise.all([
+      const [analytics, clockedInToday, settings] = await Promise.all([
         firstValueFrom(this.analyticsService.overview()),
-        firstValueFrom(this.workerManagementService.clockedInToday())
+        firstValueFrom(this.workerManagementService.clockedInToday()),
+        firstValueFrom(this.tenantSettingsService.get())
       ]);
       this.analytics.set(analytics);
       this.clockedInToday.set(clockedInToday);
+      this.tenantSettings.set(settings);
     } catch {
       this.error.set('Unable to load dashboard data.');
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  protected widgetVisible(id: DashboardWidgetId): boolean {
+    return !(this.tenantSettings()?.dashboardHiddenWidgets || []).includes(id);
+  }
+
+  protected widgetOrder(id: DashboardWidgetId): number {
+    const index = (this.tenantSettings()?.dashboardWidgetOrder || []).indexOf(id);
+    return index < 0 ? 99 : index;
+  }
+
+  protected async dropDashboardWidget(event: CdkDragDrop<unknown>, zone: DashboardWidgetId[]): Promise<void> {
+    const settings = this.tenantSettings();
+    if (!settings || event.previousIndex === event.currentIndex) {
+      return;
+    }
+    const globalOrder: DashboardWidgetId[] = settings.dashboardWidgetOrder?.length
+      ? [...settings.dashboardWidgetOrder]
+      : ['metrics', 'actionQueue', 'clockedIn', 'workMix', 'topServices', 'finance', 'workerLoad', 'inventoryRisk'];
+    const orderedZone = zone.filter((id) => !settings.dashboardHiddenWidgets.includes(id)).sort((left, right) => globalOrder.indexOf(left) - globalOrder.indexOf(right));
+    moveItemInArray(orderedZone, event.previousIndex, event.currentIndex);
+    const positions = globalOrder.map((id, index) => zone.includes(id) && !settings.dashboardHiddenWidgets.includes(id) ? index : -1).filter((index) => index >= 0);
+    positions.forEach((position, index) => globalOrder[position] = orderedZone[index]);
+    this.tenantSettings.set({ ...settings, dashboardWidgetOrder: globalOrder });
+    this.layoutMessage.set('Saving dashboard layout...');
+    try {
+      const saved = await firstValueFrom(this.tenantSettingsService.update({ ...settings, dashboardWidgetOrder: globalOrder }));
+      this.tenantSettings.set(saved);
+      this.layoutMessage.set('Dashboard layout saved.');
+      window.setTimeout(() => this.layoutMessage.set(''), 2200);
+    } catch {
+      this.tenantSettings.set(settings);
+      this.layoutMessage.set('Unable to save dashboard layout.');
     }
   }
 
@@ -633,7 +776,7 @@ export class DashboardComponent {
   }
 
   protected queuePreview(data: TenantAnalytics): WorkOrderRecord[] {
-    return this.queueWork(data).slice(0, 12);
+    return this.queueWork(data).slice(0, 7);
   }
 
   protected queueHeading(): string {

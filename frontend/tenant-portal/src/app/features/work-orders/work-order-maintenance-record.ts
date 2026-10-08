@@ -192,9 +192,10 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
       line-height: 1.25;
       overflow-wrap: anywhere;
     }
-    .date-line { display: grid; grid-template-columns: 1fr; text-align: center; }
+    .date-line { display: grid; grid-template-columns: 1fr; min-width: 0; text-align: center; }
+    .date-line.wide { grid-column: 2 / 4; }
     .date-value { border-bottom: 1.2pt solid #111827; padding-bottom: 2.5pt; font-size: 10pt; font-weight: 600; line-height: 1.25; }
-    .date-labels { display: grid; grid-template-columns: 1.25fr repeat(3, .7fr) 1fr; color: #475569; font-size: 6.5pt; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .date-labels { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); color: #475569; font-size: 6.5pt; font-weight: 800; text-align: center; text-transform: uppercase; }
     h2 { margin: 8pt 0 4pt; font-size: 8.5pt; letter-spacing: 0.03em; text-transform: uppercase; }
     .call-types { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10pt; margin-bottom: 4pt; }
     .check-row { display: grid; grid-template-columns: 1fr 12pt; align-items: center; gap: 6pt; min-height: 17pt; }
@@ -315,16 +316,15 @@ export function maintenanceRecordPrintHtml(review: WorkOrderReview, settings?: T
     <section class="form-grid${generalServiceRecord ? ' generic' : ''}">
       ${generalServiceRecord ? `
         <div class="field"><strong>Client Name:</strong><span class="line">${escapeHtml(workOrder.ownerName || workOrder.propertyName)}</span></div>
-        <div class="date-line"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span><span>Time</span></span></div>
+        <div class="date-line"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span></span></div>
         <div class="field"><strong>Client Street:</strong><span class="line">${escapeHtml(workOrder.propertyAddress || '')}</span></div>
         <div class="field"><strong>Staff:</strong><span class="line">${escapeHtml(workerNames(review))}</span></div>
       ` : `
         <div class="field"><strong>Client Name:</strong><span class="line">${escapeHtml(workOrder.ownerName || workOrder.propertyName)}</span></div>
-        <div class="date-line"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span><span>Time</span></span></div>
-        <div class="field"><strong>Staff:</strong><span class="line">${escapeHtml(workerNames(review))}</span></div>
+        <div class="date-line wide"><span class="date-value">${escapeHtml(formatServiceTimestamp(workOrder.scheduledStart, settings?.timezone))}</span><span class="date-labels"><span>Day</span><span>DD</span><span>MMM</span><span>YYYY</span></span></div>
         <div class="field"><strong>Client Street:</strong><span class="line">${escapeHtml(workOrder.propertyAddress || '')}</span></div>
         <div class="field"><strong>#</strong><span class="line">${escapeHtml(workOrder.workOrderNumber)}</span></div>
-        <div class="field"><strong>Service:</strong><span class="line">${escapeHtml(serviceName)}</span></div>
+        <div class="field"><strong>Staff:</strong><span class="line">${escapeHtml(workerNames(review))}</span></div>
       `}
     </section>
 
@@ -441,10 +441,13 @@ export function maintenanceRecordDisplayTitle(template: MaintenanceRecordTemplat
     || Boolean(template?.chemicals?.length)
     || Boolean(template?.measurements?.some((item) => normalize(item.label).includes('pool')));
 
+  if (aquatic) {
+    return 'Maintenance Record';
+  }
   if (configuredTitle && normalizedTitle !== normalize('Maintenance record')) {
     return configuredTitle;
   }
-  return aquatic ? 'Pool Maintenance Record' : 'Service Record';
+  return 'Service Record';
 }
 
 function deliveryLabels(materials: WorkOrderMaterial[], templateDeliveries: MaintenanceTemplateDelivery[], savedDeliveries?: Record<string, string>): DeliveryLine[] {
@@ -748,9 +751,7 @@ function formatServiceTimestamp(value?: string, timezone?: string): string {
     weekday: 'long',
     month: '2-digit',
     day: '2-digit',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
+    year: 'numeric'
   };
   return formatTimestamp(new Date(value), options, timezone);
 }
@@ -760,9 +761,7 @@ function formatPrintTimestamp(value: Date, timezone?: string): string {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
+    year: 'numeric'
   };
   return formatTimestamp(value, options, timezone);
 }
