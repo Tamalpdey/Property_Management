@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens from the Maple prototype.
+ * "maple-*" is the public homepage palette (Concept B).
+ * Breakpoints match the prototype's Bootstrap grid (768 / 992 / 1200px).
+ */
+@theme {
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 62rem;
+  --breakpoint-xl: 75rem;
+  --breakpoint-2xl: 90rem;
+
+  --font-display: var(--font-jakarta), "Plus Jakarta Sans", system-ui, sans-serif;
+
+  --color-maple-ink: #183630;
+  --color-maple-text: #263c36;
+  --color-maple-muted: #5b6861;
+  --color-maple-teal: #176e60;
+  --color-maple-teal-dark: #105548;
+  --color-maple-ivory: #fffefa;
+  --color-maple-shell: #f1f0e9;
+  --color-maple-sand: #f2eee5;
+  --color-maple-mist: #eaf0ed;
+  --color-maple-sage: #ecf0e5;
+  --color-maple-line: #e0e5dd;
+
+  --shadow-card: 0 16px 42px #213e2b10;
+
+  --animate-rise: rise 0.65s both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 20px;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+    }
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 104px;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 3px solid #9c661b;
+    outline-offset: 4px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+/* Scroll reveal: elements start hidden only after JS opts in (see <Reveal />). */
+.motion-ready [data-reveal] {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.65s ease,
+    transform 0.65s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.motion-ready [data-reveal][data-visible="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Story scene contents rise in when their frame becomes active. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-active="true"] .scene-content > *:not(.scene-heading) {
+    animation: rise 0.4s both;
+  }
+  [data-active="true"] .scene-content > *:nth-child(3) {
+    animation-delay: 0.08s;
+  }
+  [data-active="true"] .scene-content > *:nth-child(4) {
+    animation-delay: 0.16s;
+  }
+  [data-active="true"] .scene-content > *:nth-child(5) {
+    animation-delay: 0.24s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+
+/* Printing: show everything, including sections that haven't been scrolled into view. */
+@media print {
+  .motion-ready [data-reveal] {
+    opacity: 1;
+    transform: none;
+  }
+  header {
+    position: static !important;
+  }
+}
