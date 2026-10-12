@@ -58,6 +58,7 @@ public record TenantSettingsDto(
         String graphSenderUser,
         boolean autoSendWorkCompletedEmail,
         boolean autoSendInvoiceEmail,
-        boolean liveWorkerTrackingEnabled
+        boolean liveWorkerTrackingEnabled,
+        boolean quoteManagementEnabled
 ) {
 }

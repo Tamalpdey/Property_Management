@@ -3,8 +3,11 @@ package com.lorne.platform.notification.internal.service;
 import com.lorne.platform.audit.AuditWriter;
 import com.lorne.platform.notification.EmailLogoRenderer;
 import com.lorne.platform.notification.OutboundEmailInlineImage;
+import com.lorne.platform.notification.OutboundEmailAttachment;
 import com.lorne.platform.notification.OutboundEmailMessage;
 import com.lorne.platform.notification.OutboundMailOperations;
+import com.lorne.platform.notification.QuoteEmailResendOperations;
+import org.springframework.beans.factory.ObjectProvider;
 import com.lorne.platform.notification.internal.dto.EmailDeliveryLogDto;
 import com.lorne.platform.notification.internal.dto.ResendEmailDeliveryRequest;
 import com.lorne.platform.shared.exception.BadRequestException;
@@ -27,19 +30,22 @@ public class EmailDeliveryLogService {
     private final OutboundMailOperations outboundMailOperations;
     private final TenantSettingsOperations tenantSettingsOperations;
     private final EmailLogoRenderer emailLogoRenderer;
+    private final ObjectProvider<QuoteEmailResendOperations> quoteResendOperations;
 
     public EmailDeliveryLogService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
             OutboundMailOperations outboundMailOperations,
             TenantSettingsOperations tenantSettingsOperations,
-            EmailLogoRenderer emailLogoRenderer
+            EmailLogoRenderer emailLogoRenderer,
+            ObjectProvider<QuoteEmailResendOperations> quoteResendOperations
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.outboundMailOperations = outboundMailOperations;
         this.tenantSettingsOperations = tenantSettingsOperations;
         this.emailLogoRenderer = emailLogoRenderer;
+        this.quoteResendOperations = quoteResendOperations;
     }
 
     @Transactional(readOnly = true)
@@ -48,6 +54,7 @@ public class EmailDeliveryLogService {
         return jdbcTemplate.query("""
                 SELECT edl.id,
                        CASE
+                         WHEN edl.quote_id IS NOT NULL THEN 'QUOTE_EMAIL'
                          WHEN edl.invoice_id IS NOT NULL THEN 'INVOICE_EMAIL'
                          WHEN edl.work_order_id IS NOT NULL THEN 'WORK_ORDER_COMPLETION'
                          WHEN edl.template_id IS NOT NULL THEN 'TEST_EMAIL'
@@ -58,8 +65,9 @@ public class EmailDeliveryLogService {
                        i.invoice_number,
                        coalesce(edl.work_order_id, i.work_order_id) AS work_order_id,
                        wo.work_order_number,
-                       coalesce(st.name, wo.title) AS service_name,
-                       c.display_name AS owner_name,
+                       coalesce(q.published_details->>'serviceName', qst.name, st.name, wo.title) AS service_name,
+                       coalesce(q.published_details->>'customerName', q.adhoc_customer_name, c.display_name) AS owner_name,
+                       edl.quote_id, q.quote_number,
                        edl.recipient_email,
                        edl.cc_emails,
                        edl.bcc_emails,
@@ -74,6 +82,8 @@ public class EmailDeliveryLogService {
                 LEFT JOIN work_orders wo ON wo.id = coalesce(edl.work_order_id, i.work_order_id) AND wo.tenant_id = edl.tenant_id
                 LEFT JOIN service_types st ON st.id = wo.service_type_id AND st.tenant_id = wo.tenant_id
                 LEFT JOIN customers c ON c.id = coalesce(edl.customer_id, i.customer_id, wo.customer_id) AND c.tenant_id = edl.tenant_id
+                LEFT JOIN quotes q ON q.id = edl.quote_id AND q.tenant_id = edl.tenant_id
+                LEFT JOIN service_types qst ON qst.id = q.service_type_id AND qst.tenant_id = edl.tenant_id
                 WHERE edl.tenant_id = ?
                 ORDER BY edl.created_at DESC
                 LIMIT ?
@@ -95,7 +105,8 @@ public class EmailDeliveryLogService {
                 rs.getString("status"),
                 rs.getString("provider_message"),
                 instant(rs.getTimestamp("sent_at")),
-                instant(rs.getTimestamp("created_at"))
+                instant(rs.getTimestamp("created_at")),
+                rs.getObject("quote_id", UUID.class), rs.getString("quote_number")
         ), tenantId, limit);
     }
 
@@ -113,21 +124,23 @@ public class EmailDeliveryLogService {
         var subject = renderKnownPlaceholders(source.subject(), source);
         var body = renderKnownPlaceholders(source.body(), source);
         var inlineImages = inlineImagesForResend(tenantId, body);
+        var attachments = source.quoteId() == null ? List.<OutboundEmailAttachment>of()
+                : List.of(quoteResendOperations.getObject().quoteAttachment(tenantId, source.quoteId(), body));
         var delivery = outboundMailOperations.send(tenantId, new OutboundEmailMessage(
                 recipient,
                 subject,
                 body,
-                List.of(),
+                attachments,
                 ccRecipients,
                 bccRecipients,
                 inlineImages
         ));
         var resentId = jdbcTemplate.queryForObject("""
                 INSERT INTO email_delivery_logs (
-                    tenant_id, template_id, invoice_id, work_order_id, customer_id, recipient_email,
+                    tenant_id, template_id, invoice_id, work_order_id, customer_id, quote_id, recipient_email,
                     cc_emails, bcc_emails, subject, body, status, provider_message, sent_at, delivery_mode, created_by, updated_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESEND', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESEND', ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId,
@@ -135,6 +148,7 @@ public class EmailDeliveryLogService {
                 source.invoiceId(),
                 source.workOrderId(),
                 source.customerId(),
+                source.quoteId(),
                 recipient,
                 ccEmails,
                 bccEmails,
@@ -154,6 +168,12 @@ public class EmailDeliveryLogService {
                 "status", delivery.status(),
                 "provider", delivery.provider()
         ));
+        if (source.quoteId() != null) {
+            auditWriter.record(tenantId, actorUserId, "QUOTE_EMAIL_RESENT", "QUOTE", source.quoteId(), Map.of(
+                    "sourceDeliveryLogId", deliveryLogId.toString(), "deliveryLogId", resentId.toString(),
+                    "recipientEmail", recipient, "subject", subject, "status", delivery.status(),
+                    "provider", safe(delivery.provider()), "providerMessage", safe(delivery.providerMessage())));
+        }
         return list(tenantId, 100).stream()
                 .filter(log -> resentId.equals(log.id()))
                 .findFirst()
@@ -162,7 +182,7 @@ public class EmailDeliveryLogService {
 
     private EmailLogRow load(UUID tenantId, UUID deliveryLogId) {
         var rows = jdbcTemplate.query("""
-                SELECT edl.id, edl.template_id, edl.invoice_id, edl.work_order_id, edl.customer_id, edl.recipient_email,
+                SELECT edl.id, edl.template_id, edl.invoice_id, edl.work_order_id, edl.customer_id, edl.quote_id, edl.recipient_email,
                        edl.cc_emails, edl.bcc_emails, edl.subject, edl.body,
                        coalesce(st.name, wo.title) AS service_name,
                        wo.work_order_number, i.invoice_number, c.display_name AS owner_name
@@ -186,7 +206,7 @@ public class EmailDeliveryLogService {
                 rs.getString("service_name"),
                 rs.getString("work_order_number"),
                 rs.getString("invoice_number"),
-                rs.getString("owner_name")
+                rs.getString("owner_name"), rs.getObject("quote_id", UUID.class)
         ), tenantId, deliveryLogId);
         if (rows.isEmpty()) {
             throw new ResourceNotFoundException("Email delivery log not found.");
@@ -269,7 +289,8 @@ public class EmailDeliveryLogService {
             String serviceName,
             String workOrderNumber,
             String invoiceNumber,
-            String ownerName
+            String ownerName,
+            UUID quoteId
     ) {
     }
 }

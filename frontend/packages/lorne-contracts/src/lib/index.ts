@@ -586,6 +586,7 @@ export interface CreateTenantOnboardingRequest {
   themeNavigationColor?: string;
   loginHeadline?: string;
   loginMessage?: string;
+  quoteManagementEnabled: boolean;
 }
 
 export interface TenantOnboardingResult {
@@ -611,6 +612,7 @@ export interface SuperAdminTenantSummary {
   administratorEmail?: string;
   activeUsers: number;
   activeProperties: number;
+  quoteManagementEnabled: boolean;
   createdAt: string;
 }
 
@@ -1358,6 +1360,7 @@ export interface TenantSettingsRecord {
   autoSendWorkCompletedEmail: boolean;
   autoSendInvoiceEmail: boolean;
   liveWorkerTrackingEnabled: boolean;
+  quoteManagementEnabled: boolean;
 }
 
 export interface UpdateTenantSettingsRequest {
@@ -1487,6 +1490,8 @@ export interface EmailDeliveryLogRecord {
   invoiceNumber?: string;
   workOrderId?: string;
   workOrderNumber?: string;
+  quoteId?: string;
+  quoteNumber?: string;
   serviceName?: string;
   ownerName?: string;
   recipientEmail: string;
@@ -1756,6 +1761,90 @@ export interface CreateWorkOrderRequest {
   linkedWorkOrders?: CreateWorkOrderLinkRequest[];
   allowAvailabilityOverride?: boolean;
   allowAvailabilityOverrideReason?: string;
+}
+
+export type QuoteStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'APPROVED' | 'DECLINED' | 'EXPIRED' | 'CONVERTED' | 'VOID';
+
+export interface QuoteLine {
+  id?: string;
+  description: string;
+  quantity: number;
+  unit?: string;
+  rate: number;
+  amount: number;
+  sortOrder: number;
+}
+
+export interface QuoteRecord {
+  id: string;
+  quoteNumber: string;
+  customerId?: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  propertyId?: string;
+  propertyName?: string;
+  propertyAddress?: string;
+  serviceTypeId?: string;
+  serviceName?: string;
+  title: string;
+  scope?: string;
+  status: QuoteStatus;
+  issueDate: string;
+  validUntil?: string;
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  notes?: string;
+  terms?: string;
+  approvalName?: string;
+  approvalComment?: string;
+  sentAt?: string;
+  viewedAt?: string;
+  approvedAt?: string;
+  declinedAt?: string;
+  convertedAt?: string;
+  convertedWorkOrderId?: string;
+  convertedWorkOrderNumber?: string;
+  createdAt: string;
+  updatedAt: string;
+  lines: QuoteLine[];
+}
+
+export interface UpsertQuoteRequest {
+  customerId?: string;
+  adhocCustomerName?: string;
+  adhocCustomerEmail?: string;
+  adhocCustomerPhone?: string;
+  propertyId?: string;
+  adhocPropertyName?: string;
+  adhocPropertyAddress?: string;
+  serviceTypeId?: string;
+  title: string;
+  scope?: string;
+  issueDate?: string;
+  validUntil?: string;
+  taxRate?: number;
+  notes?: string;
+  terms?: string;
+  lines: Array<Pick<QuoteLine, 'description' | 'quantity' | 'unit' | 'rate'> & { id?: string }>;
+}
+
+export interface SendQuoteRequest {
+  recipientEmail?: string;
+  subject?: string;
+  message?: string;
+  accessPassword: string;
+}
+
+export interface PublicQuote {
+  companyName: string;
+  logoUrl?: string;
+  primaryColor: string;
+  supportEmail?: string;
+  phone?: string;
+  quote: QuoteRecord;
 }
 
 export interface CancelWorkOrderRequest {

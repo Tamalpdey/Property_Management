@@ -20,6 +20,21 @@ export class EmailTemplateService {
       .pipe(map((response) => response.data));
   }
 
+  quoteClient() {
+    return this.http.get<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/quote-client`)
+      .pipe(map(response => response.data));
+  }
+
+  updateQuoteClient(request: UpdateEmailTemplateRequest) {
+    return this.http.put<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/quote-client`, request)
+      .pipe(map(response => response.data));
+  }
+
+  resetQuoteClient() {
+    return this.http.post<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/quote-client/reset`, {})
+      .pipe(map(response => response.data));
+  }
+
   updateInvoiceOwner(request: UpdateEmailTemplateRequest) {
     return this.http
       .put<ApiResponse<EmailTemplateRecord>>(`${environment.apiBaseUrl}/tenant/email-templates/invoice-owner`, request)

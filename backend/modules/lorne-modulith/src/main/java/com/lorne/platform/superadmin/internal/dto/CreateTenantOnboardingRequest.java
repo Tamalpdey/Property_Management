@@ -29,6 +29,7 @@ public record CreateTenantOnboardingRequest(
         @Size(max = 7) String themeAccentColor,
         @Size(max = 7) String themeNavigationColor,
         @Size(max = 120) String loginHeadline,
-        @Size(max = 300) String loginMessage
+        @Size(max = 300) String loginMessage,
+        boolean quoteManagementEnabled
 ) {
 }

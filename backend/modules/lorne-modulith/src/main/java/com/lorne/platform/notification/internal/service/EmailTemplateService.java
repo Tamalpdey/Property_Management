@@ -18,6 +18,26 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class EmailTemplateService implements EmailTemplateOperations {
     private static final String DEFAULT_INVOICE_SUBJECT = "Invoice {{invoiceNumber}} for {{propertyName}}";
+    private static final String DEFAULT_QUOTE_SUBJECT = "Quote {{quoteNumber}}: {{quoteTitle}}";
+    private static final String DEFAULT_QUOTE_BODY = """
+            <div style="background:#f4f7fb;padding:28px;font-family:Arial,sans-serif;color:#0f172a;">
+              <div style="max-width:680px;margin:auto;background:#ffffff;border:1px solid #dbe4ef;border-top:6px solid {{tenantPrimaryColor}};">
+                <div style="padding:24px;">
+                  {{tenantLogoBlock}}
+                  <p style="color:{{tenantPrimaryColor}};font-weight:bold;">{{tenantName}}</p>
+                  <h1 style="font-size:26px;">Quote {{quoteNumber}}</h1>
+                  <p>Hello {{clientName}},</p>
+                  <p>{{message}}</p>
+                  <h2 style="font-size:18px;">{{quoteTitle}}</h2>
+                  <p>{{propertyName}}<br>{{propertyAddress}}</p>
+                  <p><strong>Total: {{quoteTotal}}</strong><br>Valid until: {{validUntil}}</p>
+                  {{quoteLinkBlock}}
+                  <p>The quote PDF is attached. Enter the access password provided separately by the sender to review and respond.</p>
+                  <p>Thank you,<br>{{tenantName}}<br>{{tenantPhone}}<br>{{tenantEmail}}</p>
+                </div>
+              </div>
+            </div>
+            """;
     private static final String DEFAULT_INVOICE_BODY = """
             Hello {{ownerName}},
 
@@ -128,6 +148,21 @@ public class EmailTemplateService implements EmailTemplateOperations {
         );
     }
 
+    @Transactional
+    public EmailTemplateDto quoteTemplate(UUID tenantId, UUID actorUserId) {
+        return toDto(ensureDefaultQuoteTemplate(tenantId, actorUserId));
+    }
+
+    @Transactional
+    public EmailTemplateDto updateQuoteTemplate(UUID tenantId, UUID actorUserId, UpdateEmailTemplateRequest request) {
+        return updateTemplate(tenantId, actorUserId, QUOTE_CLIENT_TEMPLATE_KEY, request);
+    }
+
+    @Transactional
+    public EmailTemplateDto resetQuoteTemplate(UUID tenantId, UUID actorUserId) {
+        return resetTemplate(tenantId, actorUserId, QUOTE_CLIENT_TEMPLATE_KEY, DEFAULT_QUOTE_SUBJECT, DEFAULT_QUOTE_BODY);
+    }
+
     private EmailTemplateDto updateTemplate(UUID tenantId, UUID actorUserId, String templateKey, UpdateEmailTemplateRequest request) {
         var subject = blankToNull(request.subject());
         var body = blankToNull(request.body());
@@ -170,6 +205,7 @@ public class EmailTemplateService implements EmailTemplateOperations {
         return switch (templateKey) {
             case INVOICE_OWNER_TEMPLATE_KEY -> ensureDefaultInvoiceTemplate(tenantId, actorUserId);
             case WORK_ORDER_COMPLETED_OWNER_TEMPLATE_KEY -> ensureDefaultWorkOrderCompletedTemplate(tenantId, actorUserId);
+            case QUOTE_CLIENT_TEMPLATE_KEY -> ensureDefaultQuoteTemplate(tenantId, actorUserId);
             default -> throw new BadRequestException("Unsupported email template.");
         };
     }
@@ -198,6 +234,13 @@ public class EmailTemplateService implements EmailTemplateOperations {
                 DEFAULT_WORK_ORDER_COMPLETED_SUBJECT,
                 DEFAULT_WORK_ORDER_COMPLETED_BODY
         );
+    }
+
+    @Transactional
+    @Override
+    public EmailTemplateView ensureDefaultQuoteTemplate(UUID tenantId, UUID actorUserId) {
+        return ensureDefaultTemplate(tenantId, actorUserId, QUOTE_CLIENT_TEMPLATE_KEY,
+                "Quote client email", DEFAULT_QUOTE_SUBJECT, DEFAULT_QUOTE_BODY);
     }
 
     private EmailTemplateView ensureDefaultTemplate(

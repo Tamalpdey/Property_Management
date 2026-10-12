@@ -5,6 +5,7 @@ import com.lorne.platform.shared.security.JwtPrincipal;
 import com.lorne.platform.superadmin.internal.dto.CreateTenantOnboardingRequest;
 import com.lorne.platform.superadmin.internal.dto.SuperAdminTenantSummary;
 import com.lorne.platform.superadmin.internal.dto.TenantOnboardingResponse;
+import com.lorne.platform.superadmin.internal.dto.UpdateTenantModuleRequest;
 import com.lorne.platform.superadmin.internal.service.TenantOnboardingService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -12,6 +13,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -38,5 +41,16 @@ class SuperAdminTenantController {
             @Valid @RequestBody CreateTenantOnboardingRequest request
     ) {
         return ApiResponse.ok(tenantOnboardingService.create(principal.userId(), request));
+    }
+
+    @PatchMapping("/{tenantId}/modules/{moduleCode}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    ApiResponse<SuperAdminTenantSummary> updateModule(
+            @AuthenticationPrincipal JwtPrincipal principal,
+            @PathVariable java.util.UUID tenantId,
+            @PathVariable String moduleCode,
+            @RequestBody UpdateTenantModuleRequest request
+    ) {
+        return ApiResponse.ok(tenantOnboardingService.updateModule(principal.userId(), tenantId, moduleCode, request.enabled()));
     }
 }

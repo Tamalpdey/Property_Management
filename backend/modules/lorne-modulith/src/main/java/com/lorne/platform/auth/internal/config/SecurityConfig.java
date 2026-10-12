@@ -82,6 +82,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/maintenance-requests").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/quotes/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/quotes/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/tenant-branding").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/tenant-domains/allow").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/profile-photo/**").permitAll()
@@ -106,7 +108,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(parseAllowedOrigins());
         configuration.setAllowedOriginPatterns(parseCommaSeparated(allowedOriginPatterns));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "X-Request-Source"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "X-Request-Source", "X-Quote-Password"));
         configuration.setExposedHeaders(List.of("Content-Disposition", "Location"));
         configuration.setAllowCredentials(false);
         configuration.setMaxAge(3600L);

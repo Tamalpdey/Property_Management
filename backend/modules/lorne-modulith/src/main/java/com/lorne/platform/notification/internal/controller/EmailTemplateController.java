@@ -64,4 +64,23 @@ class EmailTemplateController {
     ApiResponse<EmailTemplateDto> resetWorkOrderCompletedTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
         return ApiResponse.ok(emailTemplateService.resetWorkOrderCompletedTemplate(principal.tenantId(), principal.userId()));
     }
+
+    @GetMapping("/quote-client")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<EmailTemplateDto> quoteTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(emailTemplateService.quoteTemplate(principal.tenantId(), principal.userId()));
+    }
+
+    @PutMapping("/quote-client")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<EmailTemplateDto> updateQuoteTemplate(@AuthenticationPrincipal JwtPrincipal principal,
+                                                    @RequestBody UpdateEmailTemplateRequest request) {
+        return ApiResponse.ok(emailTemplateService.updateQuoteTemplate(principal.tenantId(), principal.userId(), request));
+    }
+
+    @PostMapping("/quote-client/reset")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<EmailTemplateDto> resetQuoteTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(emailTemplateService.resetQuoteTemplate(principal.tenantId(), principal.userId()));
+    }
 }

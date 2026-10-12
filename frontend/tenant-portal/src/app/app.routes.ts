@@ -1,7 +1,12 @@
 import { Routes } from '@angular/router';
 import { authGuard, roleGuard } from './core/services/auth.guard';
+import { quoteModuleGuard } from './features/quotes/quote-module.guard';
 
 export const appRoutes: Routes = [
+  {
+    path: 'quote-response/:token',
+    loadComponent: () => import('./features/quotes/public-quote-response.component').then((m) => m.PublicQuoteResponseComponent)
+  },
   {
     path: 'login',
     loadComponent: () => import('./features/login/login.component').then((m) => m.LoginComponent)
@@ -85,6 +90,11 @@ export const appRoutes: Routes = [
         path: 'email-audit',
         canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/notifications/email-audit-page.component').then((m) => m.EmailAuditPageComponent)
+      },
+      {
+        path: 'quotes',
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE']), quoteModuleGuard],
+        loadComponent: () => import('./features/quotes/quote-page.component').then((m) => m.QuotePageComponent)
       },
       {
         path: 'invoices',

@@ -6,10 +6,13 @@ import java.util.UUID;
 public interface EmailTemplateOperations {
     String INVOICE_OWNER_TEMPLATE_KEY = "INVOICE_OWNER";
     String WORK_ORDER_COMPLETED_OWNER_TEMPLATE_KEY = "WORK_ORDER_COMPLETED_OWNER";
+    String QUOTE_CLIENT_TEMPLATE_KEY = "QUOTE_CLIENT";
 
     EmailTemplateView ensureDefaultInvoiceTemplate(UUID tenantId, UUID actorUserId);
 
     EmailTemplateView ensureDefaultWorkOrderCompletedTemplate(UUID tenantId, UUID actorUserId);
+
+    EmailTemplateView ensureDefaultQuoteTemplate(UUID tenantId, UUID actorUserId);
 
     EmailTemplateView template(UUID tenantId, String templateKey);
 

@@ -60,7 +60,8 @@ public record TenantSettingsView(
         String graphSenderUser,
         boolean autoSendWorkCompletedEmail,
         boolean autoSendInvoiceEmail,
-        boolean liveWorkerTrackingEnabled
+        boolean liveWorkerTrackingEnabled,
+        boolean quoteManagementEnabled
 ) {
     public String invoiceBrandName() {
         return firstNonBlank(organizationName, tenantName, legalName, "Lorne PropertyOps");

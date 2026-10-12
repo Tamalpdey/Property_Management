@@ -1,13 +1,14 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
 import type { EmailTemplateRecord } from '@lorne/contracts';
 import { EmailTemplateService } from './services/email-template.service';
+import { TenantSettingsService } from '../settings/services/tenant-settings.service';
 
-type TemplateSlug = 'invoice-owner' | 'work-order-completed-owner';
+type TemplateSlug = 'invoice-owner' | 'work-order-completed-owner' | 'quote-client';
 
 interface TemplateOption {
   slug: TemplateSlug;
@@ -35,7 +36,7 @@ interface VariableGroup {
             <p-tag value="Administration" severity="info" />
             <h1 class="text-xl font-bold text-slate-950 md:text-2xl">Email templates</h1>
           </div>
-          <button pButton type="button" severity="secondary" icon="pi pi-refresh" label="Refresh" [loading]="loading()" (click)="loadSelected(true)"></button>
+          <button pButton type="button" severity="secondary" icon="pi pi-refresh" label="Refresh" [loading]="loading()" [disabled]="saving() || resetting()" (click)="loadSelected(true)"></button>
         </div>
       </div>
 
@@ -49,7 +50,7 @@ interface VariableGroup {
       <section class="grid gap-3 lg:grid-cols-[20rem_1fr]">
         <aside class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
           <div class="grid gap-2">
-            @for (option of templateOptions; track option.slug) {
+            @for (option of visibleTemplateOptions(); track option.slug) {
               <button
                 type="button"
                 class="w-full rounded-lg border px-3 py-3 text-left transition"
@@ -57,6 +58,7 @@ interface VariableGroup {
                 [class.bg-teal-50]="activeTemplate() === option.slug"
                 [class.border-slate-200]="activeTemplate() !== option.slug"
                 [class.bg-white]="activeTemplate() !== option.slug"
+                [disabled]="loading() || saving() || resetting()"
                 (click)="selectTemplate(option.slug)"
               >
                 <span class="block text-xs font-black uppercase tracking-wide text-teal-700">{{ option.eyebrow }}</span>
@@ -81,12 +83,12 @@ interface VariableGroup {
 
           <label class="mt-3 block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Subject</span>
-            <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="form.subject" />
+            <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="form.subject" [disabled]="loading() || saving() || resetting()" />
           </label>
 
           <label class="mt-3 block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Body</span>
-            <textarea class="min-h-96 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="form.body"></textarea>
+            <textarea class="min-h-96 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="form.body" [disabled]="loading() || saving() || resetting()"></textarea>
           </label>
 
           <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -107,6 +109,7 @@ interface VariableGroup {
                         type="button"
                         class="rounded-full border border-teal-100 bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800 transition hover:border-teal-300 hover:bg-teal-100"
                         (click)="insertVariable(variable)"
+                        [disabled]="loading() || saving() || resetting()"
                       >
                         {{ '{{' + variable + '}}' }}
                       </button>
@@ -118,8 +121,8 @@ interface VariableGroup {
           </div>
 
           <div class="mt-3 flex justify-end gap-2">
-            <button pButton type="button" severity="secondary" label="Reset to latest default" [loading]="resetting()" (click)="reset()"></button>
-            <button pButton type="submit" icon="pi pi-save" label="Save template" [loading]="saving()"></button>
+            <button pButton type="button" severity="secondary" label="Reset to latest default" [loading]="resetting()" [disabled]="loading() || saving()" (click)="reset()"></button>
+            <button pButton type="submit" icon="pi pi-save" label="Save template" [loading]="saving()" [disabled]="loading() || resetting()" ></button>
           </div>
         </form>
       </section>
@@ -128,7 +131,19 @@ interface VariableGroup {
 })
 export class EmailTemplatePageComponent {
   private readonly emailTemplateService = inject(EmailTemplateService);
+  private readonly settingsService = inject(TenantSettingsService);
+  protected readonly quotesEnabled = signal(false);
+  protected readonly visibleTemplateOptions = computed(() => this.templateOptions.filter(option => option.slug !== 'quote-client' || this.quotesEnabled()));
   protected readonly templateOptions: TemplateOption[] = [
+    {
+      slug: 'quote-client', label: 'Quote client email', description: 'Quote PDF and protected client review link.', eyebrow: 'Quote',
+      variableGroups: [
+        { label: 'Tenant branding', variables: ['tenantName', 'tenantLogoBlock', 'tenantLogoUrl', 'tenantPrimaryColor', 'tenantAccentColor', 'tenantPhone', 'tenantEmail'] },
+        { label: 'Client and property', variables: ['clientName', 'clientEmail', 'propertyName', 'propertyAddress', 'serviceName'] },
+        { label: 'Quote', variables: ['quoteNumber', 'quoteTitle', 'quoteScope', 'quoteNotes', 'quoteTerms', 'quoteSubtotal', 'quoteTax', 'quoteTotal', 'issuedOn', 'validUntil'] },
+        { label: 'Client review', variables: ['message', 'quoteLink', 'quoteLinkBlock'] }
+      ]
+    },
     {
       slug: 'invoice-owner',
       label: 'Owner invoice email',
@@ -185,7 +200,8 @@ export class EmailTemplatePageComponent {
   protected readonly activeTemplate = signal<TemplateSlug>('invoice-owner');
   protected readonly templates = signal<Record<TemplateSlug, EmailTemplateRecord | null>>({
     'invoice-owner': null,
-    'work-order-completed-owner': null
+    'work-order-completed-owner': null,
+    'quote-client': null
   });
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
@@ -195,6 +211,7 @@ export class EmailTemplatePageComponent {
   protected readonly form = { subject: '', body: '' };
 
   constructor() {
+    void firstValueFrom(this.settingsService.get()).then(settings => this.quotesEnabled.set(settings.quoteManagementEnabled)).catch(() => undefined);
     void this.loadSelected();
   }
 
@@ -207,6 +224,7 @@ export class EmailTemplatePageComponent {
   }
 
   protected async selectTemplate(slug: TemplateSlug): Promise<void> {
+    if (this.loading() || this.saving() || this.resetting()) return;
     this.activeTemplate.set(slug);
     this.message.set('');
     const cached = this.template();
@@ -218,6 +236,7 @@ export class EmailTemplatePageComponent {
   }
 
   protected async loadSelected(force = false): Promise<void> {
+    const slug = this.activeTemplate();
     if (!force && this.template()) {
       this.populate(this.template() as EmailTemplateRecord);
       return;
@@ -226,12 +245,12 @@ export class EmailTemplatePageComponent {
     this.error.set('');
     try {
       const template = await firstValueFrom(
-        this.activeTemplate() === 'invoice-owner'
+        slug === 'invoice-owner'
           ? this.emailTemplateService.invoiceOwner()
-          : this.emailTemplateService.workOrderCompletedOwner()
+          : slug === 'quote-client' ? this.emailTemplateService.quoteClient() : this.emailTemplateService.workOrderCompletedOwner()
       );
-      this.templates.update((templates) => ({ ...templates, [this.activeTemplate()]: template }));
-      this.populate(template);
+      this.templates.update((templates) => ({ ...templates, [slug]: template }));
+      if (this.activeTemplate() === slug) this.populate(template);
     } catch (exception) {
       this.error.set(apiErrorMessage(exception, 'Unable to load email template.'));
     } finally {
@@ -248,7 +267,7 @@ export class EmailTemplatePageComponent {
   }
 
   protected async reset(): Promise<void> {
-    if (this.resetting()) {
+    if (this.resetting() || this.loading() || this.saving()) {
       return;
     }
     if (!window.confirm('Reset this template to the latest default copy? This will replace the current subject and body.')) {
@@ -261,7 +280,7 @@ export class EmailTemplatePageComponent {
       const template = await firstValueFrom(
         this.activeTemplate() === 'invoice-owner'
           ? this.emailTemplateService.resetInvoiceOwner()
-          : this.emailTemplateService.resetWorkOrderCompletedOwner()
+          : this.activeTemplate() === 'quote-client' ? this.emailTemplateService.resetQuoteClient() : this.emailTemplateService.resetWorkOrderCompletedOwner()
       );
       this.templates.update((templates) => ({ ...templates, [this.activeTemplate()]: template }));
       this.populate(template);
@@ -274,7 +293,7 @@ export class EmailTemplatePageComponent {
   }
 
   protected async save(): Promise<void> {
-    if (this.saving()) {
+    if (this.saving() || this.loading() || this.resetting()) {
       return;
     }
     this.saving.set(true);
@@ -284,7 +303,7 @@ export class EmailTemplatePageComponent {
       const template = await firstValueFrom(
         this.activeTemplate() === 'invoice-owner'
           ? this.emailTemplateService.updateInvoiceOwner(this.form)
-          : this.emailTemplateService.updateWorkOrderCompletedOwner(this.form)
+          : this.activeTemplate() === 'quote-client' ? this.emailTemplateService.updateQuoteClient(this.form) : this.emailTemplateService.updateWorkOrderCompletedOwner(this.form)
       );
       this.templates.update((templates) => ({ ...templates, [this.activeTemplate()]: template }));
       this.populate(template);

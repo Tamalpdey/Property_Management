@@ -81,7 +81,11 @@ public class TenantSettingsService implements TenantSettingsOperations {
                        ts.graph_sender_user,
                        coalesce(ts.auto_send_work_completed_email, false) AS auto_send_work_completed_email,
                        coalesce(ts.auto_send_invoice_email, false) AS auto_send_invoice_email,
-                       coalesce(ts.live_worker_tracking_enabled, false) AS live_worker_tracking_enabled
+                       coalesce(ts.live_worker_tracking_enabled, false) AS live_worker_tracking_enabled,
+                       EXISTS (
+                           SELECT 1 FROM tenant_modules tm
+                           WHERE tm.tenant_id = t.id AND tm.module_code = 'QUOTES' AND tm.enabled = true
+                       ) AS quote_management_enabled
                 FROM tenants t
                 LEFT JOIN tenant_settings ts ON ts.tenant_id = t.id
                 WHERE t.id = ?
@@ -357,7 +361,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 rs.getString("graph_sender_user"),
                 rs.getBoolean("auto_send_work_completed_email"),
                 rs.getBoolean("auto_send_invoice_email"),
-                rs.getBoolean("live_worker_tracking_enabled")
+                rs.getBoolean("live_worker_tracking_enabled"),
+                rs.getBoolean("quote_management_enabled")
         );
     }
 
@@ -420,7 +425,8 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 settings.graphSenderUser(),
                 settings.autoSendWorkCompletedEmail(),
                 settings.autoSendInvoiceEmail(),
-                settings.liveWorkerTrackingEnabled()
+                settings.liveWorkerTrackingEnabled(),
+                settings.quoteManagementEnabled()
         );
     }
 

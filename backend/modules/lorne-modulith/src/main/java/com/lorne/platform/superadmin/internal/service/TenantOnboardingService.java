@@ -54,7 +54,11 @@ public class TenantOnboardingService {
                         FROM user_tenant_roles utr
                         JOIN app_users u ON u.id = utr.user_id AND u.status = 'ACTIVE'
                         WHERE utr.tenant_id = t.id) AS active_users,
-                       (SELECT count(*)::int FROM properties p WHERE p.tenant_id = t.id AND p.active = true) AS active_properties
+                       (SELECT count(*)::int FROM properties p WHERE p.tenant_id = t.id AND p.active = true) AS active_properties,
+                       EXISTS (
+                           SELECT 1 FROM tenant_modules tm
+                           WHERE tm.tenant_id = t.id AND tm.module_code = 'QUOTES' AND tm.enabled = true
+                       ) AS quote_management_enabled
                 FROM tenants t
                 ORDER BY t.created_at DESC, t.display_name
                 """, (rs, rowNum) -> new SuperAdminTenantSummary(
@@ -70,6 +74,7 @@ public class TenantOnboardingService {
                 rs.getString("administrator_email"),
                 rs.getInt("active_users"),
                 rs.getInt("active_properties"),
+                rs.getBoolean("quote_management_enabled"),
                 rs.getTimestamp("created_at").toInstant()
         ));
     }
@@ -139,6 +144,10 @@ public class TenantOnboardingService {
                 throw new IllegalStateException("Tenant administrator role is not configured.");
             }
 
+            if (request.quoteManagementEnabled()) {
+                setModuleEnabled(tenantId, actorUserId, "QUOTES", true);
+            }
+
             auditWriter.record(tenantId, actorUserId, "TENANT_ONBOARDED", "TENANT", tenantId, Map.of(
                     "displayName", request.displayName().trim(),
                     "portalSubdomain", portalSubdomain,
@@ -156,6 +165,34 @@ public class TenantOnboardingService {
     private boolean emailExists(String email) {
         var count = jdbcTemplate.queryForObject("SELECT count(*)::int FROM app_users WHERE lower(email) = lower(?)", Integer.class, email);
         return count != null && count > 0;
+    }
+
+    @Transactional
+    public SuperAdminTenantSummary updateModule(UUID actorUserId, UUID tenantId, String moduleCode, boolean enabled) {
+        var normalizedCode = moduleCode == null ? "" : moduleCode.trim().toUpperCase(Locale.ROOT);
+        if (!"QUOTES".equals(normalizedCode)) {
+            throw new BadRequestException("Unknown tenant module.");
+        }
+        var tenantCount = jdbcTemplate.queryForObject("SELECT count(*)::int FROM tenants WHERE id = ?", Integer.class, tenantId);
+        if (tenantCount == null || tenantCount == 0) {
+            throw new BadRequestException("Tenant not found.");
+        }
+        setModuleEnabled(tenantId, actorUserId, normalizedCode, enabled);
+        auditWriter.record(tenantId, actorUserId, enabled ? "TENANT_MODULE_ENABLED" : "TENANT_MODULE_DISABLED", "TENANT", tenantId,
+                Map.of("moduleCode", normalizedCode));
+        return list().stream().filter(tenant -> tenant.id().equals(tenantId)).findFirst().orElseThrow();
+    }
+
+    private void setModuleEnabled(UUID tenantId, UUID actorUserId, String moduleCode, boolean enabled) {
+        jdbcTemplate.update("""
+                INSERT INTO tenant_modules (tenant_id, module_code, enabled, enabled_at, enabled_by, updated_at)
+                VALUES (?, ?, ?, CASE WHEN ? THEN now() ELSE NULL END, CASE WHEN ? THEN ? ELSE NULL END, now())
+                ON CONFLICT (tenant_id, module_code)
+                DO UPDATE SET enabled = excluded.enabled,
+                              enabled_at = CASE WHEN excluded.enabled THEN now() ELSE tenant_modules.enabled_at END,
+                              enabled_by = CASE WHEN excluded.enabled THEN excluded.enabled_by ELSE tenant_modules.enabled_by END,
+                              updated_at = now()
+                """, tenantId, moduleCode, enabled, enabled, enabled, actorUserId);
     }
 
     private String normalizeSubdomain(String value) {

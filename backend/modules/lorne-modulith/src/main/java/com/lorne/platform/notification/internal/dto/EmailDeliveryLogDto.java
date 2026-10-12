@@ -21,6 +21,8 @@ public record EmailDeliveryLogDto(
         String status,
         String providerMessage,
         Instant sentAt,
-        Instant createdAt
+        Instant createdAt,
+        UUID quoteId,
+        String quoteNumber
 ) {
 }

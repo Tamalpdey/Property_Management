@@ -217,6 +217,12 @@ export class TenantShellComponent {
       ]
     },
     {
+      label: 'Sales',
+      items: [
+        { label: 'Quotes', path: '/quotes', icon: 'pi pi-file-edit', feature: 'QUOTES' }
+      ]
+    },
+    {
       label: 'Finance',
       items: [
         { label: 'Finance overview', path: '/finance', icon: 'pi pi-dollar', roles: ['TENANT_ADMIN', 'FINANCE'] },
@@ -262,7 +268,9 @@ export class TenantShellComponent {
   }
 
   private canAccess(item: TenantNavItem): boolean {
-    return !item.roles || this.auth.hasAnyRole(item.roles);
+    const roleAllowed = !item.roles || this.auth.hasAnyRole(item.roles);
+    const featureAllowed = item.feature !== 'QUOTES' || this.tenantSettings()?.quoteManagementEnabled === true;
+    return roleAllowed && featureAllowed;
   }
 
   signOut(): void {
@@ -314,4 +322,5 @@ interface TenantNavItem {
   path: string;
   icon: string;
   roles?: CurrentUser['roles'];
+  feature?: 'QUOTES';
 }

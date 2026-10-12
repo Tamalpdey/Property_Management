@@ -24,4 +24,13 @@ export class SuperAdminTenantService {
       .post<ApiResponse<TenantOnboardingResult>>(`${environment.apiBaseUrl}/superadmin/tenants`, request)
       .pipe(map((response) => response.data));
   }
+
+  updateModule(tenantId: string, moduleCode: 'QUOTES', enabled: boolean) {
+    return this.http
+      .patch<ApiResponse<SuperAdminTenantSummary>>(
+        `${environment.apiBaseUrl}/superadmin/tenants/${tenantId}/modules/${moduleCode}`,
+        { enabled }
+      )
+      .pipe(map((response) => response.data));
+  }
 }

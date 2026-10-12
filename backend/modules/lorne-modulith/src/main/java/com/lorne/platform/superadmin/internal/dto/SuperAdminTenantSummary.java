@@ -16,6 +16,7 @@ public record SuperAdminTenantSummary(
         String administratorEmail,
         int activeUsers,
         int activeProperties,
+        boolean quoteManagementEnabled,
         Instant createdAt
 ) {
 }

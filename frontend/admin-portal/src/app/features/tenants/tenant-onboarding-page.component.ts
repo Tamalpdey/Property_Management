@@ -225,6 +225,13 @@ import { SuperAdminTenantService } from './services/super-admin-tenant.service';
                     <span>Login message</span>
                     <textarea name="loginMessage" [(ngModel)]="form.loginMessage" rows="3"></textarea>
                   </label>
+                  <label class="md:col-span-3 flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <input class="mt-1 h-4 w-4" type="checkbox" name="quoteManagementEnabled" [(ngModel)]="form.quoteManagementEnabled" />
+                    <span>
+                      <strong class="block text-sm text-slate-950">Quote management</strong>
+                      <small class="mt-1 block text-xs leading-5 text-slate-600">Prepare and send quotes for client approval, then convert approved quotes into work orders.</small>
+                    </span>
+                  </label>
                 </div>
 
                 <div class="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
@@ -325,7 +332,7 @@ import { SuperAdminTenantService } from './services/super-admin-tenant.service';
           <div class="overflow-x-auto">
             <table class="w-full min-w-[820px] border-collapse text-left text-sm">
               <thead class="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr><th>Tenant</th><th>Portal</th><th>Administrator</th><th>Usage</th><th>Status</th><th>Created</th></tr>
+                <tr><th>Tenant</th><th>Portal</th><th>Administrator</th><th>Usage</th><th>Modules</th><th>Status</th><th>Created</th></tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
                 @for (tenant of filteredTenants(); track tenant.id) {
@@ -334,6 +341,17 @@ import { SuperAdminTenantService } from './services/super-admin-tenant.service';
                     <td><strong>{{ tenant.portalSubdomain }}</strong><small>{{ tenant.planCode }} · {{ tenant.timezone }}</small></td>
                     <td>{{ tenant.administratorEmail || 'Not assigned' }}</td>
                     <td><strong>{{ tenant.activeUsers }}</strong> users · <strong>{{ tenant.activeProperties }}</strong> properties</td>
+                    <td>
+                      <label class="inline-flex items-center gap-2 text-xs font-bold text-slate-700">
+                        <input
+                          type="checkbox"
+                          [checked]="tenant.quoteManagementEnabled"
+                          [disabled]="moduleUpdating() === tenant.id"
+                          (change)="toggleQuotes(tenant, $any($event.target).checked)"
+                        />
+                        Quotes
+                      </label>
+                    </td>
                     <td><p-tag [value]="tenant.status" [severity]="tenant.status === 'ACTIVE' ? 'success' : 'warn'" /></td>
                     <td>{{ formatDate(tenant.createdAt) }}</td>
                   </tr>
@@ -380,6 +398,7 @@ export class TenantOnboardingPageComponent {
   protected readonly loadingTenants = signal(true);
   protected readonly error = signal('');
   protected readonly created = signal<TenantOnboardingResult | null>(null);
+  protected readonly moduleUpdating = signal('');
   protected readonly tenants = signal<SuperAdminTenantSummary[]>([]);
   protected readonly activeTenantCount = computed(() => this.tenants().filter((tenant) => tenant.status === 'ACTIVE').length);
   protected search = '';
@@ -498,6 +517,20 @@ export class TenantOnboardingPageComponent {
     await navigator.clipboard.writeText(handoff);
   }
 
+  protected async toggleQuotes(tenant: SuperAdminTenantSummary, enabled: boolean): Promise<void> {
+    if (this.moduleUpdating()) return;
+    this.moduleUpdating.set(tenant.id);
+    this.error.set('');
+    try {
+      const updated = await firstValueFrom(this.tenantService.updateModule(tenant.id, 'QUOTES', enabled));
+      this.tenants.update((items) => items.map((item) => item.id === tenant.id ? updated : item));
+    } catch (error) {
+      this.error.set(this.errorMessage(error));
+    } finally {
+      this.moduleUpdating.set('');
+    }
+  }
+
   private async loadTenants(): Promise<void> {
     this.loadingTenants.set(true);
     try {
@@ -545,7 +578,8 @@ export class TenantOnboardingPageComponent {
       adminEmail: '', adminPhone: '', temporaryPassword: '', billingEmail: '', supportEmail: '',
       companyPhone: '', websiteUrl: '', addressLine1: '', addressLine2: '', city: '', postalCode: '',
       themePrimaryColor: '#0f766e', themeAccentColor: '#2563eb', themeNavigationColor: '#0f172a',
-      loginHeadline: 'Welcome back', loginMessage: 'Access your operations workspace.'
+      loginHeadline: 'Welcome back', loginMessage: 'Access your operations workspace.',
+      quoteManagementEnabled: false
     };
   }
 }

@@ -25,5 +25,7 @@ class SecurityConfigCorsTest {
         assertThat(cors.checkOrigin("https://prs.app.example.com")).isNull();
         assertThat(cors.checkOrigin("https://app.maplepropertyservices.ca"))
                 .isEqualTo("https://app.maplepropertyservices.ca");
+        assertThat(cors.checkHeaders(java.util.List.of("X-Quote-Password", "Content-Type")))
+                .contains("X-Quote-Password", "Content-Type");
     }
 }

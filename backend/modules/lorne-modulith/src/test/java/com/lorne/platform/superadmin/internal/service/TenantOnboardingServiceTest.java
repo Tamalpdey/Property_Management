@@ -65,7 +65,7 @@ class TenantOnboardingServiceTest {
                 "North Shore Property Services Inc.", "North Shore", subdomain, "starter", status,
                 "America/Toronto", "CA", "ON", "Tenant Admin", email, null, "Password123!",
                 null, null, null, null, null, null, null, null,
-                "#0f766e", "#2563eb", "#0f172a", "Welcome back", "Access your operations workspace."
+                "#0f766e", "#2563eb", "#0f172a", "Welcome back", "Access your operations workspace.", false
         );
     }
 }

@@ -13,6 +13,10 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
     return next(request);
   }
 
+  if (request.url.startsWith(`${environment.apiBaseUrl}/public/`)) {
+    return next(request);
+  }
+
   const isAuthEndpoint = request.url.endsWith('/auth/login')
     || request.url.endsWith('/auth/refresh')
     || request.url.endsWith('/auth/logout');

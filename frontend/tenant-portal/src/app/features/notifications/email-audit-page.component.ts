@@ -283,6 +283,7 @@ export class EmailAuditPageComponent {
   }
 
   protected emailTypeLabel(type: string): string {
+    if (type === 'QUOTE_EMAIL') return 'Quote email';
     if (type === 'INVOICE_EMAIL') {
       return 'Invoice email';
     }
@@ -296,7 +297,7 @@ export class EmailAuditPageComponent {
   }
 
   protected relatedLabel(log: EmailDeliveryLogRecord): string {
-    return log.invoiceNumber || log.workOrderNumber || 'Tenant email';
+    return log.quoteNumber || log.invoiceNumber || log.workOrderNumber || 'Tenant email';
   }
 
   protected emailStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
