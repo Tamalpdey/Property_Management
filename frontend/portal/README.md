@@ -1,4 +1,4 @@
-# Maple public website (frontend-new)
+# Maple public website (frontend/portal)
 
 The public marketing site for maplepropertyservices.ca, rebuilt from the approved design prototype
 (Concept B). This project is **only the public website**. The tenant portal, admin portal and worker

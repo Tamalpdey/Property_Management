@@ -9,3 +9,5 @@
 **/.env
 **/.env.*
 **/.git
+portal/.next
+portal/out
