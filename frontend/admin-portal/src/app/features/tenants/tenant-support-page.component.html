@@ -1,0 +1,128 @@
+<section class="workspace">
+  <header class="heading">
+    <div class="min-width">
+      <a routerLink="/tenants" class="back-link"><i class="pi pi-arrow-left" aria-hidden="true"></i> Tenants</a>
+      <h1>{{ detail()?.tenant?.displayName || 'Tenant support' }}</h1>
+      @if (detail(); as current) {
+        <p class="muted">{{ current.tenant.portalSubdomain }} <span aria-hidden="true">/</span> {{ current.tenant.status }} <span aria-hidden="true">/</span> {{ current.tenant.planCode }}</p>
+      }
+    </div>
+    <div class="actions">
+      @if (detail(); as current) { <lorne-tenant-access-button [tenant]="current.tenant" (changed)="load()" /> }
+      <a pButton severity="secondary" icon="pi pi-ticket" label="Tickets" routerLink="/support-tickets" [queryParams]="{ tenantId: detail()?.tenant?.id }"></a>
+      <a pButton severity="secondary" icon="pi pi-history" label="Audit log" routerLink="/audit" [queryParams]="{ tenantId: detail()?.tenant?.id }"></a>
+      <button pButton severity="secondary" icon="pi pi-refresh" aria-label="Refresh tenant support" title="Refresh tenant support" [disabled]="loading() || saving() || noteSaving()" (click)="load()"></button>
+    </div>
+  </header>
+
+  @if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
+  @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+  @if (loading()) { <p class="empty" role="status">Loading tenant support...</p> }
+  @if (health(); as report) {
+    <div class="metrics">
+      <div><span>Active admins</span><strong [class.danger]="report.activeAdministrators === 0">{{ report.activeAdministrators }}</strong></div>
+      <div><span>Active users</span><strong>{{ report.activeUsers }}</strong></div>
+      <div><span>Active workers</span><strong>{{ report.activeWorkers }}</strong></div>
+      <div><span>Workers without app login</span><strong [class.warning-text]="report.workersWithoutLogin > 0">{{ report.workersWithoutLogin }}</strong></div>
+    </div>
+  }
+  <nav class="tabs" aria-label="Tenant support sections">
+    @for (item of tabs; track item.key) {
+      <button type="button" [class.active]="tab() === item.key" [attr.aria-current]="tab() === item.key ? 'page' : null" (click)="tab.set(item.key)"><i [class]="item.icon" aria-hidden="true"></i>{{ item.label }}</button>
+    }
+  </nav>
+
+  @if (tab() === 'overview') {
+    @if (operations(); as data) {
+      <section><div class="section-heading"><h2>Tenant activity</h2><span class="badge">{{ detail()?.tenant?.status === 'SUSPENDED' ? 'Inactive' : detail()?.tenant?.status }}</span></div>
+        <div class="metrics">
+          <div><span>Active properties</span><strong>{{ data.properties }}</strong></div><div><span>Active workers</span><strong>{{ data.activeWorkers }}</strong></div>
+          <div><span>Open work orders</span><strong>{{ data.openWorkOrders }}</strong></div><div><span>Completed work orders</span><strong>{{ data.completedWorkOrders }}</strong></div>
+        </div>
+        <div class="check-row"><div class="min-width"><h3>Support workload</h3><p>{{ data.unresolvedTickets }} unresolved / {{ data.resolvedTickets }} resolved or closed</p></div><a routerLink="/support-tickets" [queryParams]="{ tenantId: detail()?.tenant?.id }">View tickets</a></div>
+        <div class="check-row"><div><h3>Latest tenant login</h3><p>{{ data.lastLoginAt ? (data.lastLoginAt | date:'medium') : 'No login recorded' }}</p></div></div>
+      </section>
+    }
+  }
+
+  @if (tab() === 'quoteTemplates' && detail(); as current) {
+    <lorne-tenant-quote-templates [tenantId]="current.tenant.id" [enabled]="current.tenant.quoteManagementEnabled" />
+  }
+
+  @if (tab() === 'health') {
+    @if (health(); as report) {
+      <section aria-label="Setup checks">
+        <div class="section-heading"><h2>Setup checks</h2><span class="muted">Checked {{ report.checkedAt | date:'medium' }}</span></div>
+        @for (check of report.checks; track check.code) {
+          <div class="check-row">
+            <i class="check-icon pi" [class.pi-check-circle]="check.severity === 'PASS'" [class.pi-exclamation-triangle]="check.severity === 'WARNING' || check.severity === 'CRITICAL'" [class.pi-info-circle]="check.severity === 'INFO'" [class.danger]="check.severity === 'CRITICAL'" [class.warning-text]="check.severity === 'WARNING'"></i>
+            <div class="min-width"><h3>{{ check.label }}</h3><p>{{ check.detail }}</p></div>
+            <span class="badge" [class.critical]="check.severity === 'CRITICAL'" [class.warning]="check.severity === 'WARNING'" [class.pass]="check.severity === 'PASS'">{{ check.severity }}</span>
+          </div>
+        }
+      </section>
+    }
+  }
+
+  @if (tab() === 'users') {
+    <div class="toolbar">
+      <label class="search"><i class="pi pi-search"></i><input aria-label="Search tenant users" placeholder="Name, email, role" [ngModel]="query()" (ngModelChange)="query.set($event)" /></label>
+      <select aria-label="Filter user status" [ngModel]="userStatus()" (ngModelChange)="userStatus.set($event)">
+        <option value="">All statuses</option><option value="ACTIVE">Active</option><option value="DISABLED">Disabled</option><option value="INVITED">Invited</option><option value="LOCKED">Locked</option>
+      </select>
+      <span class="muted">{{ filteredUsers().length }} users</span>
+    </div>
+    <div class="table-scroll">
+      <table class="users-table">
+        <thead><tr><th>User</th><th>Tenant roles</th><th>Status</th><th>Last login</th><th>Access</th></tr></thead>
+        <tbody>
+          @for (user of filteredUsers(); track user.id) {
+            <tr>
+              <td><strong>{{ user.displayName }}</strong><small>{{ user.email }}</small>@if (user.workerName) { <small>Worker: {{ user.workerName }}</small> }</td>
+              <td><div class="role-tags">@for (role of user.roles; track role) { <span class="badge">{{ role.replaceAll('_', ' ') }}</span> }</div></td>
+              <td><span class="badge" [class.pass]="user.status === 'ACTIVE'">{{ user.status }}</span></td>
+              <td>{{ user.lastLoginAt ? (user.lastLoginAt | date:'medium') : 'Never' }}</td>
+              <td><button pButton severity="secondary" icon="pi pi-user-edit" [attr.aria-label]="'Manage access for ' + user.displayName" title="Manage portal access" [disabled]="saving() || loading()" (click)="openAccess(user)"></button></td>
+            </tr>
+          } @empty { <tr><td colspan="5" class="empty">No tenant users match these filters.</td></tr> }
+        </tbody>
+      </table>
+    </div>
+  }
+
+  @if (tab() === 'notes') {
+    <section class="notes-section">
+      <div class="section-heading"><h2>Private support notes</h2><span class="badge">Super admin only</span></div>
+      <form (ngSubmit)="addNote()" class="note-form">
+        <label for="support-note">New note</label>
+        <textarea id="support-note" name="note" rows="4" maxlength="4000" required [(ngModel)]="note" [disabled]="noteSaving()"></textarea>
+        <div class="actions end"><span class="muted">{{ note.length }} / 4000</span><button pButton type="submit" icon="pi pi-plus" label="Add note" [loading]="noteSaving()" [disabled]="!note.trim() || noteSaving()"></button></div>
+      </form>
+      @for (entry of notes(); track entry.id) {
+        <article class="note-row"><div class="section-heading"><strong>{{ entry.actorName || 'Platform administrator' }}</strong><time class="muted">{{ entry.createdAt | date:'medium' }}</time></div><p class="preserve-text">{{ entry.note }}</p></article>
+      } @empty { <p class="empty">No support notes yet.</p> }
+    </section>
+  }
+</section>
+
+<p-dialog [visible]="editing() !== null" (visibleChange)="!saving() && editing.set(null)" [modal]="true" header="Manage portal access" [style]="{ width: '560px', maxWidth: 'calc(100vw - 24px)', maxHeight: '90vh' }" [draggable]="false" [closable]="!saving()" [closeOnEscape]="!saving()">
+  @if (editing(); as user) {
+    <form class="access-form" (ngSubmit)="saveAccess()">
+      <div><h2>{{ user.displayName }}</h2><p class="muted">{{ user.email }}</p></div>
+      <fieldset><legend>Portal roles</legend>
+        @for (option of portalOptions; track option.code) {
+          <label class="checkbox-label"><input type="checkbox" [checked]="access.portalRoles.includes(option.code)" [disabled]="saving() || (option.code === 'TENANT_ADMIN' && lastAdmin(user))" (change)="toggleRole(option.code, $event)" />{{ option.label }}</label>
+        }
+      </fieldset>
+      @if (lastAdmin(user)) { <p class="warning-banner">This is the last active Tenant Admin. Assign another active administrator before removing this role.</p> }
+      @if (user.status !== 'ACTIVE') {
+        <label class="checkbox-label"><input type="checkbox" name="reactivate" [(ngModel)]="access.reactivate" [disabled]="saving()" />Reactivate login account</label>
+        <p class="warning-banner">Login status is shared across tenants. Reactivation also restores this account's access to its other tenant memberships.</p>
+      }
+      <label class="field-label" for="access-reason">Support reason <span class="muted">Required, at least 10 characters</span></label>
+      <textarea id="access-reason" name="reason" [(ngModel)]="access.reason" rows="3" minlength="10" maxlength="1000" required [disabled]="saving()"></textarea>
+      @if (editError()) { <p class="error" role="alert">{{ editError() }}</p> }
+      <div class="actions end"><button pButton type="button" severity="secondary" label="Cancel" [disabled]="saving()" (click)="editing.set(null)"></button><button pButton type="submit" icon="pi pi-shield" label="Apply access" [loading]="saving()" [disabled]="saving() || access.reason.trim().length < 10"></button></div>
+    </form>
+  }
+</p-dialog>

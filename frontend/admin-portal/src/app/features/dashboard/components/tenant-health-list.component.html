@@ -1,0 +1,135 @@
+<section>
+  <header class="heading">
+    <div>
+      <h2>Tenant accounts</h2>
+      <p>Up to 50 priority accounts</p>
+    </div>
+    <div class="heading-actions">
+      <label class="search"
+        ><i class="pi pi-search" aria-hidden="true"></i
+        ><input
+          aria-label="Search priority accounts"
+          placeholder="Search accounts"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)" /></label
+      ><a routerLink="/tenants"
+        >View all<i class="pi pi-arrow-up-right" aria-hidden="true"></i
+      ></a>
+    </div>
+  </header>
+  <div class="desktop-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Tenant</th>
+          <th>Status</th>
+          <th>Admins</th>
+          <th>Users</th>
+          <th>Support</th>
+          <th>Last login</th>
+          <th>Access</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (tenant of filtered(); track tenant.id) {
+          <tr>
+            <td>
+              <a [routerLink]="['/tenants', tenant.id, 'support']">{{
+                tenant.tenantName
+              }}</a
+              ><small>{{ tenant.subdomain }}</small>
+            </td>
+            <td>
+              <span
+                class="badge"
+                [class.inactive]="
+                  tenant.status === 'SUSPENDED' || tenant.status === 'CANCELLED'
+                "
+                >{{ label(tenant.status) }}</span
+              >
+            </td>
+            <td [class.risk]="tenant.activeAdministrators === 0">
+              {{ tenant.activeAdministrators }}
+            </td>
+            <td>{{ tenant.activeUsers }}</td>
+            <td>
+              <a
+                class="ticket-count"
+                routerLink="/support-tickets"
+                [queryParams]="{ tenantId: tenant.id, status: 'UNRESOLVED' }"
+                >{{ tenant.openTickets }} unresolved</a
+              >
+            </td>
+            <td class="last-login">
+              {{
+                tenant.lastLoginAt
+                  ? (tenant.lastLoginAt | date: "MMM d, h:mm a")
+                  : "Never"
+              }}
+            </td>
+            <td>
+              <lorne-tenant-access-button
+                [tenant]="{
+                  id: tenant.id,
+                  displayName: tenant.tenantName,
+                  status: tenant.status,
+                }"
+                (changed)="changed.emit()"
+              />
+            </td>
+          </tr>
+        } @empty {
+          <tr>
+            <td class="empty" colspan="7">No accounts match your search.</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <div class="mobile-accounts">
+    @for (tenant of filtered(); track tenant.id) {
+      <article>
+        <div class="mobile-heading">
+          <a [routerLink]="['/tenants', tenant.id, 'support']">{{
+            tenant.tenantName
+          }}</a
+          ><span
+            class="badge"
+            [class.inactive]="
+              tenant.status === 'SUSPENDED' || tenant.status === 'CANCELLED'
+            "
+            >{{ label(tenant.status) }}</span
+          >
+        </div>
+        <small>{{ tenant.subdomain }}</small>
+        <div class="mobile-meta">
+          <span [class.risk]="!tenant.activeAdministrators"
+            >{{ tenant.activeAdministrators }} admins</span
+          ><span>{{ tenant.activeUsers }} users</span
+          ><a
+            routerLink="/support-tickets"
+            [queryParams]="{ tenantId: tenant.id, status: 'UNRESOLVED' }"
+            >{{ tenant.openTickets }} tickets</a
+          >
+        </div>
+        <div class="mobile-footer">
+          <span class="last-login">{{
+            tenant.lastLoginAt
+              ? (tenant.lastLoginAt | date: "MMM d, h:mm a")
+              : "No login recorded"
+          }}</span
+          ><lorne-tenant-access-button
+            [tenant]="{
+              id: tenant.id,
+              displayName: tenant.tenantName,
+              status: tenant.status,
+            }"
+            (changed)="changed.emit()"
+          />
+        </div>
+      </article>
+    } @empty {
+      <p class="empty">No accounts match your search.</p>
+    }
+  </div>
+</section>

@@ -8,6 +8,7 @@ import type { TenantLoginBrandingRecord } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
 import { TenantLoginBrandingService } from './tenant-login-branding.service';
+import { TenantThemeService } from '../../core/services/tenant-theme.service';
 
 @Component({
   selector: 'lorne-login',
@@ -25,11 +26,11 @@ import { TenantLoginBrandingService } from './tenant-login-branding.service';
       position: relative;
       isolation: isolate;
       background:
-        linear-gradient(rgba(15, 118, 110, 0.045) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(15, 118, 110, 0.045) 1px, transparent 1px),
-        linear-gradient(135deg, rgba(15, 118, 110, 0.10), transparent 28rem),
-        linear-gradient(315deg, rgba(14, 165, 233, 0.07), transparent 30rem),
-        linear-gradient(180deg, #f8fbfa 0%, #eef5f7 100%);
+        linear-gradient(color-mix(in srgb, var(--login-primary) 5%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--login-primary) 5%, transparent) 1px, transparent 1px),
+        linear-gradient(135deg, color-mix(in srgb, var(--login-primary) 10%, transparent), transparent 28rem),
+        linear-gradient(315deg, color-mix(in srgb, var(--login-accent) 7%, transparent), transparent 30rem),
+        linear-gradient(180deg, #f8fbfa 0%, var(--login-page) 100%);
       background-size: 42px 42px, 42px 42px, auto, auto, auto;
     }
 
@@ -45,7 +46,7 @@ import { TenantLoginBrandingService } from './tenant-login-branding.service';
       position: absolute;
       z-index: -1;
       clip-path: polygon(50% 0, 58% 19%, 78% 8%, 72% 31%, 96% 31%, 76% 47%, 86% 70%, 60% 61%, 56% 90%, 50% 72%, 44% 90%, 40% 61%, 14% 70%, 24% 47%, 4% 31%, 28% 31%, 22% 8%, 42% 19%);
-      background: rgba(15, 118, 110, 0.055);
+      background: color-mix(in srgb, var(--login-primary) 6%, transparent);
       pointer-events: none;
     }
 
@@ -101,10 +102,10 @@ import { TenantLoginBrandingService } from './tenant-login-branding.service';
       <section class="w-full max-w-5xl" [class.login-shell-focused]="branding()?.loginStyle && branding()?.loginStyle !== 'SPLIT'">
         <header class="mb-5 flex items-center justify-between gap-4">
           <div class="flex items-center gap-3">
-            @if (branding()?.logoUrl) {
-              <span class="grid h-11 w-14 shrink-0 place-items-center rounded-lg bg-white p-1 ring-1 ring-slate-200"><img class="max-h-full max-w-full object-contain" [src]="branding()?.logoUrl" alt="Company logo" /></span>
+            @if (branding()?.logoUrl && !logoFailed()) {
+              <span class="grid h-11 w-14 shrink-0 place-items-center rounded-lg bg-white p-1 ring-1 ring-slate-200"><img class="max-h-full max-w-full object-contain" [src]="branding()?.logoUrl" [alt]="organizationName() + ' logo'" (error)="logoFailed.set(true)" /></span>
             } @else {
-              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl ring-1" [style.background]="primarySoft()" [style.color]="primaryColor()"><span class="maple-leaf h-6 w-6" [style.background]="primaryColor()"></span></span>
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl font-bold ring-1" [style.background]="primarySoft()" [style.color]="primaryColor()">{{ organizationInitials() }}</span>
             }
             <span>
               <span class="block text-sm font-black text-slate-950">{{ organizationName() }}</span>
@@ -241,7 +242,9 @@ export class LoginComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly brandingService = inject(TenantLoginBrandingService);
+  private readonly tenantTheme = inject(TenantThemeService);
   protected readonly branding = signal<TenantLoginBrandingRecord | null>(null);
+  protected readonly logoFailed = signal(false);
   protected readonly loginAllowed = signal(this.brandingService.isTenantLoginHost());
   protected email = '';
   protected password = '';
@@ -255,6 +258,7 @@ export class LoginComponent {
   }
 
   protected organizationName(): string { return this.branding()?.organizationName || 'Maple Property Services'; }
+  protected organizationInitials(): string { return this.organizationName().split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase(); }
   protected loginHeadline(): string { return this.branding()?.loginHeadline || 'Welcome back'; }
   protected loginMessage(): string { return this.branding()?.loginMessage || 'Access your operations workspace.'; }
   protected primaryColor(): string { return this.branding()?.themePrimaryColor || '#0f766e'; }
@@ -267,12 +271,14 @@ export class LoginComponent {
   }
 
   private async loadBranding(): Promise<void> {
+    this.tenantTheme.apply({});
     if (!this.loginAllowed()) {
       this.error.set('Use the company-specific tenant sign-in address provided by your administrator.');
       return;
     }
     const branding = await firstValueFrom(this.brandingService.load());
     this.branding.set(branding);
+    if (branding) this.tenantTheme.apply(branding);
     if (!branding && !this.brandingService.isLocalDevelopmentHost()) {
       this.loginAllowed.set(false);
       this.error.set('This tenant sign-in address is not active. Contact your administrator.');

@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -228,8 +228,8 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
                 >
                   <div class="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
                     <div>
-                      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ day | date:'EEE' }}</p>
-                      <p class="text-lg font-bold text-slate-950">{{ day | date:'MMM d' }}</p>
+                      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">{{ calendarDate(day) | date:'EEE' }}</p>
+                      <p class="text-lg font-bold text-slate-950">{{ calendarDate(day) | date:'MMM d' }}</p>
                     </div>
                     <span class="rounded-full bg-white px-2 py-1 text-[0.7rem] font-black text-slate-600 shadow-sm">{{ scheduledForDay(day).length }}</span>
                   </div>
@@ -289,7 +289,7 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
                   <tr>
                     <th class="px-3 py-2">Worker</th>
                     @for (day of weekDays(); track day.toISOString()) {
-                      <th class="px-3 py-2">{{ day | date:'EEE d' }}</th>
+                      <th class="px-3 py-2">{{ calendarDate(day) | date:'EEE d' }}</th>
                     }
                   </tr>
                 </thead>
@@ -637,6 +637,8 @@ export class DispatchSchedulePageComponent {
       return day;
     });
   }
+
+  protected calendarDate(day: Date): string { return toDateInput(day); }
 
   protected scheduledThisWeek(): WorkOrderRecord[] {
     const [start, end] = weekBounds(this.selectedDate());

@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
@@ -80,7 +80,9 @@ import { TenantSettingsService } from '../settings/services/tenant-settings.serv
                 <p class="line-clamp-2 text-xs font-semibold text-slate-500">{{ log.providerMessage || 'Recorded delivery attempt.' }}</p>
                 <div class="flex justify-end gap-1">
                   <button pButton type="button" size="small" severity="secondary" icon="pi pi-eye" label="View" (click)="openMessage(log)"></button>
-                  <button pButton type="button" size="small" severity="secondary" icon="pi pi-send" label="Resend" (click)="openResend(log)"></button>
+                  @if (log.communicationType !== 'QUOTE_EMAIL' || tenantSettings()?.quoteManagementEnabled) {
+                    <button pButton type="button" size="small" severity="secondary" icon="pi pi-send" label="Resend" (click)="openResend(log)"></button>
+                  }
                 </div>
               </article>
             } @empty {
@@ -213,6 +215,7 @@ export class EmailAuditPageComponent {
   }
 
   protected openResend(log: EmailDeliveryLogRecord): void {
+    if (log.communicationType === 'QUOTE_EMAIL' && !this.tenantSettings()?.quoteManagementEnabled) return;
     this.selectedLog.set(log);
     this.resendForm.recipientEmail = log.recipientEmail || '';
     this.resendForm.ccEmails = log.ccEmails || '';

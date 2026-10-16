@@ -389,6 +389,7 @@ public class WorkerManagementService {
 
     @Transactional
     public WorkerDto create(UUID tenantId, UUID actorUserId, CreateWorkerRequest request) {
+        requireAvailableWorkerEmail(tenantId, null, request.email());
         try {
             var workerId = jdbcTemplate.queryForObject("""
                     INSERT INTO workers (
@@ -429,13 +430,14 @@ public class WorkerManagementService {
                     .findFirst()
                     .orElseThrow();
         } catch (DuplicateKeyException exception) {
-            throw new DuplicateResourceException("Worker employee number already exists.");
+            throw new DuplicateResourceException("Worker employee number or email already exists for this tenant. Update or link the existing worker profile instead.");
         }
     }
 
     @Transactional
     public WorkerDto update(UUID tenantId, UUID actorUserId, UUID workerId, CreateWorkerRequest request) {
         requireWorker(tenantId, workerId);
+        requireAvailableWorkerEmail(tenantId, workerId, request.email());
         try {
             var updated = jdbcTemplate.update("""
                     UPDATE workers
@@ -473,7 +475,7 @@ public class WorkerManagementService {
             ));
             return find(tenantId, workerId);
         } catch (DuplicateKeyException exception) {
-            throw new DuplicateResourceException("Worker employee number already exists.");
+            throw new DuplicateResourceException("Worker employee number or email already exists for this tenant. Update or link the existing worker profile instead.");
         }
     }
 
@@ -482,6 +484,18 @@ public class WorkerManagementService {
         requireWorker(tenantId, workerId);
         var linkedUserId = linkedUserId(tenantId, workerId);
         var status = normalizeStatus(request.status());
+        if ("ACTIVE".equals(status)) {
+            var duplicate = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM workers w JOIN workers other ON other.tenant_id = w.tenant_id AND other.id <> w.id
+                          AND lower(btrim(other.email::text)) = lower(btrim(w.email::text))
+                        WHERE w.tenant_id = ? AND w.id = ? AND w.status <> 'ACTIVE'
+                    )
+                    """, Boolean.class, tenantId, workerId);
+            if (Boolean.TRUE.equals(duplicate)) {
+                throw new DuplicateResourceException("Another worker profile uses this email. Resolve the duplicate and retain the correct login-linked profile before activating this worker.");
+            }
+        }
         var leaveStartDate = request.leaveStartDate();
         var leaveEndDate = request.leaveEndDate();
         var leaveReason = blankToNull(request.leaveReason());
@@ -726,6 +740,22 @@ public class WorkerManagementService {
 
     private String engagementType(String value) {
         return value == null || value.isBlank() ? "FULL_TIME" : value;
+    }
+
+    private void requireAvailableWorkerEmail(UUID tenantId, UUID workerId, String value) {
+        var email = value == null || value.isBlank() ? null : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (email == null) return;
+        if (workerId != null) {
+            var previous = jdbcTemplate.queryForObject("SELECT lower(btrim(email::text)) FROM workers WHERE tenant_id = ? AND id = ?", String.class, tenantId, workerId);
+            if (email.equals(previous)) return;
+        }
+        var exists = jdbcTemplate.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM workers WHERE tenant_id = ? AND lower(btrim(email::text)) = ?
+                    AND (?::uuid IS NULL OR id <> ?))
+                """, Boolean.class, tenantId, email, workerId, workerId);
+        if (Boolean.TRUE.equals(exists)) {
+            throw new DuplicateResourceException("A worker profile already uses this email in this tenant. Update or link that existing profile instead of adding another worker.");
+        }
     }
 
     private String blankToNull(String value) {

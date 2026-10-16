@@ -324,6 +324,7 @@ public class WorkOrderManagementService {
     @Transactional
     public WorkOrderDto update(UUID tenantId, UUID actorUserId, UUID workOrderId, CreateWorkOrderRequest request) {
         requireWorkOrder(tenantId, workOrderId);
+        jdbcTemplate.queryForList("SELECT id FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE", UUID.class, tenantId, workOrderId);
         var before = workOrders(tenantId, workOrderId).stream().findFirst().orElseThrow();
         if (isLockedForGeneralUpdate(before.status())) {
             throw new BadRequestException("Submitted or completed work orders are locked. Use the review, approval, adjustment, or reassignment workflow instead.");
@@ -2223,14 +2224,15 @@ public class WorkOrderManagementService {
         if (workerId == null) {
             return;
         }
-        var exists = Boolean.TRUE.equals(jdbcTemplate.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM workers WHERE tenant_id = ? AND id = ? AND status = 'ACTIVE')",
-                Boolean.class,
-                tenantId,
-                workerId
-        ));
-        if (!exists) {
-            throw new BadRequestException("Worker is not active for this tenant.");
+        var workers = jdbcTemplate.query("SELECT display_name, status::text AS status FROM workers WHERE tenant_id = ? AND id = ?",
+                (rs, row) -> Map.of("name", rs.getString("display_name"), "status", rs.getString("status")), tenantId, workerId);
+        if (workers.isEmpty()) {
+            throw new BadRequestException("Worker profile " + workerId + " does not belong to this tenant. Refresh the worker list and select a worker from this company.");
+        }
+        var worker = workers.getFirst();
+        if (!"ACTIVE".equals(worker.get("status"))) {
+            throw new BadRequestException("Worker \"" + worker.get("name") + "\" (" + workerId + ") is " + worker.get("status").toLowerCase(Locale.ROOT).replace('_', ' ')
+                    + ". Activate this existing profile under Workers, or reassign the work order to an active worker.");
         }
     }
 
@@ -3147,11 +3149,27 @@ public class WorkOrderManagementService {
     }
 
     private void replaceAssignments(UUID tenantId, UUID workOrderId, UUID actorUserId, CreateWorkOrderRequest request, Set<UUID> assignedWorkerIds) {
-        jdbcTemplate.update("""
-                DELETE FROM work_order_assignments
-                WHERE tenant_id = ? AND work_order_id = ?
-                  AND assignment_status NOT IN ('COMPLETED', 'RELEASED', 'DECLINED', 'LEFT_EMERGENCY')
-                """, tenantId, workOrderId);
+        var existing = jdbcTemplate.queryForList("SELECT worker_id, assignment_status::text AS status FROM work_order_assignments WHERE tenant_id = ? AND work_order_id = ? FOR UPDATE", tenantId, workOrderId);
+        for (var assignment : existing) {
+            var workerId = (UUID) assignment.get("worker_id");
+            var status = (String) assignment.get("status");
+            if (assignedWorkerIds.contains(workerId)) {
+                if (Set.of("RELEASED", "DECLINED", "LEFT_EMERGENCY").contains(status)) {
+                    throw new BadRequestException("A closed worker assignment cannot be reopened by editing the work order. Use Override worker data for an explicit reassignment.");
+                }
+                continue;
+            }
+            if (Set.of("COMPLETED", "RELEASED", "DECLINED", "LEFT_EMERGENCY").contains(status)) continue;
+            var openTime = Boolean.TRUE.equals(jdbcTemplate.queryForObject("SELECT EXISTS (SELECT 1 FROM work_order_time_entries WHERE tenant_id = ? AND work_order_id = ? AND worker_id = ? AND ended_at IS NULL)", Boolean.class, tenantId, workOrderId, workerId));
+            if (openTime) throw new BadRequestException("Pause or end the worker's current work before removing their assignment.");
+            jdbcTemplate.update("""
+                    UPDATE work_order_assignments SET assignment_status = 'RELEASED', released_at = now(),
+                        release_reason = 'Removed during work order edit', lead_worker = false,
+                        updated_by = ?, updated_at = now()
+                    WHERE tenant_id = ? AND work_order_id = ? AND worker_id = ?
+                    """, actorUserId, tenantId, workOrderId, workerId);
+        }
+        jdbcTemplate.update("UPDATE work_order_assignments SET lead_worker = false WHERE tenant_id = ? AND work_order_id = ?", tenantId, workOrderId);
         var leadWorkerId = leadWorkerId(request, assignedWorkerIds);
         for (var workerId : assignedWorkerIds) {
             jdbcTemplate.update("""
@@ -3159,9 +3177,6 @@ public class WorkOrderManagementService {
                     VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT (tenant_id, work_order_id, worker_id)
                     DO UPDATE SET lead_worker = excluded.lead_worker,
-                                  assignment_status = 'ASSIGNED'::work_order_assignment_status,
-                                  released_at = NULL,
-                                  release_reason = NULL,
                                   updated_by = excluded.updated_by,
                                   updated_at = now()
                     """, tenantId, workOrderId, workerId, workerId.equals(leadWorkerId), actorUserId, actorUserId);

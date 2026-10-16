@@ -40,7 +40,7 @@ body {
   min-height: 100%;
   margin: 0;
   background:
-    linear-gradient(180deg, rgba(15, 118, 110, 0.055) 0, rgba(246, 248, 251, 0) 14rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--tenant-primary) 6%, transparent) 0, transparent 14rem),
     var(--tenant-page-background);
   color: #162033;
   font-size: 1rem;
@@ -52,6 +52,10 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+input[type='checkbox'], input[type='radio'] {
+  accent-color: var(--tenant-primary);
 }
 
 .touch-action {

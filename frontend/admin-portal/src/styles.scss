@@ -11,9 +11,7 @@ html,
 body {
   min-height: 100%;
   margin: 0;
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.06) 0, rgba(247, 248, 251, 0) 18rem),
-    #f7f8fb;
+  background: #f7f8fa;
   color: #172033;
 }
 
@@ -27,9 +25,15 @@ select {
 .p-card {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
+  box-shadow: none;
 }
 
 .p-card .p-card-body {
   padding: 1.25rem;
 }
+
+* { box-sizing: border-box; }
+:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button, a { touch-action: manipulation; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

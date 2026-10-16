@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.ZoneId;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
@@ -160,8 +161,13 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null
         ) : request;
+        var previousTimezone = jdbcTemplate.queryForObject("SELECT timezone FROM tenants WHERE id = ?", String.class, tenantId);
+        var timezone = safeRequest.timezone() == null ? previousTimezone : safeRequest.timezone().trim();
+        if (timezone == null || !ZoneId.getAvailableZoneIds().contains(timezone)) {
+            throw new BadRequestException("Select a valid timezone, such as America/Toronto.");
+        }
         var portalSubdomain = safeRequest.portalSubdomain() == null
                 ? jdbcTemplate.queryForObject("SELECT portal_subdomain FROM tenants WHERE id = ?", String.class, tenantId)
                 : normalizePortalSubdomain(safeRequest.portalSubdomain());
@@ -192,7 +198,7 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 VALUES (?, ?, ?)
                 ON CONFLICT (tenant_id) DO NOTHING
                 """, tenantId, actorUserId, actorUserId);
-        jdbcTemplate.update("UPDATE tenants SET portal_subdomain = ?, updated_by = ?, updated_at = now() WHERE id = ?", portalSubdomain, actorUserId, tenantId);
+        jdbcTemplate.update("UPDATE tenants SET portal_subdomain = ?, timezone = ?, updated_by = ?, updated_at = now() WHERE id = ?", portalSubdomain, timezone, actorUserId, tenantId);
         jdbcTemplate.update("""
                 UPDATE tenant_settings
                 SET organization_name = ?, billing_email = ?, support_email = ?, phone = ?, website_url = ?,
@@ -297,6 +303,9 @@ public class TenantSettingsService implements TenantSettingsOperations {
                 "autoSendInvoiceEmail", Boolean.TRUE.equals(safeRequest.autoSendInvoiceEmail()),
                 "liveWorkerTrackingEnabled", Boolean.TRUE.equals(safeRequest.liveWorkerTrackingEnabled())
         ));
+        if (!timezone.equals(previousTimezone)) {
+            auditWriter.record(tenantId, actorUserId, "TENANT_TIMEZONE_UPDATED", "TENANT", tenantId, Map.of("previousTimezone", previousTimezone, "timezone", timezone));
+        }
         return get(tenantId);
     }
 

@@ -1,4 +1,6 @@
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { NgTemplateOutlet } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
+import { TenantTimeService } from '../../core/services/tenant-time.service';
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -238,7 +240,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
                 <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ selectedJob.ownerName }}</span>
                 <span class="rounded-full bg-teal-50 px-3 py-1 font-mono text-xs font-black text-teal-800">{{ selectedJob.propertyCode }}</span>
                 <span class="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs font-black text-slate-700">{{ selectedJob.ownerCode }}</span>
-                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ totalCompletedChecks(selectedJob) }}/{{ selectedJob.checklist.length }} checks</span>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{{ totalCompletedChecks(selectedJob) }}/{{ checklistItems(selectedJob, 'PRE_START').length + checklistItems(selectedJob, 'COMPLETION').length }} checks</span>
               </div>
             </div>
           </div>
@@ -1195,7 +1197,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
     }
 
     .worker-detail-chip__eyebrow {
-      color: #0f766e;
+      color: var(--tenant-primary);
       display: block;
       font-size: 0.58rem;
       font-weight: 900;
@@ -1247,7 +1249,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
     }
 
     .maintenance-card__title {
-      color: #0f766e;
+      color: var(--tenant-primary);
       font-size: 0.72rem;
       font-weight: 900;
       letter-spacing: 0.03em;
@@ -1271,10 +1273,10 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
 
     .worker-section-action {
       align-items: center;
-      background: #10b981;
+      background: var(--tenant-primary);
       border: 0;
       border-radius: 0.65rem;
-      color: #ffffff;
+      color: var(--tenant-primary-contrast);
       display: inline-flex;
       font-size: 0.78rem;
       font-weight: 900;
@@ -1290,6 +1292,7 @@ const POOL_MAINTENANCE_TEMPLATE: MaintenanceRecordTemplate = {
   `]
 })
 export class WorkerJobDetailComponent implements OnDestroy {
+  private readonly time = inject(TenantTimeService);
   private readonly route = inject(ActivatedRoute);
   private readonly workerJobService = inject(WorkerJobService);
   private readonly drafts = inject(WorkerActionDraftService);
@@ -1463,7 +1466,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
   }
 
   protected canUseChecklist(job: WorkerAssignedJob, phase: ChecklistPhase): boolean {
-    if (this.isPickupDelivery(job)) {
+    if (this.isPickupDelivery(job) && phase === 'COMPLETION') {
       return false;
     }
     if (isWorkerAssignmentClosed(job)) {
@@ -1485,14 +1488,14 @@ export class WorkerJobDetailComponent implements OnDestroy {
     }
     const start = new Date(job.scheduledStart);
     const end = job.scheduledEnd ? new Date(job.scheduledEnd) : null;
-    return `${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${end ? ` - ${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`;
+    return `${this.time.format(start, { hour: 'numeric', minute: '2-digit' })}${end ? ` - ${this.time.format(end, { hour: 'numeric', minute: '2-digit' })}` : ''}`;
   }
 
   protected scheduleDateLabel(job: WorkerAssignedJob): string {
     if (!job.scheduledStart) {
       return 'No service date';
     }
-    return new Date(job.scheduledStart).toLocaleDateString([], {
+    return this.time.format(job.scheduledStart, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -1741,7 +1744,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
   }
 
   protected checklistItems(job: WorkerAssignedJob, phase: ChecklistPhase): WorkerJobChecklistItem[] {
-    if (this.isPickupDelivery(job)) {
+    if (this.isPickupDelivery(job) && phase === 'COMPLETION') {
       return [];
     }
     return job.checklist.filter((item) => item.phase === phase);
@@ -1752,7 +1755,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
   }
 
   protected totalCompletedChecks(job: WorkerAssignedJob): number {
-    return job.checklist.filter((item) => item.completed).length;
+    return [...this.checklistItems(job, 'PRE_START'), ...this.checklistItems(job, 'COMPLETION')].filter((item) => item.completed).length;
   }
 
   protected checklistSummary(job: WorkerAssignedJob, phase: ChecklistPhase): string {
@@ -2100,7 +2103,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
     if (action === 'START_TRAVEL' && hasProgressBeyondTravel(job)) {
       return true;
     }
-    if (action === 'START_WORK' && !this.isPickupDelivery(job)) {
+    if (action === 'START_WORK') {
       return this.requiredChecksRemaining(job, 'PRE_START') > 0;
     }
     if (action === 'COMPLETE_WORK' && this.openRouteStops(job) > 0) {
@@ -2126,6 +2129,10 @@ export class WorkerJobDetailComponent implements OnDestroy {
         ? `Complete or skip ${openStops} pickup route stop${openStops === 1 ? '' : 's'} before completing this pickup job.`
         : '';
     }
+    if (action === 'START_TRAVEL' && hasProgressBeyondTravel(job)) {
+      return 'Your recorded work progress does not match this assignment. Refresh the job or ask dispatch to restore your progress.';
+    }
+    if (action !== 'START_WORK' && action !== 'COMPLETE_WORK') return '';
     const phase: ChecklistPhase = action === 'START_WORK' ? 'PRE_START' : 'COMPLETION';
     const remaining = this.requiredChecksRemaining(job, phase);
     if (remaining === 0) {
@@ -2631,7 +2638,7 @@ export class WorkerJobDetailComponent implements OnDestroy {
   }
 
   protected hasAfterPhoto(job: WorkerAssignedJob): boolean {
-    return this.jobEvidence(job).some((item) => item.documentType === 'WORK_PHOTO' && item.photoType === 'AFTER');
+    return this.jobEvidence(job).some((item) => item.documentType === 'WORK_PHOTO' && item.photoType === 'AFTER' && item.canDelete);
   }
 
   protected openRouteStops(job: WorkerAssignedJob): number {

@@ -127,29 +127,31 @@ export function primaryActionLabel(job: WorkerAssignedJob): string {
 }
 
 export function canUseChecklist(job: WorkerAssignedJob, phase: 'PRE_START' | 'COMPLETION' = 'COMPLETION'): boolean {
-  if (isFutureJob(job)) {
+  if (isFutureJob(job) || isWorkerAssignmentClosed(job)) {
     return false;
   }
   if (phase === 'PRE_START') {
-    return ['TO_DO', 'CREATED', 'SCHEDULED', 'ASSIGNED', 'TRAVELING', 'ON_SITE'].includes(job.status);
+    return ['TO_DO', 'CREATED', 'SCHEDULED', 'ASSIGNED', 'TRAVELING', 'ON_SITE'].includes(workerFacingStatus(job));
   }
-  return ['IN_PROGRESS', 'PAUSED'].includes(job.status);
+  return workerFacingStatus(job) === 'IN_PROGRESS';
 }
 
 export function checklistDisabledReason(job: WorkerAssignedJob, phase: 'PRE_START' | 'COMPLETION' = 'COMPLETION'): string {
   if (isFutureJob(job)) {
     return 'This job is scheduled for a future date. Field actions unlock on the service date.';
   }
+  if (isWorkerAssignmentClosed(job)) return 'Your assignment for this work order is already closed.';
+  const status = workerFacingStatus(job);
   if (phase === 'PRE_START') {
-    if (['IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(job.status)) {
+    if (['IN_PROGRESS', 'PAUSED', 'PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(status)) {
       return 'Pre-start checks are closed after work starts.';
     }
     return 'Pre-start checks unlock when the job is assigned.';
   }
-  if (job.status === 'PAUSED') {
+  if (status === 'PAUSED') {
     return 'Work is paused. Resume before completing more checks.';
   }
-  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(job.status)) {
+  if (['PENDING_COMPLETION', 'COMPLETED', 'APPROVED', 'CUSTOMER_NOTIFIED', 'INVOICED', 'PAID', 'CANCELLED'].includes(status)) {
     return 'Completion checks are already submitted for review.';
   }
   return 'Checklist unlocks after you start work on site.';

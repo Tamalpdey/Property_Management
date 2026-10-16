@@ -105,7 +105,8 @@ import { dateValue, parseDateInput, toDateInput, workerErrorMessage, workerFacin
               <span class="grid h-16 w-16 place-items-center rounded-lg bg-teal-50 text-2xl text-teal-700">
                 <i class="pi pi-briefcase"></i>
               </span>
-              <p class="mt-4 text-2xl font-black text-slate-950">No assigned jobs yet</p>
+              <p class="mt-4 text-2xl font-black text-slate-950">{{ loading() ? 'Loading jobs...' : error() ? 'Jobs unavailable' : 'No assigned jobs yet' }}</p>
+              @if (!loading() && !error()) {
               <p class="mt-2 text-sm font-semibold leading-6 text-slate-600">
                 This worker login is valid, but no work orders are assigned in the loaded schedule window. Dispatch can assign a worker from the tenant work-order schedule board.
               </p>
@@ -123,6 +124,7 @@ import { dateValue, parseDateInput, toDateInput, workerErrorMessage, workerFacin
                   <span class="mt-1 block text-sm font-black text-slate-950">{{ unscheduledJobs().length }} unscheduled</span>
                 </span>
               </div>
+              }
             </div>
           }
         </section>
@@ -158,6 +160,7 @@ export class WorkerTodayComponent {
       const jobs = await firstValueFrom(this.workerJobService.jobs(toDateInput(from), toDateInput(to)));
       this.jobs.set(jobs);
     } catch (error) {
+      this.jobs.set([]);
       this.error.set(workerErrorMessage(error, 'Unable to load assigned jobs. Check backend status and worker profile mapping.'));
     } finally {
       this.loading.set(false);

@@ -6,6 +6,9 @@ public record PublicQuoteDto(
         String primaryColor,
         String supportEmail,
         String phone,
-        QuoteDto quote
+        QuoteDto quote,
+        String timezone,
+        String companyAddress,
+        String taxRegistrationNumber
 ) {
 }

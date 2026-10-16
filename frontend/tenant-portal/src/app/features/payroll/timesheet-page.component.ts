@@ -1,4 +1,5 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
+import { TenantTimeService } from '../../core/services/tenant-time.service';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -304,6 +305,7 @@ interface TimesheetDayRow {
   `
 })
 export class TimesheetPageComponent {
+  private readonly time = inject(TenantTimeService);
   protected readonly Math = Math;
   private readonly workerService = inject(WorkerManagementService);
   private readonly auth = inject(AuthService);
@@ -418,8 +420,8 @@ export class TimesheetPageComponent {
       ...this.dayRows().map((day) => [
         worker?.displayName || '',
         day.date,
-        day.firstClockIn ? new Date(day.firstClockIn).toLocaleString() : '',
-        day.lastClockOut ? new Date(day.lastClockOut).toLocaleString() : '',
+        day.firstClockIn ? this.time.format(day.firstClockIn, { dateStyle: 'medium', timeStyle: 'short' }) : '',
+        day.lastClockOut ? this.time.format(day.lastClockOut, { dateStyle: 'medium', timeStyle: 'short' }) : '',
         String(day.entries.length),
         String(day.grossMinutes),
         String(day.pauseMinutes),
@@ -439,8 +441,8 @@ export class TimesheetPageComponent {
       ...this.entries().map((entry) => [
         worker?.displayName || '',
         localDateKey(entry.startedAt),
-        new Date(entry.startedAt).toLocaleString(),
-        entry.endedAt ? new Date(entry.endedAt).toLocaleString() : 'Open',
+        this.time.format(entry.startedAt, { dateStyle: 'medium', timeStyle: 'short' }),
+        entry.endedAt ? this.time.format(entry.endedAt, { dateStyle: 'medium', timeStyle: 'short' }) : 'Open',
         String(entry.durationMinutes || 0),
         String(entry.pauseMinutes || 0),
         String(this.netEntryMinutes(entry)),

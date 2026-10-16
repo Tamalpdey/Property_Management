@@ -92,7 +92,7 @@ import { AuthService } from '../../../core/services/auth.service';
                   class="mt-1 h-4 w-4"
                   type="checkbox"
                   [checked]="selectedRoles.has(role.code)"
-                  [disabled]="fieldWorkerLocked && role.code === 'FIELD_WORKER'"
+                  [disabled]="(fieldWorkerLocked && role.code === 'FIELD_WORKER') || (adminRoleLocked && role.code === 'TENANT_ADMIN')"
                   (change)="toggleRole(role.code, $event)"
                 />
                 <span>
@@ -102,23 +102,26 @@ import { AuthService } from '../../../core/services/auth.service';
               </label>
             }
           </div>
+          @if (adminRoleLocked) {
+            <p class="mt-3 text-sm text-amber-800">This is the last active Tenant Admin. Add or promote another active Tenant Admin before removing this role.</p>
+          }
         </div>
 
         @if (selectedRoles.has('FIELD_WORKER') && !linkedWorker) {
           <label class="block">
             <span class="mb-1 block text-sm font-semibold text-slate-700">Linked worker profile</span>
             <select class="w-full border border-slate-300 px-3 py-2" name="workerId" [(ngModel)]="form.workerId">
-              <option value="">Create linked worker profile</option>
+              <option value="">Match by email, or create a new profile</option>
               @for (worker of workers; track worker.id) {
-                <option [value]="worker.id">{{ worker.displayName }} {{ worker.employeeNumber ? '(' + worker.employeeNumber + ')' : '' }}</option>
+                <option [value]="worker.id">{{ worker.displayName }} {{ worker.employeeNumber ? '(' + worker.employeeNumber + ')' : '' }} · {{ worker.status.toLowerCase().replaceAll('_', ' ') }}</option>
               }
             </select>
-            <span class="mt-1 block text-xs font-semibold text-slate-500">Leave this as create linked profile when the worker does not exist yet.</span>
+            <span class="mt-1 block text-xs font-semibold text-slate-500">For existing assignments, select the same worker profile used on the work orders. Worker status is managed separately under Workers.</span>
           </label>
         }
 
-        @if (formError) {
-          <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ formError }}</p>
+        @if (formError || errorMessage) {
+          <p role="alert" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ formError || errorMessage }}</p>
         }
 
         <div class="flex justify-end gap-2">
@@ -134,6 +137,8 @@ export class TenantUserDialogComponent implements OnChanges {
   @Input() title = 'Add tenant user';
   @Input() submitLabel = 'Create user';
   @Input() saving = false;
+  @Input() adminRoleLocked = false;
+  @Input() errorMessage = '';
   @Input() roles: TenantRoleOption[] = [];
   @Input() workers: WorkerRecord[] = [];
   @Input() linkedWorker: WorkerRecord | null = null;
@@ -171,6 +176,10 @@ export class TenantUserDialogComponent implements OnChanges {
     }
     if (!this.selectedRoles.size) {
       this.formError = 'Select at least one role.';
+      return;
+    }
+    if (this.adminRoleLocked && !this.selectedRoles.has('TENANT_ADMIN')) {
+      this.formError = 'At least one active Tenant Admin must remain. Add or promote another administrator first.';
       return;
     }
     this.saveUser.emit({
@@ -222,6 +231,7 @@ export class TenantUserDialogComponent implements OnChanges {
   }
 
   protected toggleRole(role: TenantAssignableRole, event: Event): void {
+    if (this.adminRoleLocked && role === 'TENANT_ADMIN') return;
     if (this.fieldWorkerLocked && role === 'FIELD_WORKER') {
       return;
     }

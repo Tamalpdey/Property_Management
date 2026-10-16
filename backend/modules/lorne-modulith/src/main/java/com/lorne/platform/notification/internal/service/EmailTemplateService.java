@@ -150,17 +150,25 @@ public class EmailTemplateService implements EmailTemplateOperations {
 
     @Transactional
     public EmailTemplateDto quoteTemplate(UUID tenantId, UUID actorUserId) {
+        requireQuotesEnabled(tenantId);
         return toDto(ensureDefaultQuoteTemplate(tenantId, actorUserId));
     }
 
     @Transactional
     public EmailTemplateDto updateQuoteTemplate(UUID tenantId, UUID actorUserId, UpdateEmailTemplateRequest request) {
+        requireQuotesEnabled(tenantId);
         return updateTemplate(tenantId, actorUserId, QUOTE_CLIENT_TEMPLATE_KEY, request);
     }
 
     @Transactional
     public EmailTemplateDto resetQuoteTemplate(UUID tenantId, UUID actorUserId) {
+        requireQuotesEnabled(tenantId);
         return resetTemplate(tenantId, actorUserId, QUOTE_CLIENT_TEMPLATE_KEY, DEFAULT_QUOTE_SUBJECT, DEFAULT_QUOTE_BODY);
+    }
+
+    private void requireQuotesEnabled(UUID tenantId) {
+        var enabled = jdbcTemplate.queryForObject("SELECT EXISTS (SELECT 1 FROM tenant_modules WHERE tenant_id = ? AND module_code = 'QUOTES' AND enabled)", Boolean.class, tenantId);
+        if (!Boolean.TRUE.equals(enabled)) throw new BadRequestException("Quote management is not enabled for this tenant.");
     }
 
     private EmailTemplateDto updateTemplate(UUID tenantId, UUID actorUserId, String templateKey, UpdateEmailTemplateRequest request) {

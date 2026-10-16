@@ -15,6 +15,7 @@ public record SuperAdminTenantSummary(
         String provinceCode,
         String administratorEmail,
         int activeUsers,
+        int activeAdministrators,
         int activeProperties,
         boolean quoteManagementEnabled,
         Instant createdAt

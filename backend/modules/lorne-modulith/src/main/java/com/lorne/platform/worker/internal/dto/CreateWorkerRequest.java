@@ -2,6 +2,7 @@ package com.lorne.platform.worker.internal.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Email;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -12,7 +13,7 @@ public record CreateWorkerRequest(
         String employeeNumber,
         @NotBlank String displayName,
         String phone,
-        String email,
+        @Email String email,
         String engagementType,
         Integer maxWeeklyHours,
         BigDecimal hourlyRate,

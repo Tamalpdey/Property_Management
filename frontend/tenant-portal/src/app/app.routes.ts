@@ -4,6 +4,10 @@ import { quoteModuleGuard } from './features/quotes/quote-module.guard';
 
 export const appRoutes: Routes = [
   {
+    path: 'quote-capture/:token',
+    loadComponent: () => import('./features/quotes/public-quote-capture.component').then(m => m.PublicQuoteCaptureComponent)
+  },
+  {
     path: 'quote-response/:token',
     loadComponent: () => import('./features/quotes/public-quote-response.component').then((m) => m.PublicQuoteResponseComponent)
   },
@@ -83,13 +87,18 @@ export const appRoutes: Routes = [
       },
       {
         path: 'email-templates',
-        canActivate: [roleGuard(['TENANT_ADMIN', 'FINANCE'])],
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/notifications/email-template-page.component').then((m) => m.EmailTemplatePageComponent)
       },
       {
         path: 'email-audit',
         canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
         loadComponent: () => import('./features/notifications/email-audit-page.component').then((m) => m.EmailAuditPageComponent)
+      },
+      {
+        path: 'support-tickets',
+        canActivate: [roleGuard(['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'])],
+        loadComponent: () => import('./features/support/support-tickets-page.component').then(m => m.TenantSupportTicketsPageComponent)
       },
       {
         path: 'quotes',

@@ -1,0 +1,92 @@
+<div class="admin-shell">
+  <aside class="desktop-sidebar">
+    <ng-container *ngTemplateOutlet="navigation" />
+  </aside>
+  <div class="admin-main">
+    <header class="admin-topbar">
+      <div class="topbar-location">
+        <button
+          class="menu-toggle"
+          pButton
+          severity="secondary"
+          text
+          icon="pi pi-bars"
+          aria-label="Open navigation"
+          title="Open navigation"
+          [attr.aria-expanded]="mobileOpen()"
+          (click)="mobileOpen.set(true)"
+        ></button
+        ><span class="platform-label">Maple</span
+        ><i class="pi pi-angle-right" aria-hidden="true"></i
+        ><strong>{{ title() }}</strong>
+      </div>
+      <div class="session">
+        <span class="avatar" aria-hidden="true">{{ initials() }}</span
+        ><span class="session-name">{{
+          user()?.displayName || "Administrator"
+        }}</span
+        ><button
+          pButton
+          severity="secondary"
+          text
+          icon="pi pi-sign-out"
+          aria-label="Sign out"
+          title="Sign out"
+          (click)="signOut()"
+        ></button>
+      </div>
+    </header>
+    <main class="admin-content"><router-outlet /></main>
+  </div>
+</div>
+<p-drawer
+  header="Navigation"
+  [visible]="mobileOpen()"
+  (visibleChange)="mobileOpen.set($event)"
+  [modal]="true"
+  [style]="{ width: 'min(280px, calc(100vw - 24px))' }"
+  ><div class="mobile-navigation">
+    <ng-container *ngTemplateOutlet="navigation" /></div
+></p-drawer>
+<ng-template #navigation>
+  <div class="navigation-content">
+    <a
+      class="admin-brand"
+      routerLink="/dashboard"
+      (click)="mobileOpen.set(false)"
+      ><span class="brand-symbol">M</span
+      ><span
+        ><strong>Maple</strong><small>Platform administration</small></span
+      ></a
+    >
+    <nav class="admin-navigation" aria-label="Platform navigation">
+      @for (section of sections; track section.name) {
+        <section>
+          <h2>{{ section.name }}</h2>
+          @for (item of section.items; track item.path) {
+            <a
+              [routerLink]="item.path"
+              routerLinkActive="selected"
+              [routerLinkActiveOptions]="{ exact: false }"
+              (click)="mobileOpen.set(false)"
+              ><i [class]="item.icon" aria-hidden="true"></i
+              ><span>{{ item.label }}</span></a
+            >
+          }
+        </section>
+      }
+      <a
+        class="onboard-link"
+        routerLink="/tenants/new"
+        (click)="mobileOpen.set(false)"
+        ><i class="pi pi-plus" aria-hidden="true"></i>Onboard tenant</a
+      >
+    </nav>
+    <footer class="sidebar-footer">
+      <span class="role-indicator" aria-hidden="true"></span
+      ><span
+        >Super administrator<small>{{ user()?.email }}</small></span
+      >
+    </footer>
+  </div>
+</ng-template>

@@ -18,6 +18,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
+      - public-site
       - tenant-portal
       - admin-portal
       - worker-app
@@ -68,6 +69,20 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  public-site:
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    image: ${IMAGE_PREFIX:-maple-property-services}-public-site:${IMAGE_TAG:-latest}
+    build:
+      context: ../../frontend
+      dockerfile: portal/Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   tenant-portal:
     platform: ${DOCKER_PLATFORM:-linux/amd64}

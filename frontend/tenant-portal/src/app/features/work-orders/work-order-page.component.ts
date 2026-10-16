@@ -184,7 +184,7 @@ import { VoiceNoteButtonComponent } from '../../shared/voice-note-button.compone
         <lorne-work-order-form
           [properties]="properties()"
           [serviceTypes]="serviceTypes()"
-          [workers]="workers()"
+          [workers]="allWorkerProfiles()"
           [workOrders]="workOrders()"
           [inventoryItems]="inventoryItems()"
           [assets]="assets()"
@@ -428,6 +428,7 @@ export class WorkOrderPageComponent {
   protected readonly properties = signal<PropertyRecord[]>([]);
   protected readonly serviceTypes = signal<ServiceType[]>([]);
   protected readonly workers = signal<WorkerRecord[]>([]);
+  protected readonly allWorkerProfiles = signal<WorkerRecord[]>([]);
   protected readonly inventoryItems = signal<InventoryItem[]>([]);
   protected readonly assets = signal<TenantAsset[]>([]);
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
@@ -507,6 +508,7 @@ export class WorkOrderPageComponent {
     this.workOrders.set(workOrders);
     this.properties.set(properties);
     this.serviceTypes.set(catalog.serviceTypes);
+    this.allWorkerProfiles.set(workers);
     this.workers.set(workers.filter((worker) => worker.status === 'ACTIVE'));
     this.inventoryItems.set(inventory.items);
     this.assets.set(assetCatalog.assets.filter((asset) => asset.active));

@@ -2,6 +2,7 @@ package com.lorne.platform.shared.exception;
 
 public enum ErrorCode {
     BAD_REQUEST,
+    CONFLICT,
     UNAUTHORIZED,
     FORBIDDEN,
     NOT_FOUND,

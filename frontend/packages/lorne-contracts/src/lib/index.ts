@@ -54,6 +54,8 @@ export interface TenantUserRecord {
   createdAt: string;
 }
 
+export type TenantUserRecipient = Pick<TenantUserRecord, 'id' | 'displayName' | 'email' | 'status' | 'roles'>;
+
 export interface TenantRoleOption {
   code: TenantAssignableRole;
   displayName: string;
@@ -545,18 +547,44 @@ export interface SuperAdminOverviewResponse {
     icon: string;
   }>;
   tenantHealth: Array<{
+    id: string;
     tenantName: string;
+    subdomain: string;
     status: string;
-    plan: string;
-    openWorkOrders: number;
-    activeWorkers: number;
+    activeUsers: number;
+    activeAdministrators: number;
+    openTickets: number;
+    lastLoginAt?: string;
   }>;
   priorityActions: Array<{
     label: string;
     description: string;
     severity: 'success' | 'info' | 'warn' | 'danger' | 'contrast';
+    path: string;
   }>;
+  tenantStatuses: { status: string; count: number }[];
+  support: { open: number; inProgress: number; waitingOnTenant: number; urgent: number; unassigned: number };
 }
+
+export interface TenantOperationsOverview {
+  properties: number; activeWorkers: number; openWorkOrders: number; completedWorkOrders: number;
+  unresolvedTickets: number; resolvedTickets: number; lastLoginAt?: string;
+}
+
+export const SUPPORT_STATUSES = ['OPEN', 'IN_PROGRESS', 'WAITING_ON_TENANT', 'RESOLVED', 'CLOSED'] as const;
+export const SUPPORT_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
+export const SUPPORT_CATEGORIES = ['ACCESS', 'SETUP', 'WORK_ORDERS', 'INVOICING', 'QUOTES', 'BUG', 'OTHER'] as const;
+export interface SupportTicket {
+  id: string; tenantId: string; tenantName: string; number: string; subject: string; description: string;
+  category: string; priority: string; status: string; assignedTo?: string; assignedToName?: string;
+  createdByName?: string; version: number; createdAt: string; updatedAt: string; resolvedAt?: string;
+}
+export interface SupportTicketDetail {
+  ticket: SupportTicket;
+  messages: { id: string; body: string; authorName?: string; authorType: string; internal: boolean; createdAt: string }[];
+}
+export interface SupportTicketPage { items: SupportTicket[]; total: number; page: number; size: number; }
+export interface SupportAgent { id: string; displayName: string; email: string; }
 
 export type NewTenantStatus = 'TRIAL' | 'ACTIVE';
 
@@ -611,9 +639,86 @@ export interface SuperAdminTenantSummary {
   provinceCode?: string;
   administratorEmail?: string;
   activeUsers: number;
+  activeAdministrators?: number;
   activeProperties: number;
   quoteManagementEnabled: boolean;
   createdAt: string;
+}
+
+export interface UpdateTenantRequest {
+  legalName: string;
+  displayName: string;
+  portalSubdomain: string;
+  planCode: string;
+  status: string;
+  timezone: string;
+  countryCode: string;
+  provinceCode?: string;
+  organizationName: string;
+  billingEmail?: string;
+  supportEmail?: string;
+  companyPhone?: string;
+  websiteUrl?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  postalCode?: string;
+}
+
+export interface SuperAdminTenantDetail {
+  tenant: SuperAdminTenantSummary;
+  profile: UpdateTenantRequest;
+}
+
+export interface TenantAdministrationEvent {
+  id: string;
+  action: string;
+  actorName?: string;
+  moduleCode?: string;
+  createdAt: string;
+}
+
+export interface UpdateTenantPortalAccessRequest {
+  portalRoles: ('TENANT_ADMIN' | 'OPERATIONS' | 'FINANCE')[];
+  reactivate: boolean;
+  reason: string;
+}
+
+export interface TenantHealthReport {
+  tenantId: string;
+  checkedAt: string;
+  activeAdministrators: number;
+  activeUsers: number;
+  activeWorkers: number;
+  workersWithoutLogin: number;
+  checks: { code: string; label: string; severity: 'PASS' | 'WARNING' | 'CRITICAL' | 'INFO'; detail: string }[];
+}
+
+export interface TenantSupportNote {
+  id: string;
+  note: string;
+  actorName?: string;
+  createdAt: string;
+}
+
+export interface PlatformAuditEvent {
+  id: string;
+  tenantId: string;
+  tenantName?: string;
+  action: string;
+  actorName?: string;
+  actorEmail?: string;
+  resourceType: string;
+  resourceId?: string;
+  detail: string;
+  createdAt: string;
+}
+
+export interface PlatformAuditPage {
+  items: PlatformAuditEvent[];
+  total: number;
+  page: number;
+  size: number;
 }
 
 export interface PropertyOwner {
@@ -1364,6 +1469,7 @@ export interface TenantSettingsRecord {
 }
 
 export interface UpdateTenantSettingsRequest {
+  timezone?: string;
   organizationName?: string;
   portalSubdomain?: string;
   billingEmail?: string;
@@ -1765,6 +1871,19 @@ export interface CreateWorkOrderRequest {
 
 export type QuoteStatus = 'DRAFT' | 'SENT' | 'VIEWED' | 'APPROVED' | 'DECLINED' | 'EXPIRED' | 'CONVERTED' | 'VOID';
 
+export type QuotePricingMode = 'ITEMIZED' | 'TOTAL_PRICE';
+export interface QuoteTemplate {
+  code: string;
+  name: string;
+  pricingMode: QuotePricingMode;
+  defaultNotes?: string;
+  defaultTerms?: string;
+  version: number;
+  assignedTenants: number;
+  defaultForTenant: boolean;
+}
+export interface QuoteTemplateAssignment { templateCodes: string[]; defaultCode: string; }
+
 export interface QuoteLine {
   id?: string;
   description: string;
@@ -1776,6 +1895,9 @@ export interface QuoteLine {
 }
 
 export interface QuoteRecord {
+  templateCode?: string;
+  templateName?: string;
+  pricingMode?: QuotePricingMode;
   id: string;
   quoteNumber: string;
   customerId?: string;
@@ -1813,6 +1935,8 @@ export interface QuoteRecord {
 }
 
 export interface UpsertQuoteRequest {
+  templateCode?: string;
+  totalPrice?: number;
   customerId?: string;
   adhocCustomerName?: string;
   adhocCustomerEmail?: string;
@@ -1839,12 +1963,49 @@ export interface SendQuoteRequest {
 }
 
 export interface PublicQuote {
+  timezone?: string;
+  companyAddress?: string;
+  taxRegistrationNumber?: string;
   companyName: string;
   logoUrl?: string;
   primaryColor: string;
   supportEmail?: string;
   phone?: string;
   quote: QuoteRecord;
+}
+
+export interface QuotePhoto {
+  id: string;
+  caption: string;
+  clientVisible: boolean;
+  authorName: string;
+  source: 'TENANT_PORTAL' | 'SITE_LINK';
+  createdAt: string;
+}
+
+export interface QuoteSiteNote {
+  id: string;
+  authorName: string;
+  body: string;
+  source: 'TENANT_PORTAL' | 'SITE_LINK';
+  createdAt: string;
+}
+
+export interface QuoteCaptureLink { publicUrl: string; expiresAt: string; active: boolean; }
+export interface QuoteSiteDetails { photos: QuotePhoto[]; notes: QuoteSiteNote[]; captureLink?: QuoteCaptureLink; }
+export interface QuoteCaptureView {
+  timezone?: string;
+  companyName: string;
+  logoUrl?: string;
+  primaryColor: string;
+  quoteNumber: string;
+  title: string;
+  propertyName?: string;
+  propertyAddress?: string;
+  scope?: string;
+  expiresAt: string;
+  photos: QuotePhoto[];
+  notes: QuoteSiteNote[];
 }
 
 export interface CancelWorkOrderRequest {

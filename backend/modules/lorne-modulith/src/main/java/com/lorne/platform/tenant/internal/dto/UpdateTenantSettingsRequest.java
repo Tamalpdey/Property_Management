@@ -57,6 +57,7 @@ public record UpdateTenantSettingsRequest(
         String graphSenderUser,
         Boolean autoSendWorkCompletedEmail,
         Boolean autoSendInvoiceEmail,
-        Boolean liveWorkerTrackingEnabled
+        Boolean liveWorkerTrackingEnabled,
+        String timezone
 ) {
 }

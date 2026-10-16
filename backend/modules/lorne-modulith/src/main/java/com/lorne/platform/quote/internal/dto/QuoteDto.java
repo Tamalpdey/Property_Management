@@ -40,6 +40,9 @@ public record QuoteDto(
         String convertedWorkOrderNumber,
         Instant createdAt,
         Instant updatedAt,
-        List<QuoteLineDto> lines
+        List<QuoteLineDto> lines,
+        String templateCode,
+        String templateName,
+        String pricingMode
 ) {
 }

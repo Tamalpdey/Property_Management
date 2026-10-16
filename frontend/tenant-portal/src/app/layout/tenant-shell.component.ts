@@ -1,8 +1,8 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { catchError, firstValueFrom, interval, map, of, startWith, switchMap } from 'rxjs';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { catchError, filter, interval, map, of, startWith, switchMap } from 'rxjs';
 import type { CurrentUser, TenantSettingsRecord } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../core/services/auth.service';
@@ -137,6 +137,7 @@ export class TenantShellComponent {
   private readonly communicationService = inject(CommunicationService);
   private readonly tenantSettingsService = inject(TenantSettingsService);
   private readonly tenantThemeService = inject(TenantThemeService);
+  private readonly router = inject(Router);
   protected readonly mobileMenuOpen = signal(false);
   protected readonly tenantSettings = signal<TenantSettingsRecord | null>(null);
   protected readonly unreadMessageCount = signal(0);
@@ -201,6 +202,7 @@ export class TenantShellComponent {
     {
       label: 'Operations',
       items: [
+        { label: 'Quotes', path: '/quotes', icon: 'pi pi-file-edit', feature: 'QUOTES' },
         { label: 'Work orders', path: '/work-orders', icon: 'pi pi-calendar-plus' },
         { label: 'Schedule', path: '/schedule', icon: 'pi pi-calendar-clock' },
         { label: 'Route intelligence', path: '/route-intelligence', icon: 'pi pi-map' },
@@ -217,12 +219,6 @@ export class TenantShellComponent {
       ]
     },
     {
-      label: 'Sales',
-      items: [
-        { label: 'Quotes', path: '/quotes', icon: 'pi pi-file-edit', feature: 'QUOTES' }
-      ]
-    },
-    {
       label: 'Finance',
       items: [
         { label: 'Finance overview', path: '/finance', icon: 'pi pi-dollar', roles: ['TENANT_ADMIN', 'FINANCE'] },
@@ -234,7 +230,8 @@ export class TenantShellComponent {
       label: 'Administration',
       items: [
         { label: 'Users', path: '/users', icon: 'pi pi-user-edit', roles: ['TENANT_ADMIN'] },
-        { label: 'Email templates', path: '/email-templates', icon: 'pi pi-envelope', roles: ['TENANT_ADMIN', 'FINANCE'] },
+        { label: 'Email templates', path: '/email-templates', icon: 'pi pi-envelope', roles: ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'] },
+        { label: 'Support tickets', path: '/support-tickets', icon: 'pi pi-ticket', roles: ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'] },
         { label: 'Email audit', path: '/email-audit', icon: 'pi pi-send', roles: ['TENANT_ADMIN', 'OPERATIONS', 'FINANCE'] },
         { label: 'Settings', path: '/settings', icon: 'pi pi-cog', roles: ['TENANT_ADMIN'] }
       ]
@@ -242,18 +239,16 @@ export class TenantShellComponent {
   ];
 
   constructor() {
-    void this.loadTenantSettings();
-    this.startUnreadMessagePolling();
-  }
-
-  private async loadTenantSettings(): Promise<void> {
-    try {
-      const settings = await firstValueFrom(this.tenantSettingsService.get());
+    this.router.events.pipe(
+      filter(event => event instanceof NavigationEnd),
+      startWith(null),
+      switchMap(() => this.tenantSettingsService.get().pipe(catchError(() => of(null)))),
+      takeUntilDestroyed()
+    ).subscribe(settings => {
       this.tenantSettings.set(settings);
-      this.tenantThemeService.apply(settings);
-    } catch {
-      this.tenantSettings.set(null);
-    }
+      if (settings) this.tenantThemeService.apply(settings);
+    });
+    this.startUnreadMessagePolling();
   }
 
   private startUnreadMessagePolling(): void {

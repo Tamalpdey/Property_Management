@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ApiResponse, CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, UpdateTenantUserRequest } from '@lorne/contracts';
+import type { ApiResponse, CreateTenantUserRequest, TenantRoleOption, TenantUserRecord, TenantUserRecipient, UpdateTenantUserRequest } from '@lorne/contracts';
 import { map } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 
@@ -17,6 +17,12 @@ export class TenantUserService {
   roles() {
     return this.http
       .get<ApiResponse<TenantRoleOption[]>>(`${environment.apiBaseUrl}/tenant/users/roles`)
+      .pipe(map((response) => response.data));
+  }
+
+  recipients() {
+    return this.http
+      .get<ApiResponse<TenantUserRecipient[]>>(`${environment.apiBaseUrl}/tenant/users/recipients`)
       .pipe(map((response) => response.data));
   }
 

@@ -20,9 +20,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final TokenProvider tokenProvider;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    public JwtAuthenticationFilter(TokenProvider tokenProvider) {
+    public JwtAuthenticationFilter(TokenProvider tokenProvider, org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         this.tokenProvider = tokenProvider;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
@@ -36,6 +38,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (token != null) {
                 var principal = tokenProvider.parseAccessToken(token);
                 if (principal.tenantId() != null) {
+                    var allowed = jdbcTemplate.queryForObject("SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ? AND status IN ('TRIAL', 'ACTIVE', 'PAST_DUE'))", Boolean.class, principal.tenantId());
+                    if (!Boolean.TRUE.equals(allowed)) throw new SecurityException("Tenant access is suspended or cancelled");
+                    var currentRoles = jdbcTemplate.queryForList("""
+                            SELECT r.code FROM user_tenant_roles utr
+                            JOIN roles r ON r.id = utr.role_id
+                            JOIN app_users u ON u.id = utr.user_id AND u.status = 'ACTIVE'
+                            WHERE utr.tenant_id = ? AND utr.user_id = ?
+                            """, String.class, principal.tenantId(), principal.userId());
+                    if (currentRoles.isEmpty() || !new java.util.HashSet<>(currentRoles).equals(new java.util.HashSet<>(principal.roles()))) {
+                        throw new SecurityException("Tenant user access or roles have changed; refresh authentication");
+                    }
                     TenantContext.setTenantId(principal.tenantId());
                 }
 

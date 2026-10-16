@@ -1,0 +1,220 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.tickets {
+  display: grid;
+  gap: 20px;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 26px;
+}
+h2 {
+  font-size: 19px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+h3 {
+  font-size: 14px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.muted,
+small,
+time {
+  color: #64748b;
+  font-size: 12px;
+}
+.heading,
+.actions,
+.row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.actions {
+  justify-content: flex-end;
+}
+.min-width {
+  min-width: 0;
+}
+.filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(100px, 1fr)) auto;
+  gap: 10px;
+}
+input:not([type='checkbox']),
+select,
+textarea {
+  font: inherit;
+  font-size: 13px;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+  color: #172033;
+  box-sizing: border-box;
+  min-width: 0;
+}
+textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+.ticket-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.5fr);
+  gap: 24px;
+  align-items: start;
+}
+.queue {
+  margin-top: 12px;
+  max-height: 800px;
+  overflow-y: auto;
+  border-block: 1px solid #e2e8f0;
+}
+.ticket-row {
+  display: block;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: white;
+  padding: 16px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #172033;
+}
+.ticket-row.selected {
+  background: #ecfdf5;
+  box-shadow: inset 3px 0 #1d4ed8;
+}
+.ticket-row p {
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.badge.urgent {
+  background: #fff1f2;
+  color: #b91c1c;
+}
+.conversation {
+  min-width: 0;
+  border-top: 2px solid #1d4ed8;
+  padding-top: 16px;
+}
+.ticket-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 20px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.ticket-controls label,
+.reply-form {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ticket-controls button {
+  grid-column: 1/-1;
+  justify-self: end;
+}
+.message {
+  padding: 20px 0;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 14px;
+}
+.message.internal {
+  background: #fffbeb;
+  padding-inline: 12px;
+}
+.body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  margin-top: 10px;
+}
+.reply-form {
+  padding-top: 20px;
+  gap: 10px;
+}
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox input {
+  height: 18px;
+  width: 18px;
+  accent-color: #1d4ed8;
+}
+.empty {
+  padding: 32px 12px;
+  color: #64748b;
+  text-align: center;
+  font-size: 14px;
+}
+.error {
+  padding: 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+a {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+@media (max-width: 1100px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 800px) {
+  .ticket-layout {
+    grid-template-columns: 1fr;
+  }
+  .queue {
+    max-height: 340px;
+  }
+}
+@media (max-width: 450px) {
+  .filters,
+  .ticket-controls {
+    grid-template-columns: 1fr;
+  }
+  h1 {
+    font-size: 23px;
+  }
+  .heading {
+    align-items: flex-start;
+  }
+  .ticket-controls button {
+    justify-self: stretch;
+  }
+}

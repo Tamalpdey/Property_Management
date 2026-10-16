@@ -23,6 +23,7 @@ public class RolePermissionRegistry {
         ));
         permissionsByRole.put(LorneRole.OPERATIONS, EnumSet.of(
                 LornePermission.MANAGE_PROPERTIES,
+                LornePermission.MANAGE_WORKERS,
                 LornePermission.CREATE_WORK_ORDERS,
                 LornePermission.ASSIGN_WORKERS,
                 LornePermission.APPROVE_WORK

@@ -62,9 +62,7 @@
   }
 
   handle {
-    root * /srv/maple-site
-    try_files {path} /index.html
-    file_server
+    redir https://{$MAIN_DOMAIN}{uri} 308
   }
 }
 
@@ -76,9 +74,7 @@
   }
 
   handle {
-    root * /srv/maple-site
-    try_files {path} /index.html
-    file_server
+    reverse_proxy public-site:80
   }
 }
 

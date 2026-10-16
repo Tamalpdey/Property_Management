@@ -1,5 +1,6 @@
-import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { TenantDatePipe as DatePipe } from '../../../shared/tenant-date.pipe';
+import { ChangeDetectionStrategy, Component, inject, input, output, signal } from '@angular/core';
+import { TenantTimeService } from '../../../core/services/tenant-time.service';
 import { FormsModule } from '@angular/forms';
 import type { WorkerAssignedJob } from '@lorne/contracts';
 import { workerFacingStatus } from '../worker-job-ui';
@@ -123,6 +124,7 @@ type JobFilter = 'ALL' | 'ACTIVE' | 'SCHEDULED' | 'DONE' | 'NEEDS_HELP';
   `
 })
 export class WorkerJobQueueComponent {
+  private readonly time = inject(TenantTimeService);
   selectedDate = input.required<string>();
   dayJobs = input.required<WorkerAssignedJob[]>();
   unscheduledJobs = input.required<WorkerAssignedJob[]>();
@@ -153,7 +155,7 @@ export class WorkerJobQueueComponent {
     if (now >= start && (!end || now <= end) && !isDone(job)) {
       return 'now';
     }
-    return start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return this.time.format(start, { hour: 'numeric', minute: '2-digit' });
   }
 
   protected timingTone(job: WorkerAssignedJob): 'late' | 'now' | 'future' {

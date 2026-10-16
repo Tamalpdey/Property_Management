@@ -1,4 +1,4 @@
 package com.lorne.platform.superadmin.internal.dto;
 
-public record UpdateTenantModuleRequest(boolean enabled) {
+public record UpdateTenantModuleRequest(@jakarta.validation.constraints.NotNull Boolean enabled) {
 }

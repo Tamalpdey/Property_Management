@@ -75,16 +75,16 @@ import type { WorkerTodayResponse, WorkerStepKey } from '@lorne/contracts';
     }
 
     .worker-step--active {
-      background: #0d9488;
-      border-color: #0f766e;
-      box-shadow: 0 8px 18px rgba(13, 148, 136, 0.22);
-      color: white;
+      background: var(--tenant-primary);
+      border-color: var(--tenant-primary);
+      box-shadow: 0 8px 18px var(--tenant-primary-soft);
+      color: var(--tenant-primary-contrast);
     }
 
     .worker-step--done {
-      background: #ecfdf5;
-      border-color: #99f6e4;
-      color: #0f766e;
+      background: var(--tenant-primary-soft);
+      border-color: var(--p-primary-200);
+      color: var(--tenant-primary);
     }
 
     .worker-step--upcoming {

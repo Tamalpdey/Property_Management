@@ -1,4 +1,5 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../../shared/tenant-date.pipe';
+import { TenantTimeService } from '../../../core/services/tenant-time.service';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
@@ -511,6 +512,7 @@ type Worker360Tab = 'OVERVIEW' | 'WORK' | 'ACTIVITY' | 'SCHEDULE' | 'TOOLS' | 'S
   `
 })
 export class Worker360ViewComponent {
+  private readonly time = inject(TenantTimeService);
   private readonly workerManagementService = inject(WorkerManagementService);
 
   readonly worker = input.required<WorkerRecord>();
@@ -690,7 +692,7 @@ export class Worker360ViewComponent {
     const nextJob = this.workerJobs()
       .filter((job) => isFuture(job.scheduledStart))
       .sort((left, right) => dateValue(left.scheduledStart) - dateValue(right.scheduledStart))[0];
-    return nextJob ? `${nextJob.workOrderNumber} · ${new Date(nextJob.scheduledStart || '').toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'No upcoming job';
+    return nextJob ? `${nextJob.workOrderNumber} · ${this.time.format(nextJob.scheduledStart || '', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'No upcoming job';
   }
 
   protected totalActualHours(): number {
@@ -719,8 +721,8 @@ export class Worker360ViewComponent {
     }
     const start = new Date(workOrder.scheduledStart);
     const end = workOrder.scheduledEnd ? new Date(workOrder.scheduledEnd) : null;
-    const startLabel = start.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const endLabel = end?.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const startLabel = this.time.format(start, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const endLabel = end ? this.time.format(end, { hour: 'numeric', minute: '2-digit' }) : undefined;
     return endLabel ? `${startLabel} - ${endLabel}` : startLabel;
   }
 

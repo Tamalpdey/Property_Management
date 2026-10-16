@@ -1,57 +1,43 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
+import { DrawerModule } from 'primeng/drawer';
+import { filter } from 'rxjs';
 import { AuthService } from '../core/services/auth.service';
 
 @Component({
-  selector: 'lorne-admin-shell',
-  standalone: true,
-  imports: [ButtonModule, RouterLink, RouterLinkActive, RouterOutlet],
+  selector: 'lorne-admin-shell', standalone: true,
+  imports: [NgTemplateOutlet, ButtonModule, DrawerModule, RouterLink, RouterLinkActive, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="min-h-screen bg-slate-50 md:grid md:grid-cols-[17rem_1fr]">
-      <aside class="hidden border-r border-slate-800 bg-slate-950 p-4 text-white md:block">
-        <a routerLink="/dashboard" class="flex items-center gap-3 text-white no-underline">
-          <span class="grid h-11 w-11 place-items-center rounded-lg bg-white font-bold text-slate-950">L</span>
-          <span>
-            <span class="block text-sm font-bold">Lorne Admin</span>
-            <span class="block text-xs font-medium text-slate-400">Platform controls</span>
-          </span>
-        </a>
-        <nav class="mt-8 space-y-1">
-          <a routerLink="/dashboard" routerLinkActive="bg-white text-slate-950" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-300 no-underline hover:bg-white/10"><i class="pi pi-chart-bar"></i> Dashboard</a>
-          <a routerLink="/tenants" routerLinkActive="bg-white text-slate-950" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-300 no-underline hover:bg-white/10"><i class="pi pi-building"></i> Tenants</a>
-          <span class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-500">Plans</span>
-          <span class="block rounded-lg px-3 py-2 text-sm font-semibold text-slate-500">Audit</span>
-        </nav>
-        <div class="mt-8 rounded-lg border border-slate-800 bg-white/5 p-4">
-          <p class="text-xs font-bold uppercase tracking-wide text-slate-400">Runtime</p>
-          <p class="mt-2 text-sm font-bold">Spring Modulith</p>
-          <p class="mt-1 text-xs leading-5 text-slate-400">Tenant isolation, audit, worker activity, and platform health.</p>
-        </div>
-      </aside>
-
-      <main>
-        <header class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
-          <nav class="flex items-center gap-1 md:hidden" aria-label="Admin navigation">
-            <a routerLink="/dashboard" routerLinkActive="bg-slate-950 text-white" class="rounded px-3 py-2 text-sm font-bold text-slate-600 no-underline">Dashboard</a>
-            <a routerLink="/tenants" routerLinkActive="bg-slate-950 text-white" class="rounded px-3 py-2 text-sm font-bold text-slate-600 no-underline">Tenants</a>
-          </nav>
-          <span class="hidden text-sm font-semibold text-slate-500 md:inline">Platform administration</span>
-          <button pButton type="button" severity="secondary" size="small" icon="pi pi-sign-out" label="Sign out" (click)="signOut()"></button>
-        </header>
-        <div class="p-4 md:p-8">
-          <router-outlet />
-        </div>
-      </main>
-    </div>
-  `
+  templateUrl: './admin-shell.component.html', styleUrls: ['./admin-shell.component.scss']
 })
 export class AdminShellComponent {
   private readonly auth = inject(AuthService);
-
-  signOut(): void {
-    this.auth.signOut();
-    location.assign('/login');
+  private readonly router = inject(Router);
+  protected readonly mobileOpen = signal(false);
+  protected readonly currentPath = signal(this.router.url);
+  protected readonly user = this.auth.currentUser;
+  protected readonly initials = computed(() => (this.user()?.displayName || 'Admin').split(' ').filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase());
+  protected readonly sections = [
+    { name: 'Workspace', items: [
+      { label: 'Dashboard', path: '/dashboard', icon: 'pi pi-chart-bar' },
+      { label: 'Tenants', path: '/tenants', icon: 'pi pi-building' },
+      { label: 'Support tickets', path: '/support-tickets', icon: 'pi pi-ticket' }
+    ] },
+    { name: 'Configuration', items: [
+      { label: 'Quote templates', path: '/quote-templates', icon: 'pi pi-file-edit' },
+      { label: 'Audit log', path: '/audit', icon: 'pi pi-history' }
+    ] }
+  ];
+  protected readonly title = computed(() => this.currentPath().startsWith('/tenants/new') ? 'Onboard tenant'
+    : this.currentPath().includes('/support') && this.currentPath().startsWith('/tenants/') ? 'Tenant workspace'
+    : this.sections.flatMap(section => section.items).find(item => this.currentPath().startsWith(item.path))?.label || 'Dashboard');
+  constructor() {
+    this.router.events.pipe(filter(event => event instanceof NavigationEnd), takeUntilDestroyed()).subscribe(() => {
+      this.currentPath.set(this.router.url); this.mobileOpen.set(false);
+    });
   }
+  signOut(): void { this.auth.signOut(); location.assign('/login'); }
 }

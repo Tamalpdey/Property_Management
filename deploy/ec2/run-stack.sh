@@ -5,6 +5,8 @@ MODE="${1:-}"
 ACTION="${2:-up}"
 SERVICE="${3:-}"
 PLATFORM="${TARGET_PLATFORM:-${4:-linux/amd64}}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 usage() {
   cat <<'EOF'
@@ -17,6 +19,8 @@ Examples:
 ./run-stack.sh prod build-push worker-app linux/amd64
 ./run-stack.sh prod pull-deploy "" linux/amd64
 ./run-stack.sh prod migrate
+./run-stack.sh prod website-build-push
+./run-stack.sh prod website-pull-deploy
 
 Env:
 TARGET_PLATFORM=linux/amd64
@@ -36,6 +40,10 @@ migrate       Run Flyway migrations against configured external database
 ps            Show status
 logs          Tail logs
 config        Render compose config
+website-build       Build public website and updated edge only
+website-build-push  Build and push public website and updated edge only
+website-deploy      Deploy built/pulled website and edge without rebuilding
+website-pull-deploy Pull and deploy website and edge without rebuilding
 EOF
 }
 
@@ -45,6 +53,7 @@ if [[ -z "$MODE" || ("$MODE" != "local" && "$MODE" != "prod") ]]; then
 fi
 
 export DOCKER_DEFAULT_PLATFORM="$PLATFORM"
+export DOCKER_PLATFORM="$PLATFORM"
 export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
 export COMPOSE_DOCKER_CLI_BUILD="${COMPOSE_DOCKER_CLI_BUILD:-1}"
 
@@ -60,6 +69,12 @@ else
 fi
 
 compose_cmd=(docker compose --env-file .env.prod -f docker-compose.yml)
+
+deploy_website() {
+  # Leave the current edge running if the new public site does not become healthy.
+  "${compose_cmd[@]}" up -d --no-build --no-deps --wait --wait-timeout 90 public-site
+  "${compose_cmd[@]}" up -d --no-build --no-deps --wait --wait-timeout 90 edge
+}
 
 check_private_ports() {
   local rendered
@@ -174,11 +189,34 @@ case "$ACTION" in
     if [[ -n "$SERVICE" ]]; then
       "${compose_cmd[@]}" logs -f "$SERVICE"
     else
-      "${compose_cmd[@]}" logs -f edge lorne-modulith tenant-portal admin-portal worker-app
+      "${compose_cmd[@]}" logs -f edge public-site lorne-modulith tenant-portal admin-portal worker-app
     fi
     ;;
   config)
     "${compose_cmd[@]}" config
+    ;;
+  website-build|website-build-push|website-deploy|website-pull-deploy)
+    if [[ -n "$SERVICE" ]]; then
+      echo "ERROR: website actions already target public-site and edge; omit the service argument."
+      exit 1
+    fi
+    case "$ACTION" in
+      website-build)
+        "${compose_cmd[@]}" build public-site edge
+        ;;
+      website-build-push)
+        "${compose_cmd[@]}" build --push public-site edge
+        ;;
+      website-deploy)
+        check_private_ports
+        deploy_website
+        ;;
+      website-pull-deploy)
+        check_private_ports
+        "${compose_cmd[@]}" pull public-site edge
+        deploy_website
+        ;;
+    esac
     ;;
   *)
     echo "Unsupported action: $ACTION"

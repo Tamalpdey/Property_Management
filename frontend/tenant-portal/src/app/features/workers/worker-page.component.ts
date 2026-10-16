@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TenantTimeService } from '../../core/services/tenant-time.service';
+import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
@@ -260,6 +262,7 @@ type WorkerStatusFilter = 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'TERMINATED' | 'A
   `
 })
 export class WorkerPageComponent {
+  private readonly time = inject(TenantTimeService);
   private readonly workerManagementService = inject(WorkerManagementService);
   private readonly serviceCatalogService = inject(ServiceCatalogService);
   private readonly tenantUserService = inject(TenantUserService);
@@ -451,8 +454,8 @@ export class WorkerPageComponent {
     }
     const start = new Date(workOrder.scheduledStart);
     const end = workOrder.scheduledEnd ? new Date(workOrder.scheduledEnd) : null;
-    const startLabel = start.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const endLabel = end?.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const startLabel = this.time.format(start, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const endLabel = end ? this.time.format(end, { hour: 'numeric', minute: '2-digit' }) : undefined;
     return endLabel ? `${startLabel} - ${endLabel}` : startLabel;
   }
 
@@ -604,8 +607,10 @@ export class WorkerPageComponent {
       this.onboardingForm?.reset();
       this.showCreate.set(false);
       this.editingWorker.set(null);
-    } catch {
-      this.error.set('Unable to save worker. Check duplicate employee number, required fields, or backend status.');
+    } catch (error) {
+      this.error.set(error instanceof HttpErrorResponse
+        ? error.error?.error?.message || error.error?.message || 'Unable to save worker. Check duplicate employee number or email, required fields, or backend status.'
+        : 'Unable to save worker. Check duplicate employee number or email, required fields, or backend status.');
     } finally {
       this.saving.set(false);
     }
@@ -652,8 +657,10 @@ export class WorkerPageComponent {
       const updated = await firstValueFrom(this.workerManagementService.updateStatus(worker.id, { status, ...patch }));
       this.workers.update((workers) => [updated, ...workers.filter((candidate) => candidate.id !== updated.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
       return updated;
-    } catch {
-      this.error.set('Unable to update worker status.');
+    } catch (error) {
+      this.error.set(error instanceof HttpErrorResponse
+        ? error.error?.error?.message || error.error?.message || 'Unable to update worker status.'
+        : 'Unable to update worker status.');
       return null;
     }
   }

@@ -379,6 +379,7 @@ export function dayTicketHtml(input: {
   const clockSessions = input.shiftSummary?.entries ?? [];
   const rowSlots = Array.from({ length: Math.max(10, input.rows.length) }, (_, index) => input.rows[index]);
   const brand = tenantBrand(input.settings);
+  const timezone = input.settings?.timezone;
   const rangeLabel = ticketDateLabel(input.dateFrom, input.dateTo);
   const workOrderLabel = dayTicketWorkOrderLabeler(input.rows, input.dateFrom || input.dateTo);
   const loadouts = (input.loadouts ?? []).filter(hasLoadoutDetails);
@@ -505,8 +506,8 @@ export function dayTicketHtml(input: {
       <tbody>
         ${rowSlots.map((row) => row ? `
           <tr>
-            <td class="time">${escapeHtml(ticketTimeLabel(row.timeIn, input.dateFrom, input.dateTo, ''))}${row.timeInFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
-            <td class="time">${escapeHtml(ticketTimeLabel(row.timeOut, input.dateFrom, input.dateTo, ''))}${row.timeOutFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
+            <td class="time">${escapeHtml(ticketTimeLabel(row.timeIn, input.dateFrom, input.dateTo, '', timezone))}${row.timeInFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
+            <td class="time">${escapeHtml(ticketTimeLabel(row.timeOut, input.dateFrom, input.dateTo, '', timezone))}${row.timeOutFromSchedule ? '<span class="schedule-fallback">scheduled*</span>' : ''}${row.assignment?.timingOverride ? '<span class="override-badge">override</span>' : ''}</td>
             <td class="client">${escapeHtml(dayTicketClient(row))}<div class="muted">${escapeHtml(dayTicketClientMeta(row))}</div>${workOrderLabel(row) ? `<div class="wo-number">${escapeHtml(workOrderLabel(row))}</div>` : ''}</td>
             <td class="desc">
               <span class="entry-kind ${escapeAttribute(row.rowType.toLowerCase().replaceAll('_', '-'))}">${escapeHtml(dayTicketRowTypeLabel(row))}</span>
@@ -531,7 +532,7 @@ export function dayTicketHtml(input: {
     ${input.options.includeWorkerNotes ? `
       <section class="notes">
         <div class="notes-title">SPECIAL NOTES</div>
-        ${dayTicketSpecialNotes(input.rows, workOrderLabel)}
+        ${dayTicketSpecialNotes(input.rows, workOrderLabel, timezone)}
       </section>
     ` : ''}
     ${input.rows.some((row) => row.timeInFromSchedule || row.timeOutFromSchedule) ? '<p class="legend">* Scheduled fallback used because actual worker timing was not captured.</p>' : ''}
@@ -539,8 +540,8 @@ export function dayTicketHtml(input: {
 
     ${input.options.includeTotals ? `
       <section class="footer">
-        <div><span>Clock-in</span><div class="line">${escapeHtml(timeOnly(firstStart, ''))}</div></div>
-        <div><span>Clock-out</span><div class="line">${escapeHtml(timeOnly(lastFinish, ''))}</div></div>
+        <div><span>Clock-in</span><div class="line">${escapeHtml(timeOnly(firstStart, '', timezone))}</div></div>
+        <div><span>Clock-out</span><div class="line">${escapeHtml(timeOnly(lastFinish, '', timezone))}</div></div>
         <div><span>Down Time</span><div class="line">${escapeHtml(downTimeMinutes ? minutesLabel(downTimeMinutes) : '')}</div></div>
         <div><span>Total Time</span><div class="line">${escapeHtml(minutesLabel(totalMinutes))}</div></div>
       </section>
@@ -550,8 +551,8 @@ export function dayTicketHtml(input: {
           ${clockSessions.map((entry, index) => `
             <div class="clock-session-row">
               <span>Session ${index + 1}${entry.override ? '<em class="adjusted-badge">adjusted</em>' : ''}</span>
-              <div>Clock-in: ${escapeHtml(shortDateTime(entry.startedAt))}</div>
-              <div>Clock-out: ${escapeHtml(entry.endedAt ? shortDateTime(entry.endedAt) : 'Active')}</div>
+              <div>Clock-in: ${escapeHtml(shortDateTime(entry.startedAt, timezone))}</div>
+              <div>Clock-out: ${escapeHtml(entry.endedAt ? shortDateTime(entry.endedAt, timezone) : 'Active')}</div>
               <strong>${escapeHtml(minutesLabel(Math.max(0, (entry.durationMinutes ?? minutesBetween(entry.startedAt, entry.endedAt)) - (entry.pauseMinutes ?? 0))))}</strong>
             </div>
             ${entry.overrideReason ? `<div class="muted">Session ${index + 1} adjustment: ${escapeHtml(entry.overrideReason)}</div>` : ''}
@@ -566,7 +567,7 @@ export function dayTicketHtml(input: {
       </section>
     ` : ''}
 
-    <p class="hint">Generated ${escapeHtml(new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(input.generatedAt))}${input.workerEmail ? ` · ${escapeHtml(input.workerEmail)}` : ''}${brand.contact ? ` · ${escapeHtml(brand.contact)}` : ''}</p>
+    <p class="hint">Generated ${escapeHtml(new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone }).format(input.generatedAt))}${input.workerEmail ? ` · ${escapeHtml(input.workerEmail)}` : ''}${brand.contact ? ` · ${escapeHtml(brand.contact)}` : ''}</p>
   </main>
 </body>
 </html>`;
@@ -606,15 +607,15 @@ export function dayTicketEstimatedTravelLabel(entry: DayTicketEntry): string {
   return `${minutesLabel(minutes)} ${dayTicketEstimateProviderLabel(entry)}`;
 }
 
-export function timeOnly(value?: string, fallback = '-'): string {
-  return value ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(value)) : fallback;
+export function timeOnly(value?: string, fallback = '-', timezone?: string): string {
+  return value ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone }).format(new Date(value)) : fallback;
 }
 
-export function ticketTimeLabel(value: string | undefined, dateFrom: string, dateTo: string, fallback = '-'): string {
+export function ticketTimeLabel(value: string | undefined, dateFrom: string, dateTo: string, fallback = '-', timezone?: string): string {
   if (!value) {
     return fallback;
   }
-  return dateFrom && dateTo && dateFrom !== dateTo ? shortDateTime(value) : timeOnly(value, fallback);
+  return dateFrom && dateTo && dateFrom !== dateTo ? shortDateTime(value, timezone) : timeOnly(value, fallback, timezone);
 }
 
 export function minutesLabel(minutes: number): string {
@@ -860,10 +861,10 @@ function rowSortTime(row: DayTicketEntry): string | undefined {
   return row.timeIn || row.workOrder?.scheduledStart || row.activity?.startedAt || row.routeStop?.plannedArrival;
 }
 
-function dayTicketSpecialNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string {
+function dayTicketSpecialNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string, timezone?: string): string {
   const notes = [
-    ...dayTicketWorkerNotes(rows, workOrderLabel),
-    ...dayTicketActivityNotes(rows),
+    ...dayTicketWorkerNotes(rows, workOrderLabel, timezone),
+    ...dayTicketActivityNotes(rows, timezone),
     ...dayTicketOverrideNotes(rows, workOrderLabel)
   ];
   return notes.length ? notes.join('') : '<p class="notes-empty">No special notes recorded for this ticket.</p>';
@@ -873,7 +874,7 @@ function dayTicketNoteRow(ref: string, belongsTo: string, kind: string, text: st
   return `<div class="note-row"><span class="note-ref">${escapeHtml(ref)}${belongsTo ? `<small>${escapeHtml(belongsTo)}</small>` : ''}</span><span class="note-kind">${escapeHtml(kind)}${when ? `<small>${escapeHtml(when)}</small>` : ''}</span><span class="note-text">${escapeHtml(text)}</span></div>`;
 }
 
-function dayTicketWorkerNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string[] {
+function dayTicketWorkerNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string, timezone?: string): string[] {
   const renderedWorkOrders = new Set<string>();
   const notes: string[] = [];
   for (const row of rows) {
@@ -885,7 +886,7 @@ function dayTicketWorkerNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayT
     renderedWorkOrders.add(workOrder.id);
     const workerNotes = (workOrder.fieldNotes ?? [])
       .filter((note) => !note.workerId || note.workerId === assignment.workerId)
-      .map((note) => dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Field note', note.note, note.createdAt ? shortDateTime(note.createdAt) : undefined));
+      .map((note) => dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Field note', note.note, note.createdAt ? shortDateTime(note.createdAt, timezone) : undefined));
     notes.push(...workerNotes);
     if (workerNotes.length === 0 && assignment.notes) {
       notes.push(dayTicketNoteRow(workOrderLabel(row), dayTicketClient(row), 'Worker note', assignment.notes));
@@ -894,10 +895,10 @@ function dayTicketWorkerNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayT
   return notes;
 }
 
-function dayTicketActivityNotes(rows: DayTicketEntry[]): string[] {
+function dayTicketActivityNotes(rows: DayTicketEntry[], timezone?: string): string[] {
   return rows
     .filter((row) => row.rowType === 'WORKER_ACTIVITY' && row.activity?.notes)
-    .map((row) => dayTicketNoteRow('-', dayTicketClient(row), activityTypeLabel(row.activity?.activityType || 'OTHER'), row.activity?.notes || '', row.timeIn ? shortDateTime(row.timeIn) : undefined));
+    .map((row) => dayTicketNoteRow('-', dayTicketClient(row), activityTypeLabel(row.activity?.activityType || 'OTHER'), row.activity?.notes || '', row.timeIn ? shortDateTime(row.timeIn, timezone) : undefined));
 }
 
 function dayTicketOverrideNotes(rows: DayTicketEntry[], workOrderLabel: (row: DayTicketEntry) => string): string[] {
@@ -1063,8 +1064,8 @@ function minutesBetween(start?: string, end?: string): number {
   return Number.isFinite(minutes) && minutes > 0 ? minutes : 0;
 }
 
-function shortDateTime(value: string): string {
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+function shortDateTime(value: string, timezone?: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: timezone }).format(new Date(value));
 }
 
 function earliest(values: Array<string | undefined>): string | undefined {

@@ -1,4 +1,7 @@
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { NgTemplateOutlet } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../../shared/tenant-date.pipe';
+import { TenantTimeService } from '../../../core/services/tenant-time.service';
+import { formatTenantTimestamp, tenantTimezone } from '../../../../../../packages/lorne-contracts/src/lib/tenant-time';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
@@ -46,17 +49,17 @@ interface WorkOrderWorkerSummary {
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host .lorne-review-tab-active {
-      background: #0f172a !important;
-      border-color: #0f172a !important;
-      color: #fff !important;
-      box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.25) !important;
+      background: var(--tenant-primary) !important;
+      border-color: var(--tenant-primary) !important;
+      color: var(--tenant-primary-contrast) !important;
+      box-shadow: 0 0 0 2px var(--tenant-primary-soft) !important;
     }
 
     :host .lorne-review-subtab-active {
-      background: #0f766e !important;
-      border-color: #0f766e !important;
-      color: #fff !important;
-      box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.18) !important;
+      background: var(--tenant-primary) !important;
+      border-color: var(--tenant-primary) !important;
+      color: var(--tenant-primary-contrast) !important;
+      box-shadow: 0 0 0 2px var(--tenant-primary-soft) !important;
     }
   `],
   template: `
@@ -1136,6 +1139,7 @@ interface WorkOrderWorkerSummary {
   `
 })
 export class WorkOrderReviewComponent {
+  private readonly time = inject(TenantTimeService);
   private readonly sanitizer = inject(DomSanitizer);
   readonly review = input<WorkOrderReview | null>(null);
   readonly loading = input(false);
@@ -1594,10 +1598,10 @@ export class WorkOrderReviewComponent {
     const task = stringValue(metadata['taskLabel']);
     const material = stringValue(metadata['itemName']) || stringValue(metadata['description']);
     const invoice = stringValue(metadata['invoiceNumber']);
-    const changedFields = displayValue(metadata['changedFields']);
-    const changes = displayValue(metadata['changes']);
-    const before = displayValue(metadata['before']);
-    const after = displayValue(metadata['after']);
+    const changedFields = displayValue(metadata['changedFields'], this.time.timezone());
+    const changes = displayValue(metadata['changes'], this.time.timezone());
+    const before = displayValue(metadata['before'], this.time.timezone());
+    const after = displayValue(metadata['after'], this.time.timezone());
     if (audit.action.startsWith('WORKER_VIEWED_')) {
       return `${worker || audit.actorName || 'Worker'} viewed ${label || this.actionLabel(audit.action).replace('worker viewed ', '')}.`;
     }
@@ -1782,7 +1786,7 @@ export class WorkOrderReviewComponent {
     const metadata = audit.metadata ?? {};
     const entries = Object.entries(metadata)
       .filter(([key]) => !HIDDEN_AUDIT_KEYS.has(key))
-      .map(([key, value]) => ({ key: FIELD_LABELS[key] ?? sentenceLabel(key), value: displayValue(value) }))
+      .map(([key, value]) => ({ key: FIELD_LABELS[key] ?? sentenceLabel(key), value: displayValue(value, this.time.timezone()) }))
       .filter((entry) => entry.value.length > 0);
     if (metadata['latitude'] && metadata['longitude']) {
       entries.push({ key: 'Location', value: 'Captured' });
@@ -1947,7 +1951,7 @@ function auditPhotoTypeLabel(metadata: Record<string, unknown>): string {
   }
 }
 
-function displayValue(value: unknown): string {
+function displayValue(value: unknown, timezone?: string): string {
   if (value === undefined || value === null) {
     return '';
   }
@@ -1957,16 +1961,16 @@ function displayValue(value: unknown): string {
     }
     return value
       .slice(0, 3)
-      .map((item) => displayArrayItem(item))
+      .map((item) => displayArrayItem(item, timezone))
       .filter(Boolean)
       .join('; ')
       .concat(value.length > 3 ? ` +${value.length - 3} more` : '');
   }
   if (typeof value === 'object') {
-    return displayRecord(value as Record<string, unknown>);
+    return displayRecord(value as Record<string, unknown>, timezone);
   }
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
-    return new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return formatTenantTimestamp(value, tenantTimezone(timezone), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
   if (typeof value === 'string') {
     return prettifyValue(emailBodyText(value));
@@ -1977,9 +1981,9 @@ function displayValue(value: unknown): string {
   return String(value).replaceAll('_', ' ');
 }
 
-function displayArrayItem(value: unknown): string {
+function displayArrayItem(value: unknown, timezone?: string): string {
   if (!isRecord(value)) {
-    return displayValue(value);
+    return displayValue(value, timezone);
   }
   const name = [
     value['workerName'],
@@ -1989,29 +1993,29 @@ function displayArrayItem(value: unknown): string {
     value['description'],
     value['propertyName'],
     value['title']
-  ].map(displayValue).find(Boolean);
-  const status = displayValue(value['assignmentStatus'] ?? value['taskStatus'] ?? value['status']);
-  const role = value['leadWorker'] === true ? 'lead' : displayValue(value['assignmentRole'] ?? value['assetType']);
-  return [name || compactRecord(value), role, status].filter(Boolean).join(' · ');
+  ].map(item => displayValue(item, timezone)).find(Boolean);
+  const status = displayValue(value['assignmentStatus'] ?? value['taskStatus'] ?? value['status'], timezone);
+  const role = value['leadWorker'] === true ? 'lead' : displayValue(value['assignmentRole'] ?? value['assetType'], timezone);
+  return [name || compactRecord(value, timezone), role, status].filter(Boolean).join(' · ');
 }
 
-function displayRecord(record: Record<string, unknown>): string {
+function displayRecord(record: Record<string, unknown>, timezone?: string): string {
   if ('before' in record || 'after' in record) {
-    return `${displayValue(record['before']) || 'empty'} -> ${displayValue(record['after']) || 'empty'}`;
+    return `${displayValue(record['before'], timezone) || 'empty'} -> ${displayValue(record['after'], timezone) || 'empty'}`;
   }
   const entries = Object.entries(record)
     .filter(([key, value]) => !HIDDEN_AUDIT_KEYS.has(key) && !key.toLowerCase().endsWith('id') && value !== undefined && value !== null)
     .slice(0, 4)
-    .map(([key, value]) => `${FIELD_LABELS[key] ?? sentenceLabel(key)}: ${displayValue(value)}`)
+    .map(([key, value]) => `${FIELD_LABELS[key] ?? sentenceLabel(key)}: ${displayValue(value, timezone)}`)
     .filter((entry) => !entry.endsWith(': '));
   return entries.join('; ');
 }
 
-function compactRecord(record: Record<string, unknown>): string {
+function compactRecord(record: Record<string, unknown>, timezone?: string): string {
   return Object.entries(record)
     .filter(([key, value]) => !HIDDEN_AUDIT_KEYS.has(key) && !key.toLowerCase().endsWith('id') && value !== undefined && value !== null)
     .slice(0, 2)
-    .map(([key, value]) => `${FIELD_LABELS[key] ?? sentenceLabel(key)} ${displayValue(value)}`)
+    .map(([key, value]) => `${FIELD_LABELS[key] ?? sentenceLabel(key)} ${displayValue(value, timezone)}`)
     .join(', ');
 }
 

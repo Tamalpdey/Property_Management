@@ -7,6 +7,7 @@ import com.lorne.platform.quote.internal.dto.SendQuoteRequest;
 import com.lorne.platform.quote.internal.dto.UpsertQuoteRequest;
 import com.lorne.platform.quote.internal.dto.ShareQuoteRequest;
 import com.lorne.platform.quote.internal.dto.QuoteShareResult;
+import com.lorne.platform.quote.internal.dto.QuoteSharingDetails;
 import com.lorne.platform.quote.internal.dto.ConvertQuoteRequest;
 import com.lorne.platform.quote.internal.service.QuoteManagementService;
 import com.lorne.platform.shared.response.ApiResponse;
@@ -105,6 +106,12 @@ class QuoteManagementController {
     ApiResponse<QuoteShareResult> share(@AuthenticationPrincipal JwtPrincipal principal, @PathVariable UUID quoteId,
                                        @Valid @RequestBody ShareQuoteRequest request) {
         return ApiResponse.ok(quoteManagementService.share(principal.tenantId(), principal.userId(), quoteId, request.accessPassword()));
+    }
+
+    @GetMapping("/{quoteId}/sharing")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<QuoteSharingDetails> sharing(@AuthenticationPrincipal JwtPrincipal principal, @PathVariable UUID quoteId) {
+        return ApiResponse.ok(quoteManagementService.sharing(principal.tenantId(), quoteId));
     }
 
     @PostMapping("/{quoteId}/convert")

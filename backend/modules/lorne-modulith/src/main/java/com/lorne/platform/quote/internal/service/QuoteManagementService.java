@@ -19,6 +19,7 @@ import com.lorne.platform.quote.internal.dto.QuoteSendResult;
 import com.lorne.platform.quote.internal.dto.SendQuoteRequest;
 import com.lorne.platform.quote.internal.dto.UpsertQuoteRequest;
 import com.lorne.platform.quote.internal.dto.QuoteShareResult;
+import com.lorne.platform.quote.internal.dto.QuoteSharingDetails;
 import com.lorne.platform.shared.exception.BadRequestException;
 import com.lorne.platform.shared.exception.ResourceNotFoundException;
 import com.lorne.platform.tenant.TenantSettingsOperations;
@@ -35,6 +36,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -63,6 +67,7 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     private final LornePublicUrlProperties publicUrls;
     private final EmailTemplateOperations emailTemplates;
     private final EmailLogoRenderer emailLogoRenderer;
+    private final Clock clock;
 
     public QuoteManagementService(
             JdbcTemplate jdbcTemplate,
@@ -76,7 +81,8 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
             ObjectMapper objectMapper,
             LornePublicUrlProperties publicUrls,
             EmailTemplateOperations emailTemplates,
-            EmailLogoRenderer emailLogoRenderer
+            EmailLogoRenderer emailLogoRenderer,
+            Clock clock
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
@@ -90,6 +96,7 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
         this.publicUrls = publicUrls;
         this.emailTemplates = emailTemplates;
         this.emailLogoRenderer = emailLogoRenderer;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -115,9 +122,10 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     public QuoteDto create(UUID tenantId, UUID actorUserId, UpsertQuoteRequest request) {
         requireEnabled(tenantId);
         validateReferences(tenantId, request);
-        var issueDate = request.issueDate() == null ? LocalDate.now() : request.issueDate();
+        var issueDate = request.issueDate() == null ? today(tenantId) : request.issueDate();
         validateDates(issueDate, request.validUntil());
-        var totals = totals(request, tenantSettingsOperations.settings(tenantId).invoiceTaxRate());
+        var template = pricingTemplate(tenantId, request.templateCode(), null);
+        var totals = totals(request, tenantSettingsOperations.settings(tenantId).invoiceTaxRate(), template.mode());
         var quoteNumber = nextQuoteNumber(tenantId, issueDate);
         var quoteId = jdbcTemplate.queryForObject("""
                 INSERT INTO quotes (
@@ -125,8 +133,8 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                     adhoc_customer_phone, property_id, adhoc_property_name, adhoc_property_address,
                     service_type_id, title, scope,
                     issue_date, valid_until, subtotal, tax_rate, tax_amount, total, notes, terms,
-                    created_by, updated_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_by, updated_by, template_code, template_name, pricing_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """, UUID.class,
                 tenantId, quoteNumber, request.customerId(), adhocValue(request.customerId(), request.adhocCustomerName()),
@@ -135,8 +143,9 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                 adhocValue(request.propertyId(), request.adhocPropertyAddress()), request.serviceTypeId(),
                 request.title().trim(), blankToNull(request.scope()), Date.valueOf(issueDate), sqlDate(request.validUntil()),
                 totals.subtotal(), totals.taxRate(), totals.taxAmount(), totals.total(),
-                blankToNull(request.notes()), blankToNull(request.terms()), actorUserId, actorUserId);
-        replaceLines(tenantId, quoteId, actorUserId, request.lines());
+                request.notes() == null ? template.notes() : blankToNull(request.notes()), request.terms() == null ? template.terms() : blankToNull(request.terms()), actorUserId, actorUserId,
+                template.code(), template.name(), template.mode());
+        replaceLines(tenantId, quoteId, actorUserId, request.lines(), template.mode());
         auditWriter.record(tenantId, actorUserId, "QUOTE_CREATED", "QUOTE", quoteId, Map.of(
                 "quoteNumber", quoteNumber, "total", totals.total().toPlainString()));
         return requiredQuote(queryQuotes(tenantId, quoteId, null, null, null));
@@ -153,15 +162,15 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
         validateReferences(tenantId, request);
         var issueDate = request.issueDate() == null ? current.issueDate() : request.issueDate();
         validateDates(issueDate, request.validUntil());
-        var totals = totals(request, tenantSettingsOperations.settings(tenantId).invoiceTaxRate());
+        var template = pricingTemplate(tenantId, request.templateCode(), current);
+        var totals = totals(request, tenantSettingsOperations.settings(tenantId).invoiceTaxRate(), template.mode());
         var updated = jdbcTemplate.update("""
                 UPDATE quotes
                 SET customer_id = ?, adhoc_customer_name = ?, adhoc_customer_email = ?, adhoc_customer_phone = ?,
                     property_id = ?, adhoc_property_name = ?, adhoc_property_address = ?,
                     service_type_id = ?, title = ?, scope = ?,
                     issue_date = ?, valid_until = ?, subtotal = ?, tax_rate = ?, tax_amount = ?, total = ?,
-                    notes = ?, terms = ?, status = 'DRAFT', approval_token_hash = NULL,
-                    access_password_hash = NULL, published_details = NULL,
+                    notes = ?, terms = ?, template_code = ?, template_name = ?, pricing_mode = ?, status = 'DRAFT', published_details = NULL,
                     approval_name = NULL, approval_comment = NULL, approved_at = NULL, declined_at = NULL,
                     updated_by = ?, updated_at = now()
                 WHERE tenant_id = ? AND id = ? AND status IN ('DRAFT', 'DECLINED')
@@ -172,11 +181,11 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                 adhocValue(request.propertyId(), request.adhocPropertyAddress()), request.serviceTypeId(), request.title().trim(),
                 blankToNull(request.scope()), Date.valueOf(issueDate), sqlDate(request.validUntil()),
                 totals.subtotal(), totals.taxRate(), totals.taxAmount(), totals.total(),
-                blankToNull(request.notes()), blankToNull(request.terms()), actorUserId, tenantId, quoteId);
+                blankToNull(request.notes()), blankToNull(request.terms()), template.code(), template.name(), template.mode(), actorUserId, tenantId, quoteId);
         if (updated == 0) {
             throw new BadRequestException("This quote was already sent or responded to and can no longer be changed.");
         }
-        replaceLines(tenantId, quoteId, actorUserId, request.lines());
+        replaceLines(tenantId, quoteId, actorUserId, request.lines(), template.mode());
         auditWriter.record(tenantId, actorUserId, "QUOTE_UPDATED", "QUOTE", quoteId, Map.of(
                 "quoteNumber", current.quoteNumber(), "total", totals.total().toPlainString()));
         return requiredQuote(queryQuotes(tenantId, quoteId, null, null, null));
@@ -281,13 +290,48 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
         return new QuoteShareResult(publish(tenantId, actorUserId, quote, password));
     }
 
+    @Transactional(readOnly = true)
+    public QuoteSharingDetails sharing(UUID tenantId, UUID quoteId) {
+        requireEnabled(tenantId);
+        requiredQuote(queryQuotes(tenantId, quoteId, null, null, null));
+        var row = jdbcTemplate.queryForMap("""
+                SELECT q.access_password_hash, links.token
+                FROM quotes q LEFT JOIN quote_share_links links ON links.quote_id = q.id
+                    AND links.tenant_id = q.tenant_id
+                WHERE q.tenant_id = ? AND q.id = ?
+                """, tenantId, quoteId);
+        var token = (String) row.get("token");
+        return new QuoteSharingDetails(token == null || row.get("access_password_hash") == null ? null : publicResponseUrl(tenantId, token), row.get("access_password_hash") != null);
+    }
+
     private String publish(UUID tenantId, UUID actorUserId, QuoteDto quote, String password) {
-        if (password == null || password.length() < 8 || password.length() > 64
-                || password.getBytes(StandardCharsets.UTF_8).length > 72) {
+        expireIfNeeded(quote);
+        if (password != null && (password.length() > 64 || password.getBytes(StandardCharsets.UTF_8).length > 72)) {
             throw new BadRequestException("Use a password of 8 to 64 characters (up to 72 UTF-8 bytes).");
         }
-        validateDates(LocalDate.now(), quote.validUntil());
-        var token = newToken();
+        var credentials = jdbcTemplate.queryForMap("SELECT approval_token_hash, access_password_hash FROM quotes WHERE tenant_id = ? AND id = ?", tenantId, quote.id());
+        var existingHash = (String) credentials.get("approval_token_hash");
+        var existingPassword = (String) credentials.get("access_password_hash");
+        String token;
+        if (existingHash != null && existingPassword != null) {
+            if (password != null && !password.isEmpty() && !passwordEncoder.matches(password, existingPassword)) {
+                throw new BadRequestException("This quote already has a password. Use the original password or leave it blank to reuse the existing protected link.");
+            }
+            var tokens = jdbcTemplate.queryForList("SELECT token FROM quote_share_links WHERE tenant_id = ? AND quote_id = ?", String.class, tenantId, quote.id());
+            if (tokens.isEmpty() || !hash(tokens.getFirst()).equals(existingHash)) {
+                throw new BadRequestException("Open the existing shared link once with its password, then retry. Its link and password have not been changed.");
+            }
+            token = tokens.getFirst();
+            if (!"DRAFT".equals(quote.status())) return publicResponseUrl(tenantId, token);
+        } else {
+            if (password == null || password.length() < 8 || password.length() > 64
+                || password.getBytes(StandardCharsets.UTF_8).length > 72) {
+                throw new BadRequestException("Use a password of 8 to 64 characters (up to 72 UTF-8 bytes).");
+            }
+            token = newToken();
+            existingPassword = passwordEncoder.encode(password);
+            jdbcTemplate.update("INSERT INTO quote_share_links(quote_id, tenant_id, token) VALUES (?, ?, ?)", quote.id(), tenantId, token);
+        }
         String details;
         try {
             details = objectMapper.writeValueAsString(quote);
@@ -300,7 +344,7 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                     viewed_at = NULL, approval_name = NULL, approval_comment = NULL,
                     approved_at = NULL, declined_at = NULL, updated_by = ?, updated_at = now()
                 WHERE tenant_id = ? AND id = ?
-                """, hash(token), passwordEncoder.encode(password), details, actorUserId, tenantId, quote.id());
+                """, hash(token), existingPassword, details, actorUserId, tenantId, quote.id());
         auditWriter.record(tenantId, actorUserId, "QUOTE_SHARED", "QUOTE", quote.id(), Map.of("quoteNumber", quote.quoteNumber()));
         return publicResponseUrl(tenantId, token);
     }
@@ -314,7 +358,7 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
             throw new BadRequestException("An approved quote is locked and cannot be voided.");
         }
         jdbcTemplate.update("""
-                UPDATE quotes SET status = 'VOID', approval_token_hash = NULL, updated_by = ?, updated_at = now()
+                UPDATE quotes SET status = 'VOID', approval_token_hash = NULL, access_password_hash = NULL, updated_by = ?, updated_at = now()
                 WHERE tenant_id = ? AND id = ?
                 """, actorUserId, tenantId, quoteId);
         auditWriter.record(tenantId, actorUserId, "QUOTE_VOIDED", "QUOTE", quoteId, Map.of("quoteNumber", quote.quoteNumber()));
@@ -364,6 +408,7 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
         lockPublicQuote(token);
         var quote = requiredQuote(queryQuotes(null, null, hash(token), null, null));
         expireIfNeeded(quote);
+        if ("DRAFT".equals(quote.status())) throw new BadRequestException("This quote is being revised and is not ready for review.");
         if ("SENT".equals(quote.status())) {
             jdbcTemplate.update("UPDATE quotes SET status = 'VIEWED', viewed_at = coalesce(viewed_at, now()), updated_at = now() WHERE id = ?", quote.id());
             quote = requiredQuote(queryQuotes(null, quote.id(), null, null, null));
@@ -404,11 +449,35 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     private PublicQuoteDto publicView(QuoteDto quote) {
         var settings = tenantSettingsOperations.settings(tenantIdForQuote(quote.id()));
         return new PublicQuoteDto(settings.invoiceBrandName(), settings.logoUrl(), settings.themePrimaryColor(),
-                settings.effectiveSupportEmail(""), settings.phone(), quote);
+                settings.effectiveSupportEmail(""), settings.phone(), quote, settings.timezone(),
+                java.util.stream.Stream.of(settings.addressLine2(), settings.addressLine1(), settings.city(),
+                        settings.provinceCode(), settings.postalCode(), settings.countryCode())
+                        .filter(value -> value != null && !value.isBlank()).map(String::trim)
+                        .collect(java.util.stream.Collectors.joining(", ")),
+                settings.taxRegistrationNumber());
+    }
+
+    @Transactional
+    public QuoteDto publicPhotoQuote(String token, String password) {
+        requirePublicPassword(token, password);
+        lockPublicQuote(token);
+        var quote = requiredQuote(queryQuotes(null, null, hash(token), null, null));
+        expireIfNeeded(quote);
+        if ("DRAFT".equals(quote.status())) throw new BadRequestException("This quote is being revised.");
+        return quote;
     }
 
     private void requirePublicPassword(String token, String password) {
         accessService.verify(hash(token), password);
+        var tenants = jdbcTemplate.queryForList("SELECT tenant_id FROM quotes WHERE approval_token_hash = ?", UUID.class, hash(token));
+        if (tenants.isEmpty()) throw new ResourceNotFoundException("Quote not found.");
+        requireEnabled(tenants.getFirst());
+        // Legacy links were hash-only. Recover their original token after successful password verification.
+        jdbcTemplate.update("""
+                INSERT INTO quote_share_links(quote_id, tenant_id, token)
+                SELECT id, tenant_id, ? FROM quotes WHERE approval_token_hash = ?
+                ON CONFLICT (quote_id) DO NOTHING
+                """, token, hash(token));
     }
 
     private void lockQuote(UUID tenantId, UUID quoteId) {
@@ -435,7 +504,9 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     public OutboundEmailAttachment quoteAttachment(UUID tenantId, UUID quoteId, String emailBody) {
         requireEnabled(tenantId);
         var quote = requiredQuote(queryQuotes(tenantId, quoteId, null, null, null));
+        expireIfNeeded(quote);
         var matcher = java.util.regex.Pattern.compile("/quote-response/([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])").matcher(emailBody == null ? "" : emailBody);
+        if ("DRAFT".equals(quote.status())) throw new BadRequestException("This quote is being revised. Send it from Quotes before resending this email.");
         boolean activeLink = false;
         while (matcher.find()) {
             var count = jdbcTemplate.queryForObject("SELECT count(*) FROM quotes WHERE tenant_id = ? AND id = ? AND approval_token_hash = ? AND status NOT IN ('VOID', 'EXPIRED')", Integer.class,
@@ -450,8 +521,11 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     @Transactional
     public byte[] publicPdf(String token, String password) {
         requirePublicPassword(token, password);
+        lockPublicQuote(token);
         var quote = requiredQuote(queryQuotes(null, null, hash(token), null, null));
+        expireIfNeeded(quote);
         var tenantId = tenantIdForQuote(quote.id());
+        if ("DRAFT".equals(quote.status())) throw new BadRequestException("This quote is being revised and is not ready for review.");
         auditWriter.record(tenantId, null, "QUOTE_CLIENT_PDF_DOWNLOADED", "QUOTE", quote.id(),
                 Map.of("quoteNumber", quote.quoteNumber(), "source", "CLIENT_LINK"));
         return quotePdfService.generate(quote, tenantId, tenantSettingsOperations.settings(tenantId));
@@ -503,36 +577,62 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                 rs.getString("approval_name"), rs.getString("approval_comment"), instant(rs, "sent_at"),
                 instant(rs, "viewed_at"), instant(rs, "approved_at"), instant(rs, "declined_at"),
                 instant(rs, "converted_at"), rs.getObject("converted_work_order_id", UUID.class),
-                rs.getString("converted_work_order_number"), instant(rs, "created_at"), instant(rs, "updated_at"), lines);
+                rs.getString("converted_work_order_number"), instant(rs, "created_at"), instant(rs, "updated_at"), lines,
+                rs.getString("template_code"), rs.getString("template_name"), rs.getString("pricing_mode"));
     }
 
-    private void replaceLines(UUID tenantId, UUID quoteId, UUID actorUserId, List<UpsertQuoteRequest.Line> lines) {
+    private void replaceLines(UUID tenantId, UUID quoteId, UUID actorUserId, List<UpsertQuoteRequest.Line> lines, String mode) {
         jdbcTemplate.update("DELETE FROM quote_lines WHERE tenant_id = ? AND quote_id = ?", tenantId, quoteId);
         for (var index = 0; index < lines.size(); index++) {
             var line = lines.get(index);
-            var quantity = line.quantity().setScale(2, RoundingMode.HALF_UP);
-            var rate = line.rate().setScale(2, RoundingMode.HALF_UP);
+            var quantity = "TOTAL_PRICE".equals(mode) ? BigDecimal.ONE : line.quantity().setScale(2, RoundingMode.HALF_UP);
+            var rate = "TOTAL_PRICE".equals(mode) ? BigDecimal.ZERO : line.rate().setScale(2, RoundingMode.HALF_UP);
             jdbcTemplate.update("""
                     INSERT INTO quote_lines (
                         tenant_id, quote_id, description, quantity, unit, rate, amount, sort_order, created_by, updated_by
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, tenantId, quoteId, line.description().trim(), quantity, blankToNull(line.unit()),
+                    """, tenantId, quoteId, line.description().trim(), quantity, "TOTAL_PRICE".equals(mode) ? null : blankToNull(line.unit()),
                     rate, quantity.multiply(rate).setScale(2, RoundingMode.HALF_UP), index + 1, actorUserId, actorUserId);
         }
     }
 
-    private Totals totals(UpsertQuoteRequest request, BigDecimal defaultTaxRate) {
-        var subtotal = request.lines().stream()
-                .map(line -> line.quantity().multiply(line.rate()))
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
+    private Totals totals(UpsertQuoteRequest request, BigDecimal defaultTaxRate, String mode) {
+        if (request.lines() == null || request.lines().isEmpty() || request.lines().size() > 200) throw new BadRequestException("Add between 1 and 200 description lines.");
+        for (var line : request.lines()) {
+            if (line == null || line.description() == null || line.description().isBlank() || line.description().length() > 4000) throw new BadRequestException("Each line needs a description of up to 4000 characters.");
+            if (!"TOTAL_PRICE".equals(mode) && (line.quantity() == null || line.quantity().setScale(2, RoundingMode.HALF_UP).signum() <= 0
+                    || line.rate() == null || line.rate().signum() < 0)) throw new BadRequestException("Each item needs a positive quantity and a non-negative rate.");
+            if (!"TOTAL_PRICE".equals(mode) && (line.quantity().compareTo(new BigDecimal("9999999999.99")) > 0 || line.rate().compareTo(new BigDecimal("9999999999.99")) > 0)) throw new BadRequestException("An item quantity or rate exceeds the supported maximum.");
+        }
+        BigDecimal subtotal;
+        if ("TOTAL_PRICE".equals(mode)) {
+            if (request.totalPrice() == null || request.totalPrice().signum() < 0) throw new BadRequestException("Enter the total price before tax.");
+            subtotal = request.totalPrice().setScale(2, RoundingMode.HALF_UP);
+        } else subtotal = request.lines().stream()
+                .map(line -> line.quantity().setScale(2, RoundingMode.HALF_UP).multiply(line.rate().setScale(2, RoundingMode.HALF_UP)).setScale(2, RoundingMode.HALF_UP))
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        if (subtotal.compareTo(new BigDecimal("9999999999.99")) > 0) throw new BadRequestException("The quote amount exceeds the supported maximum.");
         var taxRate = (request.taxRate() == null ? defaultTaxRate : request.taxRate()).setScale(4, RoundingMode.HALF_UP);
         if (taxRate.signum() < 0 || taxRate.compareTo(BigDecimal.ONE) > 0) {
             throw new BadRequestException("Tax rate must be between 0 and 1.");
         }
         var tax = subtotal.multiply(taxRate).setScale(2, RoundingMode.HALF_UP);
+        if (subtotal.add(tax).compareTo(new BigDecimal("9999999999.99")) > 0) throw new BadRequestException("The quote total exceeds the supported maximum.");
         return new Totals(subtotal, taxRate, tax, subtotal.add(tax));
     }
+
+    private PricingTemplate pricingTemplate(UUID tenantId, String requested, QuoteDto current) {
+        var code = blankToNull(requested);
+        if (current != null && (code == null || code.equals(current.templateCode()))) return new PricingTemplate(current.templateCode(), current.templateName(), current.pricingMode(), null, null);
+        var choices = jdbcTemplate.query("""
+                SELECT q.* FROM tenant_quote_templates a JOIN quote_templates q ON q.code = a.template_code
+                WHERE a.tenant_id = ? AND ((?::text IS NULL AND a.is_default) OR q.code = ?)
+                """, (rs, row) -> new PricingTemplate(rs.getString("code"), rs.getString("name"), rs.getString("pricing_mode"),
+                rs.getString("default_notes"), rs.getString("default_terms")), tenantId, code, code);
+        return choices.stream().findFirst().orElseThrow(() -> new BadRequestException("This quote template is not assigned to your tenant."));
+    }
+
+    private record PricingTemplate(String code, String name, String mode, String notes, String terms) { }
 
     private void validateReferences(UUID tenantId, UpsertQuoteRequest request) {
         if (request.customerId() == null) {
@@ -572,7 +672,8 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
                 DO UPDATE SET last_value = quote_daily_sequences.last_value + 1
                 RETURNING last_value
                 """, Integer.class, tenantId, Date.valueOf(date));
-        return "Q-" + date.toString().replace("-", "") + "-" + String.format("%04d", sequence);
+        return date.format(java.time.format.DateTimeFormatter.ofPattern("yyMMdd", java.util.Locale.ROOT))
+                + "-" + String.format(java.util.Locale.ROOT, "%04d", sequence);
     }
 
     private void requireEnabled(UUID tenantId) {
@@ -583,7 +684,8 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
 
     private boolean isEnabled(UUID tenantId) {
         var count = jdbcTemplate.queryForObject("""
-                SELECT count(*)::int FROM tenant_modules WHERE tenant_id = ? AND module_code = ? AND enabled = true
+                SELECT count(*)::int FROM tenant_modules m JOIN tenants t ON t.id = m.tenant_id
+                WHERE m.tenant_id = ? AND m.module_code = ? AND m.enabled = true AND t.status IN ('TRIAL', 'ACTIVE', 'PAST_DUE')
                 """, Integer.class, tenantId, MODULE_CODE);
         return count != null && count > 0;
     }
@@ -602,10 +704,17 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
     }
 
     private void expireIfNeeded(QuoteDto quote) {
-        if (quote.validUntil() != null && quote.validUntil().isBefore(LocalDate.now()) && List.of("SENT", "VIEWED").contains(quote.status())) {
-            jdbcTemplate.update("UPDATE quotes SET status = 'EXPIRED', updated_at = now() WHERE id = ?", quote.id());
+        if ("VOID".equals(quote.status())) {
+            throw new BadRequestException("This quote has been voided.");
+        }
+        if ("EXPIRED".equals(quote.status()) || (quote.validUntil() != null && quote.validUntil().isBefore(today(tenantIdForQuote(quote.id()))))) {
             throw new BadRequestException("This quote has expired.");
         }
+    }
+
+    private LocalDate today(UUID tenantId) {
+        var timezone = tenantSettingsOperations.settings(tenantId).timezone();
+        return Instant.now(clock).atZone(ZoneId.of(timezone == null || timezone.isBlank() ? "America/Toronto" : timezone)).toLocalDate();
     }
 
     private UUID tenantIdForQuote(UUID quoteId) {
@@ -629,10 +738,13 @@ public class QuoteManagementService implements QuoteEmailResendOperations {
         }
         builder.append("Converted from quote ").append(quote.quoteNumber()).append(".\n");
         for (var line : quote.lines()) {
-            builder.append("- ").append(line.description()).append(" (")
+            builder.append("- ").append(line.description());
+            if (!"TOTAL_PRICE".equals(quote.pricingMode())) builder.append(" (")
                     .append(line.quantity().stripTrailingZeros().toPlainString()).append(" ")
-                    .append(line.unit() == null ? "" : line.unit()).append(")\n");
+                    .append(line.unit() == null ? "" : line.unit()).append(")");
+            builder.append("\n");
         }
+        builder.append("Quoted total: ").append(money(quote.total())).append("\n");
         return builder.toString().trim();
     }
 

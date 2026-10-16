@@ -233,6 +233,65 @@ public class DocumentStorageService {
         }
     }
 
+    @Transactional
+    public UUID storeQuotePhoto(UUID tenantId, UUID actorUserId, UUID quoteId, byte[] bytes, String contentType) {
+        requireConfigured();
+        if (bytes.length == 0 || bytes.length > properties.maxImageBytes()) {
+            throw new BadRequestException("Photo must be smaller than 10 MB.");
+        }
+        var key = "tenants/%s/quotes/%s/photos/%s.%s".formatted(tenantId, quoteId, UUID.randomUUID(),
+                contentType.equals("image/png") ? "png" : "jpg");
+        try (var client = s3Client()) {
+            client.putObject(PutObjectRequest.builder().bucket(properties.bucket()).key(key).contentType(contentType).build(),
+                    software.amazon.awssdk.core.sync.RequestBody.fromBytes(bytes));
+        }
+        // Avoid orphaned storage objects if a later database/audit write rolls back.
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override public void afterCompletion(int status) {
+                            if (status != STATUS_COMMITTED) deleteStoredObject(properties.bucket(), key);
+                        }
+                    });
+        }
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO documents(tenant_id, owner_type, owner_id, bucket, object_key, content_type, byte_size, created_by, updated_by)
+                VALUES (?, 'QUOTE', ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                """, UUID.class, tenantId, quoteId, properties.bucket(), key, contentType, bytes.length, actorUserId, actorUserId);
+    }
+
+    public StoredLogo quotePhoto(UUID tenantId, UUID quoteId, UUID documentId) {
+        var rows = jdbcTemplate.query("""
+                SELECT bucket, object_key, content_type FROM documents
+                WHERE tenant_id = ? AND owner_type = 'QUOTE' AND owner_id = ? AND id = ?
+                """, (rs, row) -> new StoredLogo(rs.getString("content_type"),
+                objectBytes(rs.getString("bucket"), rs.getString("object_key"))), tenantId, quoteId, documentId);
+        if (rows.isEmpty()) throw new ResourceNotFoundException("Photo not found.");
+        return rows.getFirst();
+    }
+
+    @Transactional
+    public void deleteQuotePhoto(UUID tenantId, UUID quoteId, UUID documentId) {
+        var rows = jdbcTemplate.query("""
+                DELETE FROM documents WHERE tenant_id = ? AND owner_type = 'QUOTE' AND owner_id = ? AND id = ?
+                RETURNING bucket, object_key
+                """, (rs, row) -> new StoredDocument(rs.getString("bucket"), rs.getString("object_key")), tenantId, quoteId, documentId);
+        for (var row : rows) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override public void afterCommit() { deleteStoredObject(row.bucket(), row.objectKey()); }
+                    });
+        }
+    }
+
+    private void deleteStoredObject(String bucket, String key) {
+        try (var client = s3Client()) {
+            client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+        } catch (RuntimeException exception) {
+            org.slf4j.LoggerFactory.getLogger(DocumentStorageService.class).warn("Could not clean up quote photo storage object", exception);
+        }
+    }
+
     private PresignedPhotoUpload createPresignedUpload(
             UUID tenantId,
             UUID actorUserId,

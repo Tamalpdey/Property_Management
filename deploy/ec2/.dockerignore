@@ -1,0 +1,8 @@
+# The edge image only needs routing configuration and the separate Platinum site.
+# Do not send production environment files or credentials to the Docker builder.
+*
+!Dockerfile.caddy
+!Caddyfile
+!Caddyfile.local
+!platinum-site/
+!platinum-site/**

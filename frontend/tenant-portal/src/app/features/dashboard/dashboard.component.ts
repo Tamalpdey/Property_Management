@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
 import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { RouterLink } from '@angular/router';

@@ -1,4 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
+import { AuthService } from '../../core/services/auth.service';
+import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
@@ -35,6 +38,8 @@ import { TenantUserService } from './services/tenant-user.service';
 
       <lorne-tenant-user-list
         [users]="users()"
+        [currentUserId]="auth.currentUser()?.id ?? null"
+        [lastAdminId]="lastAdminId()"
         (editUser)="openEdit($event)"
         (activateUser)="activate($event)"
         (deactivateUser)="deactivate($event)"
@@ -49,6 +54,8 @@ import { TenantUserService } from './services/tenant-user.service';
         [title]="editingUser() ? 'Update tenant user' : 'Add tenant user'"
         [submitLabel]="editingUser() ? 'Save user' : 'Create user'"
         [saving]="saving()"
+        [adminRoleLocked]="editingUser() !== null && editingUser()?.id === lastAdminId()"
+        [errorMessage]="error()"
         (visibleChange)="closeDialog($event)"
         (saveUser)="save($event)"
       />
@@ -56,9 +63,15 @@ import { TenantUserService } from './services/tenant-user.service';
   `
 })
 export class TenantUserPageComponent {
+  protected readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
   private readonly tenantUserService = inject(TenantUserService);
   private readonly workerManagementService = inject(WorkerManagementService);
   protected readonly users = signal<TenantUserRecord[]>([]);
+  protected readonly lastAdminId = computed(() => {
+    const ids = new Set(this.users().filter(user => user.status === 'ACTIVE' && user.roles.includes('TENANT_ADMIN')).map(user => user.id));
+    return ids.size === 1 ? [...ids][0] : null;
+  });
   protected readonly roles = signal<TenantRoleOption[]>([]);
   protected readonly workers = signal<WorkerRecord[]>([]);
   protected readonly saving = signal(false);
@@ -71,22 +84,29 @@ export class TenantUserPageComponent {
   }
 
   async load(): Promise<void> {
-    const [users, roles, workers] = await Promise.all([
-      firstValueFrom(this.tenantUserService.list()),
-      firstValueFrom(this.tenantUserService.roles()),
-      firstValueFrom(this.workerManagementService.list())
-    ]);
-    this.users.set(users);
-    this.roles.set(roles);
-    this.workers.set(workers);
+    this.error.set('');
+    try {
+      const [users, roles, workers] = await Promise.all([
+        firstValueFrom(this.tenantUserService.list()),
+        firstValueFrom(this.tenantUserService.roles()),
+        firstValueFrom(this.workerManagementService.list())
+      ]);
+      this.users.set(users);
+      this.roles.set(roles);
+      this.workers.set(workers);
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, 'Unable to load tenant users.'));
+    }
   }
 
   openCreate(): void {
+    this.error.set('');
     this.editingUser.set(null);
     this.showCreate.set(true);
   }
 
   openEdit(user: TenantUserRecord): void {
+    this.error.set('');
     this.editingUser.set(user);
     this.showCreate.set(true);
   }
@@ -109,9 +129,17 @@ export class TenantUserPageComponent {
       this.users.update((users) => [user, ...users.filter((candidate) => candidate.id !== user.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
       this.showCreate.set(false);
       this.editingUser.set(null);
+      const current = this.auth.currentUser();
+      if (current?.id === user.id && (current.roles.length !== user.roles.length || current.roles.some(role => !user.roles.includes(role as typeof user.roles[number])))) {
+        this.auth.signOut();
+        await this.router.navigate(['/login']);
+        return;
+      }
       await this.refreshWorkers();
-    } catch {
-      this.error.set('Unable to save tenant user. Check email, role selection, worker link, or backend status.');
+    } catch (error) {
+      this.error.set(error instanceof HttpErrorResponse
+        ? error.error?.error?.message || error.error?.message || 'Unable to save tenant user. Check email, role selection, worker link, or backend status.'
+        : 'Unable to save tenant user. Check email, role selection, worker link, or backend status.');
     } finally {
       this.saving.set(false);
     }
@@ -134,8 +162,8 @@ export class TenantUserPageComponent {
       await firstValueFrom(this.tenantUserService.delete(user.id));
       this.users.update((users) => users.filter((candidate) => candidate.id !== user.id));
       await this.refreshWorkers();
-    } catch {
-      this.error.set('Unable to remove tenant user.');
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, 'Unable to remove tenant user.'));
     }
   }
 
@@ -144,12 +172,16 @@ export class TenantUserPageComponent {
     try {
       const updated = await userPromise;
       this.users.update((users) => [updated, ...users.filter((user) => user.id !== updated.id)].sort((a, b) => a.displayName.localeCompare(b.displayName)));
-    } catch {
-      this.error.set(message);
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, message));
     }
   }
 
   private async refreshWorkers(): Promise<void> {
     this.workers.set(await firstValueFrom(this.workerManagementService.list()));
   }
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof HttpErrorResponse ? error.error?.error?.message || error.error?.message || fallback : fallback;
 }

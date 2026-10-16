@@ -27,15 +27,18 @@ public class WorkerShiftClockService {
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final WorkerShiftClockAutoClockOutProperties autoClockOutProperties;
+    private final WorkerLoginResolver workerLoginResolver;
 
     public WorkerShiftClockService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
-            WorkerShiftClockAutoClockOutProperties autoClockOutProperties
+            WorkerShiftClockAutoClockOutProperties autoClockOutProperties,
+            WorkerLoginResolver workerLoginResolver
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.autoClockOutProperties = autoClockOutProperties;
+        this.workerLoginResolver = workerLoginResolver;
     }
 
     @Transactional(readOnly = true)
@@ -477,19 +480,8 @@ public class WorkerShiftClockService {
     }
 
     private WorkerRef worker(UUID tenantId, UUID userId, String email) {
-        return jdbcTemplate.query("""
-                SELECT id, display_name, email
-                FROM workers
-                WHERE tenant_id = ? AND status = 'ACTIVE'
-                  AND (user_id = ? OR lower(email::text) = lower(?))
-                ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END
-                LIMIT 1
-                """, rs -> {
-            if (!rs.next()) {
-                throw new ResourceNotFoundException("Worker profile is not linked to this login.");
-            }
-            return new WorkerRef(rs.getObject("id", UUID.class), rs.getString("display_name"), rs.getString("email"));
-        }, tenantId, userId, email, userId);
+        var identity = workerLoginResolver.activeWorker(tenantId, userId, email);
+        return new WorkerRef(identity.id(), identity.name(), identity.email());
     }
 
     private Map<String, Object> metadata(WorkerRef worker, WorkerShiftClockRequest request, Instant actionAt) {

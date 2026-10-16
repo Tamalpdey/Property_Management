@@ -34,6 +34,7 @@ public class TenantAuditService {
                 FROM audit_logs al
                 LEFT JOIN app_users au ON au.id = al.actor_user_id
                 WHERE al.tenant_id = ?
+                  AND al.resource_type NOT IN ('PLATFORM_SUPPORT', 'PLATFORM_ACCESS')
                   AND (? = false OR (al.resource_type = ? AND al.resource_id = ?))
                 ORDER BY al.created_at DESC
                 LIMIT ?

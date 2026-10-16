@@ -1,0 +1,178 @@
+<section class="template-page">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">Configuration</p>
+      <h1>Quote templates</h1>
+    </div>
+    <button
+      pButton
+      icon="pi pi-refresh"
+      severity="secondary"
+      title="Refresh quote templates"
+      aria-label="Refresh quote templates"
+      [disabled]="loading() || saving()"
+      (click)="load()"
+    ></button>
+  </header>
+  <nav class="tabs" aria-label="Quote template sections">
+    <button
+      [class.active]="tab() === 'templates'"
+      (click)="tab.set('templates')"
+    >
+      <i class="pi pi-file-edit" aria-hidden="true"></i>Templates</button
+    ><button
+      [class.active]="tab() === 'assignments'"
+      (click)="tab.set('assignments')"
+    >
+      <i class="pi pi-building" aria-hidden="true"></i>Tenant assignments
+    </button>
+  </nav>
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+  @if (notice()) {
+    <p class="notice" role="status">{{ notice() }}</p>
+  }
+  @if (loading()) {
+    <p class="muted" role="status">Loading templates...</p>
+  }
+  @if (tab() === "templates") {
+    <div class="catalog-layout">
+      <nav class="template-list" aria-label="Available quote layouts">
+        @for (template of templates(); track template.code) {
+          <button
+            class="template-choice"
+            [class.selected]="form?.code === template.code"
+            [disabled]="saving()"
+            (click)="select(template)"
+          >
+            <i
+              [class]="
+                template.pricingMode === 'ITEMIZED'
+                  ? 'pi pi-list'
+                  : 'pi pi-file-edit'
+              "
+              aria-hidden="true"
+            ></i
+            ><span
+              ><strong>{{ template.name }}</strong
+              ><small
+                >{{ template.assignedTenants }} tenants assigned</small
+              ></span
+            ><i class="pi pi-angle-right" aria-hidden="true"></i>
+          </button>
+        }
+      </nav>
+      @if (form; as selected) {
+        <div class="editor-layout">
+          <form class="template-editor" (ngSubmit)="save()">
+            <div class="section-heading">
+              <h2>Template defaults</h2>
+              <span class="mode">{{
+                selected.pricingMode === "ITEMIZED" ? "Itemized" : "Total price"
+              }}</span>
+            </div>
+            <label
+              >Template name<input
+                name="name"
+                aria-label="Template name"
+                maxlength="80"
+                required
+                [(ngModel)]="selected.name"
+                [disabled]="saving()"
+            /></label>
+            <label
+              >Default client notes<textarea
+                name="notes"
+                rows="4"
+                maxlength="8000"
+                [(ngModel)]="selected.defaultNotes"
+                [disabled]="saving()"
+              ></textarea>
+            </label>
+            <label
+              >Default terms<textarea
+                name="terms"
+                rows="5"
+                maxlength="8000"
+                [(ngModel)]="selected.defaultTerms"
+                [disabled]="saving()"
+              ></textarea>
+            </label>
+            <div class="actions">
+              <button
+                pButton
+                type="submit"
+                icon="pi pi-save"
+                label="Save template"
+                [loading]="saving()"
+                [disabled]="saving() || !selected.name.trim()"
+              ></button>
+            </div>
+          </form>
+          <section class="preview" aria-label="Quote template preview">
+            <div class="preview-top">
+              <span>PREVIEW</span><strong>QUOTE</strong>
+            </div>
+            <h3>{{ selected.name || "Quote" }}</h3>
+            <p class="muted">Example client · Example property</p>
+            @if (selected.pricingMode === "ITEMIZED") {
+              <table>
+                <thead>
+                  <tr>
+                    <th>QTY</th>
+                    <th>DESCRIPTION</th>
+                    <th>RATE</th>
+                    <th>AMOUNT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>Site preparation</td>
+                    <td>$120.00</td>
+                    <td>$120.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            } @else {
+              <div class="description-lines">
+                <strong>DESCRIPTION</strong>
+                <p>Site preparation</p>
+                <p>Equipment installation</p>
+                <p>Testing and cleanup</p>
+              </div>
+            }
+            <div class="preview-total">
+              <span>Subtotal</span><strong>$120.00</strong>
+            </div>
+            @if (selected.defaultNotes) {
+              <h4>CLIENT NOTES</h4>
+              <p class="preview-body">{{ selected.defaultNotes }}</p>
+            }
+            @if (selected.defaultTerms) {
+              <h4>TERMS</h4>
+              <p class="preview-body">{{ selected.defaultTerms }}</p>
+            }
+          </section>
+        </div>
+      }
+    </div>
+  } @else {
+    <section class="tenant-assignment">
+      <label for="template-tenant">Tenant</label
+      ><select id="template-tenant" [(ngModel)]="tenantId">
+        <option value="">Select tenant</option>
+        @for (tenant of tenants(); track tenant.id) {
+          <option [value]="tenant.id">{{ tenant.displayName }}</option>
+        }
+      </select>
+      @if (tenantId) {
+        <lorne-tenant-quote-templates
+          [tenantId]="tenantId"
+          [enabled]="enabled()"
+        />
+      }
+    </section>
+  }
+</section>

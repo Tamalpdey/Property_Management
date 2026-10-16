@@ -1,0 +1,281 @@
+<section class="support-page">
+  <header class="heading">
+    <div>
+      <p class="muted">Platform support</p>
+      <h1>Support tickets</h1>
+    </div>
+    <div class="actions">
+      <button
+        pButton
+        severity="secondary"
+        icon="pi pi-refresh"
+        title="Refresh tickets"
+        aria-label="Refresh tickets"
+        [disabled]="loading()"
+        (click)="load(0)"
+      ></button
+      ><button
+        pButton
+        icon="pi pi-plus"
+        label="New ticket"
+        (click)="newTicket()"
+        [disabled]="saving()"
+      ></button>
+    </div>
+  </header>
+  @if (error()) {
+    <p role="alert" class="error">{{ error() }}</p>
+  }
+  <form class="filters" (ngSubmit)="load(0)">
+    <input
+      name="query"
+      aria-label="Search support tickets"
+      placeholder="Ticket number or subject"
+      maxlength="200"
+      [(ngModel)]="query"
+    /><select
+      name="status"
+      aria-label="Filter support status"
+      [(ngModel)]="status"
+    >
+      <option value="">All statuses</option>
+      <option value="UNRESOLVED">Unresolved</option>
+      @for (item of statuses; track item) {
+        <option [value]="item">{{ label(item) }}</option>
+      }</select
+    ><button
+      pButton
+      type="submit"
+      severity="secondary"
+      icon="pi pi-filter"
+      label="Apply"
+      [disabled]="loading()"
+    ></button>
+  </form>
+  <div class="layout">
+    <section aria-label="Your tickets" class="min-width">
+      <p class="muted">{{ page().total }} matching tickets</p>
+      <div class="queue">
+        @for (ticket of page().items; track ticket.id) {
+          <button
+            class="ticket"
+            [class.selected]="detail()?.ticket?.id === ticket.id"
+            [disabled]="saving()"
+            (click)="open(ticket.id)"
+          >
+            <div class="heading">
+              <strong>{{ ticket.number }}</strong
+              ><span class="badge">{{ ticket.priority }}</span>
+            </div>
+            <h3>{{ ticket.subject }}</h3>
+            <div class="heading">
+              <span class="badge">{{ label(ticket.status) }}</span
+              ><small>{{ ticket.updatedAt | date: 'MMM d, h:mm a' }}</small>
+            </div>
+          </button>
+        } @empty {
+          <p class="empty">
+            {{
+              loading()
+                ? 'Loading tickets...'
+                : 'No tickets match these filters.'
+            }}
+          </p>
+        }
+      </div>
+      <div class="heading pager">
+        <span class="muted">Page {{ page().page + 1 }}</span>
+        <div class="actions">
+          <button
+            pButton
+            severity="secondary"
+            icon="pi pi-chevron-left"
+            aria-label="Previous ticket page"
+            [disabled]="loading() || page().page === 0"
+            (click)="load(page().page - 1)"
+          ></button
+          ><button
+            pButton
+            severity="secondary"
+            icon="pi pi-chevron-right"
+            aria-label="Next ticket page"
+            [disabled]="
+              loading() || (page().page + 1) * page().size >= page().total
+            "
+            (click)="load(page().page + 1)"
+          ></button>
+        </div>
+      </div>
+    </section>
+    <section class="conversation" aria-label="Support conversation">
+      @if (detailError()) {
+        <p class="error" role="alert">{{ detailError() }}</p>
+      }
+      @if (detailLoading()) {
+        <p class="muted" role="status">Loading conversation...</p>
+      }
+      @if (detail(); as selected) {
+        <header class="heading">
+          <div class="min-width">
+            <p class="muted">
+              {{ selected.ticket.number }} / {{ label(selected.ticket.status) }}
+            </p>
+            <h2>{{ selected.ticket.subject }}</h2>
+            <p class="muted">
+              Assigned to
+              {{ selected.ticket.assignedToName || 'support queue' }}
+            </p>
+          </div>
+          <div class="actions">
+            <button
+              pButton
+              severity="secondary"
+              icon="pi pi-refresh"
+              title="Refresh conversation"
+              aria-label="Refresh conversation"
+              [disabled]="saving()"
+              (click)="open(selected.ticket.id, true)"
+            ></button>
+            @if (selected.ticket.status !== 'CLOSED') {
+              <button
+                pButton
+                severity="secondary"
+                icon="pi pi-check"
+                label="Close ticket"
+                [disabled]="saving()"
+                (click)="closeTicket()"
+              ></button>
+            }
+          </div>
+        </header>
+        <article class="message">
+          <div class="heading">
+            <strong>{{ selected.ticket.createdByName || 'Tenant user' }}</strong
+            ><time>{{ selected.ticket.createdAt | date: 'medium' }}</time>
+          </div>
+          <p class="body">{{ selected.ticket.description }}</p>
+        </article>
+        @for (message of selected.messages; track message.id) {
+          <article class="message">
+            <div class="heading">
+              <strong>{{ message.authorName || message.authorType }}</strong
+              ><time>{{ message.createdAt | date: 'medium' }}</time>
+            </div>
+            <span class="badge">{{ message.authorType }}</span>
+            <p class="body">{{ message.body }}</p>
+          </article>
+        }
+        <form class="reply-form" (ngSubmit)="send()">
+          <label for="tenant-support-reply">Reply</label
+          ><textarea
+            id="tenant-support-reply"
+            name="reply"
+            required
+            rows="4"
+            maxlength="8000"
+            [(ngModel)]="reply"
+            [disabled]="saving()"
+          ></textarea>
+          <div class="actions">
+            <button
+              pButton
+              type="submit"
+              icon="pi pi-send"
+              [label]="
+                ['RESOLVED', 'CLOSED'].includes(selected.ticket.status)
+                  ? 'Reply and reopen'
+                  : 'Send reply'
+              "
+              [disabled]="saving() || !reply.trim()"
+              [loading]="saving()"
+            ></button>
+          </div>
+        </form>
+      } @else if (!detailLoading()) {
+        <p class="empty">Select a ticket to view the conversation.</p>
+      }
+    </section>
+  </div>
+</section>
+<p-dialog
+  header="New support ticket"
+  [visible]="creating()"
+  (visibleChange)="!saving() && creating.set(false)"
+  [modal]="true"
+  [style]="{
+    width: '600px',
+    maxWidth: 'calc(100vw - 24px)',
+    maxHeight: '90vh'
+  }"
+  [draggable]="false"
+  [closable]="!saving()"
+>
+  <form class="create-form" (ngSubmit)="create()">
+    <label
+      >Subject<input
+        name="subject"
+        required
+        maxlength="160"
+        [(ngModel)]="form.subject"
+        [disabled]="saving()"
+    /></label>
+    <div class="form-row">
+      <label
+        >Category<select
+          name="category"
+          aria-label="Category"
+          [(ngModel)]="form.category"
+          [disabled]="saving()"
+        >
+          @for (item of categories; track item) {
+            <option [value]="item">{{ label(item) }}</option>
+          }
+        </select></label
+      ><label
+        >Priority<select
+          name="priority"
+          aria-label="Priority"
+          [(ngModel)]="form.priority"
+          [disabled]="saving()"
+        >
+          @for (item of priorities; track item) {
+            <option [value]="item">{{ label(item) }}</option>
+          }
+        </select></label
+      >
+    </div>
+    <label
+      >Details<textarea
+        name="description"
+        rows="6"
+        required
+        maxlength="8000"
+        [(ngModel)]="form.description"
+        [disabled]="saving()"
+      ></textarea>
+    </label>
+    @if (createError()) {
+      <p class="error" role="alert">{{ createError() }}</p>
+    }
+    <div class="actions">
+      <button
+        pButton
+        type="button"
+        severity="secondary"
+        label="Cancel"
+        [disabled]="saving()"
+        (click)="creating.set(false)"
+      ></button
+      ><button
+        pButton
+        type="submit"
+        icon="pi pi-send"
+        label="Create ticket"
+        [disabled]="
+          saving() || !form.subject.trim() || !form.description.trim()
+        "
+        [loading]="saving()"
+      ></button>
+    </div>
+  </form>
+</p-dialog>

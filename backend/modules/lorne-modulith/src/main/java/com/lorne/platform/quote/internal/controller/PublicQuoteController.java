@@ -24,10 +24,54 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/public/quotes")
 class PublicQuoteController {
+    private final com.lorne.platform.quote.internal.service.QuoteSiteVisitService siteVisits;
     private final QuoteManagementService quoteManagementService;
 
-    PublicQuoteController(QuoteManagementService quoteManagementService) {
+    PublicQuoteController(QuoteManagementService quoteManagementService, com.lorne.platform.quote.internal.service.QuoteSiteVisitService siteVisits) {
         this.quoteManagementService = quoteManagementService;
+        this.siteVisits = siteVisits;
+    }
+
+    @GetMapping("/{token}/photos")
+    ApiResponse<java.util.List<com.lorne.platform.quote.internal.dto.QuoteSiteDetails.Photo>> photos(@PathVariable String token,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password) {
+        return ApiResponse.ok(siteVisits.clientPhotos(token, password));
+    }
+
+    @GetMapping("/{token}/photos/{photoId}/image")
+    ResponseEntity<byte[]> photo(@PathVariable String token, @PathVariable java.util.UUID photoId,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password) {
+        return QuoteSiteVisitController.imageResponse(siteVisits.clientPhoto(token, password, photoId));
+    }
+
+    @GetMapping("/capture/{token}")
+    ApiResponse<com.lorne.platform.quote.internal.dto.QuoteSiteDetails.CaptureView> capture(@PathVariable String token,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password) {
+        return ApiResponse.ok(siteVisits.capture(token, password));
+    }
+
+    @PostMapping("/capture/{token}/notes")
+    ApiResponse<com.lorne.platform.quote.internal.dto.QuoteSiteDetails.Note> captureNote(@PathVariable String token,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password,
+            @Valid @RequestBody QuoteSiteVisitController.NoteRequest request) {
+        return ApiResponse.ok(siteVisits.captureNote(token, password, request.authorName(), request.body()));
+    }
+
+    @PostMapping(value = "/capture/{token}/photos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    ApiResponse<com.lorne.platform.quote.internal.dto.QuoteSiteDetails.Photo> capturePhoto(@PathVariable String token,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password,
+            @org.springframework.web.bind.annotation.RequestParam org.springframework.web.multipart.MultipartFile file,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "") String caption,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "true") boolean clientVisible,
+            @org.springframework.web.bind.annotation.RequestParam String authorName,
+            @org.springframework.web.bind.annotation.RequestParam java.util.UUID uploadId) {
+        return ApiResponse.ok(siteVisits.capturePhoto(token, password, file, caption, clientVisible, authorName, uploadId));
+    }
+
+    @GetMapping("/capture/{token}/photos/{photoId}/image")
+    ResponseEntity<byte[]> captureImage(@PathVariable String token, @PathVariable java.util.UUID photoId,
+            @RequestHeader(value = "X-Quote-Password", required = false) String password) {
+        return QuoteSiteVisitController.imageResponse(siteVisits.capturePhotoBytes(token, password, photoId));
     }
 
     @ModelAttribute

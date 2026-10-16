@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
@@ -238,7 +238,7 @@ export class WorkerDayTicketComponent {
     includeTotals: true
   };
 
-  protected readonly timeOnly = timeOnly;
+  protected readonly timeOnly = (value?: string, fallback = '-') => timeOnly(value, fallback, this.settings()?.timezone);
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
   protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;

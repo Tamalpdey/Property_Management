@@ -57,6 +57,7 @@ public class WorkerJobService {
     private final DocumentStorageService documentStorageService;
     private final WorkerShiftClockService workerShiftClockService;
     private final ObjectMapper objectMapper;
+    private final WorkerLoginResolver workerLoginResolver;
     private final ThreadLocal<WorkerJobActionRequest> actionRequestContext = new ThreadLocal<>();
 
     public WorkerJobService(
@@ -64,13 +65,15 @@ public class WorkerJobService {
             AuditWriter auditWriter,
             DocumentStorageService documentStorageService,
             WorkerShiftClockService workerShiftClockService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            WorkerLoginResolver workerLoginResolver
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.documentStorageService = documentStorageService;
         this.workerShiftClockService = workerShiftClockService;
         this.objectMapper = objectMapper;
+        this.workerLoginResolver = workerLoginResolver;
     }
 
     @Transactional(readOnly = true)
@@ -189,6 +192,7 @@ public class WorkerJobService {
     ) {
         var worker = worker(tenantId, userId, email);
         var action = normalizeAction(request.action());
+        jdbcTemplate.queryForList("SELECT id FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE", UUID.class, tenantId, workOrderId);
         workerShiftClockService.requireClockedIn(tenantId, userId, email);
         requireAssigned(tenantId, worker.id(), workOrderId);
         var now = Instant.now();
@@ -307,8 +311,10 @@ public class WorkerJobService {
             UpsertWorkOrderMaintenanceRecordRequest request
     ) {
         var worker = worker(tenantId, userId, email);
+        jdbcTemplate.queryForList("SELECT id FROM work_orders WHERE tenant_id = ? AND id = ? FOR UPDATE", UUID.class, tenantId, workOrderId);
         workerShiftClockService.requireClockedIn(tenantId, userId, email);
         requireAssigned(tenantId, worker.id(), workOrderId);
+        requireActionAllowed(tenantId, worker.id(), workOrderId, "SAVE_MAINTENANCE_RECORD", Instant.now());
         var templateSnapshot = request == null ? null : request.templateSnapshot();
         if (templateSnapshot == null || templateSnapshot.isEmpty()) {
             templateSnapshot = workOrderTemplate(tenantId, workOrderId);
@@ -394,6 +400,18 @@ public class WorkerJobService {
                 && !isEvidenceAction(action)) {
             throw new BadRequestException("This job is submitted for review. Only photos and purchase receipts can still be added.");
         }
+        if (terminalAssignmentStatus(gate.assignmentStatus()) && !isEvidenceAction(action)) {
+            throw new BadRequestException("Your worker assignment is already closed. Only photos and purchase receipts can still be added before review closes.");
+        }
+        var allowed = switch (action) {
+            case "START_TRAVEL" -> "ASSIGNED".equals(gate.assignmentStatus());
+            case "ARRIVE_ON_SITE" -> Set.of("ASSIGNED", "ACCEPTED").contains(gate.assignmentStatus());
+            case "START_WORK" -> "ON_SITE".equals(gate.assignmentStatus());
+            case "PAUSE_WORK", "COMPLETE_WORK" -> "IN_PROGRESS".equals(gate.assignmentStatus());
+            case "RESUME_WORK" -> "PAUSED".equals(gate.assignmentStatus());
+            default -> true;
+        };
+        if (!allowed) throw new BadRequestException("This action is not available for your current worker progress. Refresh the job and continue from the current step.");
     }
 
     private void requireNoOpenWorkerActivityForWorkOrderAction(UUID tenantId, UUID workerId, String action) {
@@ -535,6 +553,14 @@ public class WorkerJobService {
             throw new BadRequestException("Checklist item is required.");
         }
         var task = checklistTask(tenantId, worker.id(), workOrderId, taskId);
+        var gate = actionGate(tenantId, worker.id(), workOrderId);
+        if ("PRE_START".equals(task.phase()) && !Set.of("ASSIGNED", "ACCEPTED", "ON_SITE").contains(gate.assignmentStatus())) {
+            throw new BadRequestException("Pre-start checks are closed after work starts.");
+        }
+        if ("COMPLETION".equals(task.phase()) && !"IN_PROGRESS".equals(gate.assignmentStatus())) {
+            throw new BadRequestException("Start or resume your work before completing the completion checklist.");
+        }
+        if (task.completed()) return;
         var updated = jdbcTemplate.update("""
                 UPDATE work_order_tasks
                 SET completed = true, completed_at = ?, completed_by = ?, task_status = 'COMPLETED', updated_by = ?, updated_at = now()
@@ -1021,7 +1047,7 @@ public class WorkerJobService {
 
     private ChecklistTaskRef checklistTask(UUID tenantId, UUID workerId, UUID workOrderId, UUID taskId) {
         return jdbcTemplate.query("""
-                SELECT label, checklist_phase::text AS phase
+                SELECT label, checklist_phase::text AS phase, completed
                 FROM work_order_tasks
                 WHERE tenant_id = ? AND work_order_id = ? AND id = ?
                   AND (assigned_worker_id IS NULL OR assigned_worker_id = ?)
@@ -1029,7 +1055,7 @@ public class WorkerJobService {
             if (!rs.next()) {
                 throw new ResourceNotFoundException("Checklist item not found for this job.");
             }
-            return new ChecklistTaskRef(rs.getString("label"), rs.getString("phase"));
+            return new ChecklistTaskRef(rs.getString("label"), rs.getString("phase"), rs.getBoolean("completed"));
         }, tenantId, workOrderId, taskId, workerId);
     }
 
@@ -1504,24 +1530,8 @@ public class WorkerJobService {
     }
 
     private WorkerRef worker(UUID tenantId, UUID userId, String email) {
-        return jdbcTemplate.query("""
-                SELECT id, user_id, display_name, email
-                FROM workers
-                WHERE tenant_id = ? AND status = 'ACTIVE'
-                  AND (user_id = ? OR lower(email::text) = lower(?))
-                ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END
-                LIMIT 1
-                """, rs -> {
-            if (!rs.next()) {
-                throw new ResourceNotFoundException("Worker profile is not linked to this login.");
-            }
-            return new WorkerRef(
-                    rs.getObject("id", UUID.class),
-                    rs.getObject("user_id", UUID.class) == null ? userId : rs.getObject("user_id", UUID.class),
-                    rs.getString("display_name"),
-                    rs.getString("email")
-            );
-        }, tenantId, userId, email, userId);
+        var identity = workerLoginResolver.activeWorker(tenantId, userId, email);
+        return new WorkerRef(identity.id(), identity.userId(), identity.name(), identity.email());
     }
 
     private void requireAssigned(UUID tenantId, UUID workerId, UUID workOrderId) {
@@ -1827,7 +1837,7 @@ public class WorkerJobService {
     private record WorkerRef(UUID id, UUID userId, String displayName, String email) {
     }
 
-    private record ChecklistTaskRef(String label, String phase) {
+    private record ChecklistTaskRef(String label, String phase, boolean completed) {
     }
 
     private record RouteStopRef(String stopType, String name, Instant arrivedAt, Instant completedAt, Instant skippedAt) {

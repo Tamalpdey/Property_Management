@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { TenantTimeService } from '../../../core/services/tenant-time.service';
 import type { WorkerAssignedJob } from '@lorne/contracts';
 import { TagModule } from 'primeng/tag';
 import { CardModule } from 'primeng/card';
@@ -70,6 +71,7 @@ import { workerFacingStatus } from '../worker-job-ui';
   `
 })
 export class WorkerJobCardComponent {
+  private readonly time = inject(TenantTimeService);
   job = input.required<WorkerAssignedJob>();
 
   protected windowLabel(): string {
@@ -79,7 +81,7 @@ export class WorkerJobCardComponent {
     const start = new Date(this.job().scheduledStart!);
     const scheduledEnd = this.job().scheduledEnd;
     const end = scheduledEnd ? new Date(scheduledEnd) : null;
-    return `${start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${end ? ` - ${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`;
+    return `${this.time.format(start, { hour: 'numeric', minute: '2-digit' })}${end ? ` - ${this.time.format(end, { hour: 'numeric', minute: '2-digit' })}` : ''}`;
   }
 
   protected completedChecks(): number {

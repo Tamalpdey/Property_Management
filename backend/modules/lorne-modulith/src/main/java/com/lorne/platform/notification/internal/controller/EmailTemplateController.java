@@ -24,7 +24,7 @@ class EmailTemplateController {
     }
 
     @GetMapping("/invoice-owner")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','FINANCE')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
     ApiResponse<EmailTemplateDto> invoiceTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
         return ApiResponse.ok(emailTemplateService.invoiceTemplate(principal.tenantId(), principal.userId()));
     }
@@ -45,7 +45,7 @@ class EmailTemplateController {
     }
 
     @GetMapping("/work-order-completed-owner")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
     ApiResponse<EmailTemplateDto> workOrderCompletedTemplate(@AuthenticationPrincipal JwtPrincipal principal) {
         return ApiResponse.ok(emailTemplateService.workOrderCompletedTemplate(principal.tenantId(), principal.userId()));
     }

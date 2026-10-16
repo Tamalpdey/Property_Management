@@ -1,0 +1,267 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.template-page {
+  display: grid;
+  gap: 24px;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 27px;
+  font-weight: 650;
+}
+h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+h3 {
+  font-size: 18px;
+  font-weight: 650;
+}
+.page-heading,
+.section-heading,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.eyebrow,
+.muted,
+small {
+  font-size: 12px;
+  color: #64748b;
+}
+.eyebrow {
+  margin-bottom: 7px;
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #e2e8f0;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.tabs button {
+  display: flex;
+  gap: 8px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 0;
+  color: #64748b;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tabs button.active {
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.catalog-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.template-list {
+  display: grid;
+  gap: 8px;
+}
+.template-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+.template-choice.selected {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.template-choice span {
+  min-width: 0;
+  flex: 1;
+}
+.template-choice strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.template-choice small {
+  display: block;
+  margin-top: 5px;
+}
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.template-editor {
+  display: grid;
+  gap: 18px;
+}
+.template-editor label,
+.tenant-assignment > label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+input,
+select,
+textarea {
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+  background: white;
+  color: #172033;
+}
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.mode {
+  padding: 4px 7px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #475569;
+}
+.actions {
+  justify-content: flex-end;
+}
+.preview {
+  padding: 24px;
+  background: white;
+  border: 1px solid #dbe2ea;
+  border-radius: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.preview-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  color: #1d4ed8;
+  font-size: 11px;
+}
+.preview-top strong {
+  font-size: 22px;
+}
+.preview .muted {
+  margin-top: 8px;
+}
+.preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 22px 0;
+  font-size: 11px;
+}
+.preview th {
+  background: #eff6ff;
+  text-align: left;
+  padding: 8px 5px;
+  font-size: 9px;
+}
+.preview td {
+  padding: 12px 5px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.preview-total {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #cbd5e1;
+  padding-top: 14px;
+  font-size: 13px;
+}
+.description-lines {
+  margin: 22px 0;
+  font-size: 12px;
+}
+.description-lines strong {
+  display: block;
+  background: #eff6ff;
+  padding: 8px;
+  font-size: 10px;
+}
+.description-lines p {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 8px;
+}
+.preview h4 {
+  font-size: 10px;
+  color: #64748b;
+  margin: 24px 0 8px;
+}
+.preview-body {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tenant-assignment {
+  display: grid;
+  gap: 18px;
+  max-width: 900px;
+}
+.tenant-assignment > select {
+  max-width: 480px;
+}
+.error,
+.notice {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.notice {
+  background: #ecfdf5;
+  color: #047857;
+}
+@media (max-width: 1200px) {
+  .editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 800px) {
+  .catalog-layout {
+    grid-template-columns: 1fr;
+  }
+  .template-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .template-list {
+    grid-template-columns: 1fr;
+  }
+  .preview {
+    padding: 16px;
+  }
+  h1 {
+    font-size: 24px;
+  }
+}

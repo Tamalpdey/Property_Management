@@ -1,0 +1,108 @@
+<section class="dashboard">
+  <header class="dashboard-heading">
+    <div>
+      <p class="eyebrow">Platform overview</p>
+      <h1>Tenant operations</h1>
+      <p class="refreshed">
+        @if (refreshedAt()) {
+          Updated {{ refreshedAt() | date: "h:mm a" }}
+        }
+      </p>
+    </div>
+    <div class="heading-actions">
+      <button
+        pButton
+        severity="secondary"
+        icon="pi pi-refresh"
+        title="Refresh overview"
+        aria-label="Refresh overview"
+        [disabled]="loading()"
+        (click)="load()"
+      ></button
+      ><a
+        pButton
+        routerLink="/tenants/new"
+        icon="pi pi-plus"
+        label="New tenant"
+      ></a>
+    </div>
+  </header>
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+  @if (overview(); as data) {
+    <div class="metrics" aria-label="Platform totals">
+      @for (metric of data.metrics; track metric.label) {
+        <lorne-platform-metric-card [metric]="metric" />
+      }
+    </div>
+    <div class="status-overview">
+      <section class="lifecycle">
+        <div class="section-heading">
+          <h2>Tenant lifecycle</h2>
+          <a routerLink="/tenants"
+            >View directory
+            <i class="pi pi-arrow-up-right" aria-hidden="true"></i
+          ></a>
+        </div>
+        <div class="lifecycle-bar" aria-hidden="true">
+          @for (item of data.tenantStatuses; track item.status) {
+            <span
+              [style.width.%]="percentage(item.count, data)"
+              [style.background]="statusColor(item.status)"
+            ></span>
+          }
+        </div>
+        <div class="lifecycle-legend">
+          @for (item of data.tenantStatuses; track item.status) {
+            <a routerLink="/tenants" [queryParams]="{ status: item.status }"
+              ><i [style.background]="statusColor(item.status)"></i
+              ><span>{{ label(item.status) }}</span
+              ><strong>{{ item.count }}</strong></a
+            >
+          } @empty {
+            <p class="muted">No tenants yet</p>
+          }
+        </div>
+      </section>
+      <section class="support-summary">
+        <div class="section-heading">
+          <h2>Support queue</h2>
+          <a routerLink="/support-tickets"
+            >View tickets <i class="pi pi-arrow-up-right" aria-hidden="true"></i
+          ></a>
+        </div>
+        <div class="support-states">
+          <a routerLink="/support-tickets" [queryParams]="{ status: 'OPEN' }"
+            ><span>Open</span><strong>{{ data.support.open }}</strong></a
+          ><a
+            routerLink="/support-tickets"
+            [queryParams]="{ status: 'IN_PROGRESS' }"
+            ><span>In progress</span
+            ><strong>{{ data.support.inProgress }}</strong></a
+          ><a
+            routerLink="/support-tickets"
+            [queryParams]="{ status: 'WAITING_ON_TENANT' }"
+            ><span>Waiting</span
+            ><strong>{{ data.support.waitingOnTenant }}</strong></a
+          ><a
+            class="urgent"
+            routerLink="/support-tickets"
+            [queryParams]="{ status: 'UNRESOLVED', priority: 'URGENT' }"
+            ><span>Urgent</span><strong>{{ data.support.urgent }}</strong></a
+          >
+        </div>
+      </section>
+    </div>
+    <lorne-tenant-health-list
+      [tenants]="data.tenantHealth"
+      (changed)="load()"
+    />
+    <lorne-admin-action-list [actions]="data.priorityActions" />
+  } @else if (loading()) {
+    <div class="loading" role="status">
+      <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>Loading tenant
+      operations...
+    </div>
+  }
+</section>

@@ -28,15 +28,18 @@ public class WorkerDailyLoadoutService {
     private final JdbcTemplate jdbcTemplate;
     private final AuditWriter auditWriter;
     private final WorkerShiftClockService workerShiftClockService;
+    private final WorkerLoginResolver workerLoginResolver;
 
     public WorkerDailyLoadoutService(
             JdbcTemplate jdbcTemplate,
             AuditWriter auditWriter,
-            WorkerShiftClockService workerShiftClockService
+            WorkerShiftClockService workerShiftClockService,
+            WorkerLoginResolver workerLoginResolver
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.auditWriter = auditWriter;
         this.workerShiftClockService = workerShiftClockService;
+        this.workerLoginResolver = workerLoginResolver;
     }
 
     @Transactional
@@ -602,27 +605,8 @@ public class WorkerDailyLoadoutService {
     }
 
     private WorkerRef worker(UUID tenantId, UUID userId, String email) {
-        return jdbcTemplate.query("""
-                SELECT w.id, w.user_id,
-                       coalesce(nullif(btrim(u.display_name), ''), w.display_name) AS display_name,
-                       coalesce(u.email, w.email) AS email
-                FROM workers w
-                LEFT JOIN app_users u ON u.id = w.user_id
-                WHERE w.tenant_id = ? AND w.status = 'ACTIVE'
-                  AND (w.user_id = ? OR lower(w.email::text) = lower(?))
-                ORDER BY CASE WHEN w.user_id = ? THEN 0 ELSE 1 END
-                LIMIT 1
-                """, rs -> {
-            if (!rs.next()) {
-                throw new ResourceNotFoundException("Worker profile is not linked to this login.");
-            }
-            return new WorkerRef(
-                    rs.getObject("id", UUID.class),
-                    rs.getObject("user_id", UUID.class) == null ? userId : rs.getObject("user_id", UUID.class),
-                    rs.getString("display_name"),
-                    rs.getString("email")
-            );
-        }, tenantId, userId, email, userId);
+        var identity = workerLoginResolver.activeWorker(tenantId, userId, email);
+        return new WorkerRef(identity.id(), identity.userId(), identity.name(), identity.email());
     }
 
     private WorkerRef worker(UUID tenantId, UUID workerId) {

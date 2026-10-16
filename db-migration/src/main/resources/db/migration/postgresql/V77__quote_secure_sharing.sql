@@ -1,3 +1,13 @@
+-- Earlier V76 deployments predate ad-hoc clients and properties.
+ALTER TABLE quotes
+    ADD COLUMN IF NOT EXISTS adhoc_customer_name text,
+    ADD COLUMN IF NOT EXISTS adhoc_customer_email citext,
+    ADD COLUMN IF NOT EXISTS adhoc_customer_phone text,
+    ADD COLUMN IF NOT EXISTS adhoc_property_name text,
+    ADD COLUMN IF NOT EXISTS adhoc_property_address text;
+
+ALTER TABLE quotes ALTER COLUMN customer_id DROP NOT NULL;
+
 ALTER TABLE quotes
     ADD COLUMN access_password_hash text,
     ADD COLUMN access_failed_attempts integer NOT NULL DEFAULT 0,

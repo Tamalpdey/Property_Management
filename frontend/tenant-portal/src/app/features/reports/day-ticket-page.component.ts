@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -301,8 +301,8 @@ export class DayTicketPageComponent {
     includeTotals: true
   };
 
-  protected readonly timeOnly = timeOnly;
-  protected readonly ticketTimeLabel = ticketTimeLabel;
+  protected readonly timeOnly = (value?: string, fallback = '-') => timeOnly(value, fallback, this.settings()?.timezone);
+  protected readonly ticketTimeLabel = (value: string | undefined, from: string, to: string, fallback = '-') => ticketTimeLabel(value, from, to, fallback, this.settings()?.timezone);
   protected readonly minutesLabel = minutesLabel;
   protected readonly dayTicketDescription = dayTicketDescription;
   protected readonly dayTicketRowTypeLabel = dayTicketRowTypeLabel;

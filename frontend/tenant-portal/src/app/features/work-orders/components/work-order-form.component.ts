@@ -48,6 +48,19 @@ type WorkOrderLinkType = 'RELATED' | 'BLOCKS' | 'FOLLOWS' | 'SAME_RECURRENCE' | 
         <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{{ formError }}</p>
       }
 
+      @if (unavailableSelectedWorkers().length > 0 && !isLockedWorkOrder()) {
+        <div class="flex-none rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+          <p class="font-bold">Assigned workers unavailable for dispatch</p>
+          <p class="mt-1 text-xs">These profiles are inactive or missing from this company's active worker list. Activate the existing profile under Workers, or remove its assignment before saving.</p>
+          @for (worker of unavailableSelectedWorkers(); track worker.id) {
+            <div class="mt-2 flex items-center justify-between gap-3 border-t border-amber-200 pt-2">
+              <span class="min-w-0 break-words font-semibold">{{ worker.name }}</span>
+              <button pButton type="button" severity="secondary" size="small" icon="pi pi-user-minus" label="Remove assignment" [disabled]="saving()" (click)="removeWorker(worker.id)"></button>
+            </div>
+          }
+        </div>
+      }
+
       <fieldset class="flex min-h-0 flex-1 flex-col gap-3" [disabled]="isLockedWorkOrder()">
       <div class="flex-none grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5" [style.grid-template-columns]="'repeat(' + currentSteps().length + ', minmax(0, 1fr))'">
         @for (stepLabel of currentSteps(); track stepLabel; let index = $index) {
@@ -717,11 +730,12 @@ export class WorkOrderFormComponent {
   }
 
   protected eligibleWorkers(): WorkerRecord[] {
+    const activeWorkers = this.workers().filter(worker => worker.status === 'ACTIVE');
     const serviceTypeId = this.form.serviceTypeId;
     if (!serviceTypeId) {
-      return this.workers();
+      return activeWorkers;
     }
-    return this.workers().filter((worker) => worker.serviceSkills.some((skill) => skill.serviceTypeId === serviceTypeId));
+    return activeWorkers.filter((worker) => worker.serviceSkills.some((skill) => skill.serviceTypeId === serviceTypeId));
   }
 
   protected filteredWorkers(): WorkerRecord[] {
@@ -812,6 +826,12 @@ export class WorkOrderFormComponent {
     if (isPickupDelivery && this.routeStopRows.filter((stop) => stop.name.trim()).length === 0) {
       this.step = 1;
       this.formError = 'Add at least one pickup, delivery, supplier, warehouse, or return stop.';
+      return;
+    }
+    const unavailableWorkers = this.unavailableSelectedWorkers();
+    if (unavailableWorkers.length) {
+      this.formError = `Cannot save with unavailable worker profiles: ${unavailableWorkers.map(worker => worker.name).join(', ')}. Activate the existing profiles under Workers or remove their assignments.`;
+      this.step = 2;
       return;
     }
     const availabilityWarnings = this.selectedAvailabilityWarnings();
@@ -1007,10 +1027,25 @@ export class WorkOrderFormComponent {
       this.leadWorkerId ||= workerId;
       return;
     }
+    this.removeWorker(workerId);
+  }
+
+  protected removeWorker(workerId: string): void {
     this.selectedWorkerIds.delete(workerId);
     if (this.leadWorkerId === workerId) {
       this.leadWorkerId = [...this.selectedWorkerIds][0] || '';
     }
+    this.taskRows = this.taskRows.map(task => ({...task, assignedWorkerId: task.assignedWorkerId === workerId ? '' : task.assignedWorkerId}));
+    this.formError = '';
+  }
+
+  protected unavailableSelectedWorkers(): Array<{id: string; name: string}> {
+    const activeIds = new Set(this.workers().filter(worker => worker.status === 'ACTIVE').map(worker => worker.id));
+    return [...this.selectedWorkerIds].filter(id => !activeIds.has(id)).map(id => {
+      const worker = this.workers().find(worker => worker.id === id);
+      const name = worker?.displayName || this.workOrder()?.assignments.find(assignment => assignment.workerId === id)?.workerName || id;
+      return {id, name: worker?.employeeNumber ? `${name} (${worker.employeeNumber})` : name};
+    });
   }
 
   protected toggleAsset(assetId: string, event: Event): void {
@@ -1024,8 +1059,9 @@ export class WorkOrderFormComponent {
 
   protected pruneWorkers(): void {
     const eligibleIds = new Set(this.eligibleWorkers().map((worker) => worker.id));
+    const unavailableIds = new Set(this.unavailableSelectedWorkers().map(worker => worker.id));
     [...this.selectedWorkerIds].forEach((workerId) => {
-      if (!eligibleIds.has(workerId)) {
+      if (!eligibleIds.has(workerId) && !unavailableIds.has(workerId)) {
         this.selectedWorkerIds.delete(workerId);
       }
     });
@@ -1267,6 +1303,7 @@ export class WorkOrderFormComponent {
     this.allowAvailabilityOverride = false;
     this.availabilityOverrideReason = '';
     this.selectedWorkerIds.clear();
+    this.leadWorkerId = '';
     for (const assignment of workOrder.assignments.filter(isActiveAssignment)) {
       this.selectedWorkerIds.add(assignment.workerId);
       if (assignment.leadWorker) {

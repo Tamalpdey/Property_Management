@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, OnDestroy, inject, signal } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 import { WorkerShiftClockService } from '../core/services/worker-shift-clock.service';

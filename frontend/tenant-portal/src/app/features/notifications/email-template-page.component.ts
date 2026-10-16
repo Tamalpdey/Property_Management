@@ -7,6 +7,7 @@ import { TagModule } from 'primeng/tag';
 import type { EmailTemplateRecord } from '@lorne/contracts';
 import { EmailTemplateService } from './services/email-template.service';
 import { TenantSettingsService } from '../settings/services/tenant-settings.service';
+import { AuthService } from '../../core/services/auth.service';
 
 type TemplateSlug = 'invoice-owner' | 'work-order-completed-owner' | 'quote-client';
 
@@ -83,12 +84,12 @@ interface VariableGroup {
 
           <label class="mt-3 block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Subject</span>
-            <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="form.subject" [disabled]="loading() || saving() || resetting()" />
+            <input class="w-full border border-slate-300 px-3 py-2 text-sm" name="subject" [(ngModel)]="form.subject" [readonly]="!canEdit()" [disabled]="loading() || saving() || resetting()" />
           </label>
 
           <label class="mt-3 block">
             <span class="mb-1 block text-sm font-bold text-slate-700">Body</span>
-            <textarea class="min-h-96 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="form.body" [disabled]="loading() || saving() || resetting()"></textarea>
+            <textarea class="min-h-96 w-full border border-slate-300 px-3 py-2 text-sm" name="body" [(ngModel)]="form.body" [readonly]="!canEdit()" [disabled]="loading() || saving() || resetting()"></textarea>
           </label>
 
           <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -109,7 +110,7 @@ interface VariableGroup {
                         type="button"
                         class="rounded-full border border-teal-100 bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800 transition hover:border-teal-300 hover:bg-teal-100"
                         (click)="insertVariable(variable)"
-                        [disabled]="loading() || saving() || resetting()"
+                        [disabled]="!canEdit() || loading() || saving() || resetting()"
                       >
                         {{ '{{' + variable + '}}' }}
                       </button>
@@ -120,16 +121,21 @@ interface VariableGroup {
           </div>
           </div>
 
-          <div class="mt-3 flex justify-end gap-2">
-            <button pButton type="button" severity="secondary" label="Reset to latest default" [loading]="resetting()" [disabled]="loading() || saving()" (click)="reset()"></button>
-            <button pButton type="submit" icon="pi pi-save" label="Save template" [loading]="saving()" [disabled]="loading() || resetting()" ></button>
-          </div>
+          @if (canEdit()) {
+            <div class="mt-3 flex justify-end gap-2">
+              <button pButton type="button" severity="secondary" label="Reset to latest default" [loading]="resetting()" [disabled]="loading() || saving()" (click)="reset()"></button>
+              <button pButton type="submit" icon="pi pi-save" label="Save template" [loading]="saving()" [disabled]="loading() || resetting()" ></button>
+            </div>
+          } @else {
+            <p class="mt-3 text-sm text-slate-600">Read-only. {{ activeTemplate() === 'invoice-owner' ? 'Tenant Admin or Finance' : 'Tenant Admin or Operations' }} can change this template.</p>
+          }
         </form>
       </section>
     </section>
   `
 })
 export class EmailTemplatePageComponent {
+  private readonly auth = inject(AuthService);
   private readonly emailTemplateService = inject(EmailTemplateService);
   private readonly settingsService = inject(TenantSettingsService);
   protected readonly quotesEnabled = signal(false);
@@ -198,6 +204,10 @@ export class EmailTemplatePageComponent {
     }
   ];
   protected readonly activeTemplate = signal<TemplateSlug>('invoice-owner');
+  protected readonly canEdit = computed(() => this.auth.hasRole('TENANT_ADMIN')
+    || (this.activeTemplate() === 'invoice-owner' ? this.auth.hasRole('FINANCE')
+      : this.activeTemplate() === 'work-order-completed-owner' ? this.auth.hasRole('OPERATIONS')
+      : this.auth.hasAnyRole(['OPERATIONS', 'FINANCE'])));
   protected readonly templates = signal<Record<TemplateSlug, EmailTemplateRecord | null>>({
     'invoice-owner': null,
     'work-order-completed-owner': null,
@@ -263,11 +273,12 @@ export class EmailTemplatePageComponent {
   }
 
   protected insertVariable(variable: string): void {
+    if (!this.canEdit()) return;
     this.form.body = `${this.form.body}${this.form.body.endsWith('\n') || this.form.body.length === 0 ? '' : '\n'}{{${variable}}}`;
   }
 
   protected async reset(): Promise<void> {
-    if (this.resetting() || this.loading() || this.saving()) {
+    if (!this.canEdit() || this.resetting() || this.loading() || this.saving()) {
       return;
     }
     if (!window.confirm('Reset this template to the latest default copy? This will replace the current subject and body.')) {
@@ -293,7 +304,7 @@ export class EmailTemplatePageComponent {
   }
 
   protected async save(): Promise<void> {
-    if (this.saving() || this.loading() || this.resetting()) {
+    if (!this.canEdit() || this.saving() || this.loading() || this.resetting()) {
       return;
     }
     this.saving.set(true);

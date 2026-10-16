@@ -1,8 +1,8 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import type { CommunicationChannelType, ConversationRecord, ConversationThread, TenantUserRecord } from '@lorne/contracts';
+import type { CommunicationChannelType, ConversationRecord, ConversationThread, TenantUserRecipient } from '@lorne/contracts';
 import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -277,7 +277,7 @@ export class MessagesPageComponent implements OnDestroy {
     { value: 'WORKER_DIRECT', label: 'Private worker chat', helper: 'Use for one-to-one communication with a single worker.', icon: 'pi pi-comments' }
   ];
   protected readonly conversations = signal<ConversationRecord[]>([]);
-  protected readonly users = signal<TenantUserRecord[]>([]);
+  protected readonly users = signal<TenantUserRecipient[]>([]);
   protected readonly selectedThread = signal<ConversationThread | null>(null);
   protected readonly selectedId = signal<string | null>(null);
   protected readonly loading = signal(false);
@@ -478,7 +478,7 @@ export class MessagesPageComponent implements OnDestroy {
       .map((user) => user.id));
   }
 
-  protected roleSummary(user: TenantUserRecord): string {
+  protected roleSummary(user: TenantUserRecipient): string {
     return user.roles.map((role) => role.replace(/_/g, ' ').toLowerCase()).join(', ') || 'user';
   }
 
@@ -498,13 +498,13 @@ export class MessagesPageComponent implements OnDestroy {
 
   private async loadUsers(): Promise<void> {
     try {
-      this.users.set(await firstValueFrom(this.tenantUserService.list()));
+      this.users.set(await firstValueFrom(this.tenantUserService.recipients()));
     } catch {
       this.users.set([]);
     }
   }
 
-  private filteredRecipients(): TenantUserRecord[] {
+  private filteredRecipients(): TenantUserRecipient[] {
     const query = this.recipientSearch().trim().toLowerCase();
     const channelType = this.newChannel();
     return this.users()

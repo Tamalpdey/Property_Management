@@ -24,12 +24,27 @@ public class QuoteAccessService {
     }
 
     public void verify(String tokenHash, String password) {
+        verify(tokenHash, password, false);
+    }
+
+    public void verifyCapture(String tokenHash, String password) {
+        verify(tokenHash, password, true);
+    }
+
+    private void verify(String tokenHash, String password, boolean capture) {
+        var table = capture ? "quote_capture_links" : "quotes";
+        var idColumn = capture ? "quote_id" : "id";
+        var tokenColumn = capture ? "token_hash" : "approval_token_hash";
+        var passwordColumn = capture ? "password_hash" : "access_password_hash";
+        var failuresColumn = capture ? "failed_attempts" : "access_failed_attempts";
+        var lockedColumn = capture ? "locked_until" : "access_locked_until";
         var outcome = transaction.execute(status -> {
             var rows = jdbc.query("""
-                    SELECT id, access_password_hash, access_failed_attempts,
-                           coalesce(access_locked_until > now(), false) AS locked
-                    FROM quotes WHERE approval_token_hash = ? FOR UPDATE
-                    """, (rs, row) -> new Access(rs.getObject("id", UUID.class), rs.getString("access_password_hash"),
+                    SELECT %s AS id, %s AS access_password_hash, %s AS access_failed_attempts,
+                           coalesce(%s > now(), false) AS locked
+                    FROM %s WHERE %s = ? FOR UPDATE
+                    """.formatted(idColumn, passwordColumn, failuresColumn, lockedColumn, table, tokenColumn),
+                    (rs, row) -> new Access(rs.getObject("id", UUID.class), rs.getString("access_password_hash"),
                     rs.getInt("access_failed_attempts"), rs.getBoolean("locked")), tokenHash);
             if (rows.isEmpty()) return HttpStatus.NOT_FOUND;
             var access = rows.getFirst();
@@ -37,13 +52,13 @@ public class QuoteAccessService {
             if (password == null || password.length() > 64 || access.passwordHash() == null
                     || !encoder.matches(password, access.passwordHash())) {
                 jdbc.update("""
-                        UPDATE quotes SET access_failed_attempts = access_failed_attempts + 1,
-                            access_locked_until = CASE WHEN access_failed_attempts >= 4 THEN now() + interval '5 minutes' ELSE NULL END
-                        WHERE id = ?
-                        """, access.id());
+                        UPDATE %s SET %s = %s + 1,
+                            %s = CASE WHEN %s >= 4 THEN now() + interval '5 minutes' ELSE NULL END
+                        WHERE %s = ?
+                        """.formatted(table, failuresColumn, failuresColumn, lockedColumn, failuresColumn, idColumn), access.id());
                 return HttpStatus.UNAUTHORIZED;
             }
-            jdbc.update("UPDATE quotes SET access_failed_attempts = 0, access_locked_until = NULL WHERE id = ?", access.id());
+            jdbc.update("UPDATE %s SET %s = 0, %s = NULL WHERE %s = ?".formatted(table, failuresColumn, lockedColumn, idColumn), access.id());
             return HttpStatus.OK;
         });
         if (outcome != HttpStatus.OK) {

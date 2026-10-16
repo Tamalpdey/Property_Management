@@ -2,6 +2,7 @@ package com.lorne.platform.auth.internal.controller;
 
 import com.lorne.platform.auth.internal.dto.CreateTenantUserRequest;
 import com.lorne.platform.auth.internal.dto.TenantRoleDto;
+import com.lorne.platform.auth.internal.dto.TenantRecipientDto;
 import com.lorne.platform.auth.internal.dto.TenantUserDto;
 import com.lorne.platform.auth.internal.dto.UpdateTenantUserRequest;
 import com.lorne.platform.auth.internal.service.TenantUserManagementService;
@@ -37,9 +38,15 @@ class TenantUserManagementController {
     }
 
     @GetMapping("/roles")
-    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
     ApiResponse<List<TenantRoleDto>> roles() {
         return ApiResponse.ok(tenantUserManagementService.roles());
+    }
+
+    @GetMapping("/recipients")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','OPERATIONS','FINANCE')")
+    ApiResponse<List<TenantRecipientDto>> recipients(@AuthenticationPrincipal JwtPrincipal principal) {
+        return ApiResponse.ok(tenantUserManagementService.recipients(principal.tenantId()));
     }
 
     @PostMapping

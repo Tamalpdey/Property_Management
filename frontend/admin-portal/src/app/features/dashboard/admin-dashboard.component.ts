@@ -1,56 +1,43 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TagModule } from 'primeng/tag';
+import { ButtonModule } from 'primeng/button';
+import type { SuperAdminOverviewResponse } from '@lorne/contracts';
+import { firstValueFrom } from 'rxjs';
 import { AdminActionListComponent } from './components/admin-action-list.component';
 import { PlatformMetricCardComponent } from './components/platform-metric-card.component';
 import { TenantHealthListComponent } from './components/tenant-health-list.component';
 import { SuperAdminOverviewService } from './services/super-admin-overview.service';
 
 @Component({
-  selector: 'lorne-admin-dashboard',
   standalone: true,
-  imports: [AdminActionListComponent, PlatformMetricCardComponent, RouterLink, TagModule, TenantHealthListComponent],
+  imports: [DatePipe, AdminActionListComponent, PlatformMetricCardComponent, RouterLink, ButtonModule, TenantHealthListComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <section class="space-y-6">
-      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div class="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
-          <div>
-            <p-tag value="Platform" severity="contrast" />
-            <h1 class="mt-3 text-3xl font-bold leading-tight text-slate-950 md:text-4xl">Admin dashboard</h1>
-            <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Tenant health, worker readiness, audit visibility, and runtime controls for the property-management platform.</p>
-          </div>
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-              <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Environment</p>
-              <p class="mt-1 text-lg font-bold text-emerald-950">Operational</p>
-            </div>
-            <a routerLink="/tenants" class="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white no-underline hover:bg-slate-800">
-              <i class="pi pi-plus"></i> Onboard tenant
-            </a>
-          </div>
-        </div>
-      </div>
-
-      @if (overview(); as data) {
-        <div class="grid gap-4 md:grid-cols-3">
-          @for (metric of data.metrics; track metric.label) {
-            <lorne-platform-metric-card [metric]="metric" />
-          }
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-[1fr_24rem]">
-          <lorne-tenant-health-list [tenants]="data.tenantHealth" />
-          <lorne-admin-action-list [actions]="data.priorityActions" />
-        </div>
-      } @else {
-        <div class="rounded border border-slate-200 bg-white p-6 text-slate-600">Loading platform overview...</div>
-      }
-    </section>
-  `
+  templateUrl: './admin-dashboard.component.html', styleUrls: ['./admin-dashboard.component.scss']
 })
 export class AdminDashboardComponent {
-  private readonly overviewService = inject(SuperAdminOverviewService);
-  protected readonly overview = toSignal(this.overviewService.overview());
+  private readonly service = inject(SuperAdminOverviewService);
+  protected readonly overview = signal<SuperAdminOverviewResponse | null>(null);
+  protected readonly loading = signal(false);
+  protected readonly error = signal('');
+  protected readonly refreshedAt = signal<Date | null>(null);
+  constructor() { void this.load(); }
+  protected percentage(count: number, data: SuperAdminOverviewResponse): number {
+    const total = data.tenantStatuses.reduce((sum, item) => sum + item.count, 0);
+    return total ? count / total * 100 : 0;
+  }
+  protected statusColor(status: string): string {
+    return ({ ACTIVE: '#0d9488', TRIAL: '#3b82f6', PAST_DUE: '#d97706', SUSPENDED: '#e11d48', CANCELLED: '#94a3b8' } as Record<string, string>)[status] || '#94a3b8';
+  }
+  protected label(status: string): string {
+    return status === 'SUSPENDED' ? 'Inactive' : status.toLowerCase().replaceAll('_', ' ').replace(/^./, value => value.toUpperCase());
+  }
+  protected async load(): Promise<void> {
+    if (this.loading()) return;
+    this.loading.set(true); this.error.set('');
+    try { this.overview.set(await firstValueFrom(this.service.overview())); this.refreshedAt.set(new Date()); }
+    catch (error) { this.error.set(error instanceof HttpErrorResponse ? error.error?.error?.message || 'Unable to load platform overview.' : 'Unable to load platform overview.'); }
+    finally { this.loading.set(false); }
+  }
 }

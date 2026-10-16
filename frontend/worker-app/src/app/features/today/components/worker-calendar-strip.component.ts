@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import type { WorkerAssignedJob } from '@lorne/contracts';
 import { ButtonModule } from 'primeng/button';
@@ -35,8 +35,8 @@ import { ButtonModule } from 'primeng/button';
             [class.bg-white]="day.key !== selectedDate()"
             (click)="dateSelected.emit(day.key)"
           >
-            <span class="block text-[0.7rem] font-bold uppercase text-slate-500">{{ day.date | date:'EEE' }}</span>
-            <span class="mt-1 block text-xl font-black text-slate-950">{{ day.date | date:'d' }}</span>
+            <span class="block text-[0.7rem] font-bold uppercase text-slate-500">{{ day.key | date:'EEE' }}</span>
+            <span class="mt-1 block text-xl font-black text-slate-950">{{ day.key | date:'d' }}</span>
             <span
               class="mt-2 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[0.72rem] font-black"
               [class.bg-slate-950]="day.count > 0"

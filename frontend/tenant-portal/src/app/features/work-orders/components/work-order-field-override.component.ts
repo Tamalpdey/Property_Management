@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { TenantDatePipe } from '../../../shared/tenant-date.pipe';
 import { Component, computed, effect, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -112,7 +112,7 @@ export interface WorkOrderOverrideEvidenceUploadRequest {
   selector: 'lorne-work-order-field-override',
   standalone: true,
   imports: [
-    CommonModule,
+    TenantDatePipe,
     FormsModule,
     ButtonModule,
     CheckboxModule,

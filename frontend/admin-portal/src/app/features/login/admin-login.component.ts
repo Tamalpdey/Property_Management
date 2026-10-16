@@ -17,24 +17,25 @@ import { AuthService } from '../../core/services/auth.service';
       <p-card styleClass="w-full max-w-md">
         <div class="space-y-6">
           <div>
-            <span class="grid h-12 w-12 place-items-center rounded-lg bg-slate-950 font-bold text-white">L</span>
-            <p class="mt-5 text-sm font-bold uppercase tracking-wide text-slate-600">Lorne platform</p>
+            <span class="grid h-12 w-12 place-items-center rounded-lg bg-slate-950 font-bold text-white">M</span>
+            <p class="mt-5 text-sm font-bold uppercase tracking-wide text-slate-600">Maple Property Services</p>
             <h1 class="mt-2 text-3xl font-bold text-slate-950">Platform admin</h1>
-            <p class="mt-2 text-sm leading-6 text-slate-600">Software-owner controls for tenants, health, audit, and readiness.</p>
           </div>
-          <form class="space-y-4" (ngSubmit)="login()">
+          <form class="space-y-4" autocomplete="off" (ngSubmit)="login()">
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Email</span>
-              <input pInputText class="w-full" name="email" autocomplete="username" [(ngModel)]="email" />
+              <input pInputText class="w-full" name="platform-admin-email" type="email" autocomplete="off" required [(ngModel)]="email" />
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-semibold text-slate-700">Password</span>
               <p-password
                 styleClass="w-full"
                 inputStyleClass="w-full"
-                name="password"
-                autocomplete="current-password"
+                name="platform-admin-password"
+                autocomplete="off"
                 [feedback]="false"
+                [toggleMask]="true"
+                [required]="true"
                 [(ngModel)]="password"
               />
             </label>
@@ -59,8 +60,8 @@ import { AuthService } from '../../core/services/auth.service';
 export class AdminLoginComponent {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
-  protected email = 'superadmin@lorne.local';
-  protected password = 'Password123!';
+  protected email = '';
+  protected password = '';
   protected readonly loading = signal(false);
   protected readonly error = signal('');
 
@@ -68,14 +69,24 @@ export class AdminLoginComponent {
     if (this.loading()) {
       return;
     }
+    if (!this.email.trim() || !this.password) {
+      this.error.set('Enter your email and password.');
+      return;
+    }
     this.loading.set(true);
     this.error.set('');
     try {
-      await this.auth.login({ email: this.email, password: this.password });
+      const user = await this.auth.login({ email: this.email.trim(), password: this.password });
+      if (!user.roles.includes('SUPER_ADMIN')) {
+        this.auth.signOut();
+        this.error.set('Platform administrator access is required.');
+        return;
+      }
       await this.router.navigateByUrl('/dashboard');
     } catch {
       this.error.set('Unable to sign in. Check credentials and backend status.');
     } finally {
+      this.password = '';
       this.loading.set(false);
     }
   }

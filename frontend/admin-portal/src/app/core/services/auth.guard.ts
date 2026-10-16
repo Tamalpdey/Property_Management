@@ -5,5 +5,5 @@ import { AuthService } from './auth.service';
 export const authGuard: CanActivateFn = () => {
   const auth = inject(AuthService);
   const router = inject(Router);
-  return auth.isAuthenticated() || router.createUrlTree(['/login']);
+  return (auth.isAuthenticated() && auth.currentUser()?.roles.includes('SUPER_ADMIN')) || router.createUrlTree(['/login']);
 };

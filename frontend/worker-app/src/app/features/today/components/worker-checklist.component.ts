@@ -32,7 +32,7 @@ import { CardModule } from 'primeng/card';
             [class.border-slate-200]="!item.completed"
             [class.bg-white]="!item.completed"
             [class.text-slate-700]="!item.completed"
-            [disabled]="disabled() || item.completed || busyTaskId() === item.id"
+            [disabled]="disabled() || item.completed || !!busyTaskId()"
             (click)="completeItem.emit(item)"
           >
             <i [class]="item.completed ? 'pi pi-check-circle text-teal-700' : 'pi pi-circle text-slate-300'"></i>

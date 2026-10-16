@@ -1,0 +1,248 @@
+<section class="tickets">
+  <header class="heading">
+    <div>
+      <p class="muted">Tenant support</p>
+      <h1>Support tickets</h1>
+    </div>
+    <button
+      pButton
+      severity="secondary"
+      icon="pi pi-refresh"
+      title="Refresh tickets"
+      aria-label="Refresh tickets"
+      [disabled]="loading()"
+      (click)="load(0)"
+    ></button>
+  </header>
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+  <form class="filters" (ngSubmit)="load(0)">
+    <input
+      aria-label="Search tickets"
+      name="query"
+      placeholder="Ticket number, subject, tenant"
+      maxlength="200"
+      [(ngModel)]="query"
+    />
+    <select aria-label="Tenant filter" name="tenant" [(ngModel)]="tenantId">
+      <option value="">All tenants</option>
+      @for (tenant of tenants(); track tenant.id) {
+        <option [value]="tenant.id">{{ tenant.displayName }}</option>
+      }
+    </select>
+    <select
+      aria-label="Ticket status filter"
+      name="status"
+      [(ngModel)]="status"
+    >
+      <option value="">All statuses</option>
+      <option value="UNRESOLVED">Unresolved</option>
+      @for (item of statuses; track item) {
+        <option [value]="item">{{ label(item) }}</option>
+      }
+    </select>
+    <select aria-label="Priority filter" name="priority" [(ngModel)]="priority">
+      <option value="">All priorities</option>
+      @for (item of priorities; track item) {
+        <option [value]="item">{{ label(item) }}</option>
+      }
+    </select>
+    <button
+      pButton
+      type="submit"
+      icon="pi pi-filter"
+      label="Apply"
+      [disabled]="loading()"
+    ></button>
+  </form>
+  <div class="ticket-layout">
+    <section class="min-width" aria-label="Ticket queue">
+      <p class="muted">{{ page().total }} matching tickets</p>
+      <div class="queue">
+        @for (ticket of page().items; track ticket.id) {
+          <button
+            class="ticket-row"
+            [class.selected]="detail()?.ticket?.id === ticket.id"
+            [disabled]="saving()"
+            (click)="open(ticket.id)"
+          >
+            <div class="row-head">
+              <strong>{{ ticket.number }}</strong
+              ><span
+                class="badge"
+                [class.urgent]="ticket.priority === 'URGENT'"
+                >{{ ticket.priority }}</span
+              >
+            </div>
+            <h3>{{ ticket.subject }}</h3>
+            <p>{{ ticket.tenantName }}</p>
+            <div class="row-head">
+              <span class="badge">{{ label(ticket.status) }}</span
+              ><small>{{ ticket.updatedAt | date: 'MMM d, h:mm a' }}</small>
+            </div>
+          </button>
+        } @empty {
+          <p class="empty">
+            {{
+              loading()
+                ? 'Loading tickets...'
+                : 'No tickets match these filters.'
+            }}
+          </p>
+        }
+      </div>
+      <div class="pager">
+        <span class="muted">Page {{ page().page + 1 }}</span>
+        <div class="actions">
+          <button
+            pButton
+            severity="secondary"
+            icon="pi pi-chevron-left"
+            aria-label="Previous ticket page"
+            [disabled]="loading() || page().page === 0"
+            (click)="load(page().page - 1)"
+          ></button
+          ><button
+            pButton
+            severity="secondary"
+            icon="pi pi-chevron-right"
+            aria-label="Next ticket page"
+            [disabled]="
+              loading() || (page().page + 1) * page().size >= page().total
+            "
+            (click)="load(page().page + 1)"
+          ></button>
+        </div>
+      </div>
+    </section>
+    <section class="conversation" aria-label="Ticket conversation">
+      @if (detailError()) {
+        <p class="error" role="alert">{{ detailError() }}</p>
+      }
+      @if (detailLoading()) {
+        <p class="muted" role="status">Loading conversation...</p>
+      }
+      @if (detail(); as selected) {
+        <header class="heading">
+          <div class="min-width">
+            <p class="muted">
+              {{ selected.ticket.number }} /
+              <a
+                [routerLink]="['/tenants', selected.ticket.tenantId, 'support']"
+                >{{ selected.ticket.tenantName }}</a
+              >
+            </p>
+            <h2>{{ selected.ticket.subject }}</h2>
+          </div>
+          <button
+            pButton
+            severity="secondary"
+            icon="pi pi-refresh"
+            title="Refresh conversation"
+            aria-label="Refresh conversation"
+            [disabled]="saving()"
+            (click)="open(selected.ticket.id, true)"
+          ></button>
+        </header>
+        <form class="ticket-controls" (ngSubmit)="save()">
+          <label
+            >Status<select
+              name="editStatus"
+              aria-label="Status"
+              [(ngModel)]="edit.status"
+              [disabled]="saving()"
+            >
+              @for (item of statuses; track item) {
+                <option [value]="item">{{ label(item) }}</option>
+              }
+            </select></label
+          ><label
+            >Priority<select
+              name="editPriority"
+              aria-label="Priority"
+              [(ngModel)]="edit.priority"
+              [disabled]="saving()"
+            >
+              @for (item of priorities; track item) {
+                <option [value]="item">{{ label(item) }}</option>
+              }
+            </select></label
+          ><label
+            >Assigned to<select
+              name="assignedTo"
+              aria-label="Assigned to"
+              [(ngModel)]="edit.assignedTo"
+              [disabled]="saving()"
+            >
+              <option value="">Unassigned</option>
+              @for (agent of agents(); track agent.id) {
+                <option [value]="agent.id">{{ agent.displayName }}</option>
+              }
+            </select></label
+          ><button
+            pButton
+            type="submit"
+            icon="pi pi-save"
+            label="Save ticket"
+            [disabled]="saving()"
+            [loading]="saving()"
+          ></button>
+        </form>
+        <article class="message">
+          <div class="row-head">
+            <strong>{{ selected.ticket.createdByName || 'Tenant user' }}</strong
+            ><time>{{ selected.ticket.createdAt | date: 'medium' }}</time>
+          </div>
+          <p class="muted">{{ label(selected.ticket.category) }}</p>
+          <p class="body">{{ selected.ticket.description }}</p>
+        </article>
+        @for (message of selected.messages; track message.id) {
+          <article class="message" [class.internal]="message.internal">
+            <div class="row-head">
+              <strong>{{ message.authorName || message.authorType }}</strong
+              ><time>{{ message.createdAt | date: 'medium' }}</time>
+            </div>
+            <span class="badge">{{
+              message.internal ? 'Internal note' : message.authorType
+            }}</span>
+            <p class="body">{{ message.body }}</p>
+          </article>
+        }
+        <form class="reply-form" (ngSubmit)="send()">
+          <label for="support-reply">{{
+            internal ? 'Private internal note' : 'Reply to tenant'
+          }}</label
+          ><textarea
+            id="support-reply"
+            name="reply"
+            rows="4"
+            maxlength="8000"
+            required
+            [(ngModel)]="reply"
+            [disabled]="saving()"
+          ></textarea>
+          <div class="heading">
+            <label class="checkbox"
+              ><input
+                type="checkbox"
+                name="internal"
+                [(ngModel)]="internal"
+                [disabled]="saving()"
+              />Internal note</label
+            ><button
+              pButton
+              type="submit"
+              icon="pi pi-send"
+              [label]="internal ? 'Add internal note' : 'Send reply'"
+              [disabled]="saving() || !reply.trim()"
+              [loading]="saving()"
+            ></button>
+          </div>
+        </form>
+      } @else if (!detailLoading()) {
+        <p class="empty">Select a ticket to review its conversation.</p>
+      }
+    </section>
+  </div>
+</section>

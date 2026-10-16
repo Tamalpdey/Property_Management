@@ -1,6 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import type {
   CreateTenantOnboardingRequest,
   SuperAdminTenantSummary,
@@ -10,16 +11,16 @@ import { firstValueFrom } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { PasswordModule } from 'primeng/password';
-import { TagModule } from 'primeng/tag';
 import { SuperAdminTenantService } from './services/super-admin-tenant.service';
 
 @Component({
   selector: 'lorne-tenant-onboarding-page',
   standalone: true,
-  imports: [ButtonModule, FormsModule, InputTextModule, PasswordModule, TagModule],
+  imports: [ButtonModule, FormsModule, InputTextModule, PasswordModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-6">
+      <a routerLink="/tenants" class="inline-flex items-center gap-2 text-sm font-semibold text-teal-700"><i class="pi pi-arrow-left"></i> Tenant directory</a>
       <header class="rounded-lg border border-slate-200 bg-slate-950 p-5 text-white shadow-sm md:p-6">
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
@@ -313,54 +314,6 @@ import { SuperAdminTenantService } from './services/super-admin-tenant.service';
         </aside>
       </div>
 
-      <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div class="flex flex-col gap-3 border-b border-slate-200 p-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p class="text-xs font-bold uppercase text-slate-500">Tenant directory</p>
-            <h2 class="mt-1 text-xl font-bold text-slate-950">Provisioned organizations</h2>
-          </div>
-          <label class="relative block md:w-80">
-            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input pInputText class="w-full pl-9" name="search" [(ngModel)]="search" placeholder="Search tenants or administrators" />
-          </label>
-        </div>
-        @if (loadingTenants()) {
-          <p class="p-6 text-sm text-slate-500">Loading tenants...</p>
-        } @else if (filteredTenants().length === 0) {
-          <p class="p-6 text-sm text-slate-500">No tenants match this search.</p>
-        } @else {
-          <div class="overflow-x-auto">
-            <table class="w-full min-w-[820px] border-collapse text-left text-sm">
-              <thead class="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr><th>Tenant</th><th>Portal</th><th>Administrator</th><th>Usage</th><th>Modules</th><th>Status</th><th>Created</th></tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                @for (tenant of filteredTenants(); track tenant.id) {
-                  <tr>
-                    <td><strong>{{ tenant.displayName }}</strong><small>{{ tenant.legalName }}</small></td>
-                    <td><strong>{{ tenant.portalSubdomain }}</strong><small>{{ tenant.planCode }} · {{ tenant.timezone }}</small></td>
-                    <td>{{ tenant.administratorEmail || 'Not assigned' }}</td>
-                    <td><strong>{{ tenant.activeUsers }}</strong> users · <strong>{{ tenant.activeProperties }}</strong> properties</td>
-                    <td>
-                      <label class="inline-flex items-center gap-2 text-xs font-bold text-slate-700">
-                        <input
-                          type="checkbox"
-                          [checked]="tenant.quoteManagementEnabled"
-                          [disabled]="moduleUpdating() === tenant.id"
-                          (change)="toggleQuotes(tenant, $any($event.target).checked)"
-                        />
-                        Quotes
-                      </label>
-                    </td>
-                    <td><p-tag [value]="tenant.status" [severity]="tenant.status === 'ACTIVE' ? 'success' : 'warn'" /></td>
-                    <td>{{ formatDate(tenant.createdAt) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      </div>
     </section>
   `,
   styles: `
@@ -378,11 +331,6 @@ import { SuperAdminTenantService } from './services/super-admin-tenant.service';
     aside dt { color: #64748b; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
     aside dd { margin: .2rem 0 0; color: #064e3b; font-weight: 700; overflow-wrap: anywhere; }
     aside li { display: flex; gap: .55rem; align-items: center; }
-    th { padding: .8rem 1rem; font-weight: 800; }
-    td { padding: .9rem 1rem; color: #475569; vertical-align: middle; }
-    td strong, td small { display: block; }
-    td strong { color: #172033; }
-    td small { margin-top: .18rem; color: #64748b; }
   `
 })
 export class TenantOnboardingPageComponent {
@@ -398,10 +346,8 @@ export class TenantOnboardingPageComponent {
   protected readonly loadingTenants = signal(true);
   protected readonly error = signal('');
   protected readonly created = signal<TenantOnboardingResult | null>(null);
-  protected readonly moduleUpdating = signal('');
   protected readonly tenants = signal<SuperAdminTenantSummary[]>([]);
   protected readonly activeTenantCount = computed(() => this.tenants().filter((tenant) => tenant.status === 'ACTIVE').length);
-  protected search = '';
   protected confirmed = false;
   protected subdomainEdited = false;
   protected form = this.emptyForm();
@@ -475,15 +421,6 @@ export class TenantOnboardingPageComponent {
     this.step.set(1);
   }
 
-  protected filteredTenants(): SuperAdminTenantSummary[] {
-    const term = this.search.trim().toLowerCase();
-    if (!term) return this.tenants();
-    return this.tenants().filter((tenant) =>
-      [tenant.displayName, tenant.legalName, tenant.portalSubdomain, tenant.administratorEmail, tenant.planCode]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(term))
-    );
-  }
 
   protected portalHost(surface: 'app' | 'worker', subdomain = this.form.portalSubdomain): string {
     return `${subdomain || 'tenant'}.${surface}.${this.rootDomain()}`;
@@ -502,9 +439,6 @@ export class TenantOnboardingPageComponent {
     return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   }
 
-  protected formatDate(value: string): string {
-    return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
-  }
 
   protected async copyHandoff(result: TenantOnboardingResult): Promise<void> {
     const handoff = [
@@ -517,19 +451,6 @@ export class TenantOnboardingPageComponent {
     await navigator.clipboard.writeText(handoff);
   }
 
-  protected async toggleQuotes(tenant: SuperAdminTenantSummary, enabled: boolean): Promise<void> {
-    if (this.moduleUpdating()) return;
-    this.moduleUpdating.set(tenant.id);
-    this.error.set('');
-    try {
-      const updated = await firstValueFrom(this.tenantService.updateModule(tenant.id, 'QUOTES', enabled));
-      this.tenants.update((items) => items.map((item) => item.id === tenant.id ? updated : item));
-    } catch (error) {
-      this.error.set(this.errorMessage(error));
-    } finally {
-      this.moduleUpdating.set('');
-    }
-  }
 
   private async loadTenants(): Promise<void> {
     this.loadingTenants.set(true);

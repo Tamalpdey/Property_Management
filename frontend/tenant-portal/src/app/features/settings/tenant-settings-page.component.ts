@@ -107,6 +107,16 @@ type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
 
             @if (activeTab() === 'branding') {
               <div class="grid gap-3">
+                <section class="border-b border-slate-200 pb-3">
+                  <h2 class="text-lg font-bold text-slate-950">Company logo</h2>
+                  <div class="logo-url-row mt-3">
+                    <input class="field-input" name="logoUrl" aria-label="Company logo URL" placeholder="https://... or upload a logo" [(ngModel)]="form.logoUrl" />
+                    <input #logoFileInput class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" (change)="selectLogoFile($event)" />
+                    <button pButton type="button" severity="secondary" icon="pi pi-upload" label="Upload company logo" [loading]="uploadingLogo()" (click)="logoFileInput.click()"></button>
+                    <button pButton type="button" severity="secondary" icon="pi pi-times" label="Clear" [disabled]="!form.logoUrl || uploadingLogo()" (click)="clearLogo()"></button>
+                  </div>
+                  @if (form.logoUrl) { <img class="mt-3 h-16 max-w-48 object-contain" [src]="form.logoUrl" alt="Company logo preview" /> }
+                </section>
                 <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -266,38 +276,6 @@ type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
                   <span class="mt-1 block text-xs font-semibold text-slate-500">Displayed with the invoice number and dates on generated invoices.</span>
                 </label>
                 <label class="block md:col-span-2">
-                  <span class="field-label">Logo URL</span>
-                  <div class="logo-url-row">
-                    <input class="field-input" name="logoUrl" placeholder="https://... or upload a logo" [(ngModel)]="form.logoUrl" />
-                    <input
-                      #logoFileInput
-                      class="hidden"
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      (change)="selectLogoFile($event)"
-                    />
-                    <button
-                      pButton
-                      type="button"
-                      severity="secondary"
-                      icon="pi pi-upload"
-                      label="Upload"
-                      [loading]="uploadingLogo()"
-                      (click)="logoFileInput.click()"
-                    ></button>
-                    <button
-                      pButton
-                      type="button"
-                      severity="secondary"
-                      icon="pi pi-times"
-                      label="Clear"
-                      [disabled]="!form.logoUrl || uploadingLogo()"
-                      (click)="clearLogo()"
-                    ></button>
-                  </div>
-                  <span class="mt-1 block text-xs font-semibold text-slate-500">Paste a public logo URL or upload PNG, JPG, WEBP, or GIF. Save settings after upload.</span>
-                </label>
-                <label class="block md:col-span-2">
                   <span class="field-label">Payment terms</span>
                   <textarea class="field-input min-h-28" name="paymentTerms" [(ngModel)]="form.paymentTerms"></textarea>
                 </label>
@@ -390,6 +368,13 @@ type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
 
             @if (activeTab() === 'settings') {
               <div class="grid gap-3">
+                <section class="border-b border-slate-200 pb-4">
+                  <h2 class="text-lg font-bold text-slate-950">Regional settings</h2>
+                  <label for="tenant-timezone" class="mt-3 block text-sm font-semibold text-slate-700">Timezone</label>
+                  <select id="tenant-timezone" name="timezone" class="field-input mt-1 w-full md:max-w-md" [(ngModel)]="form.timezone" required>
+                    @for (zone of timezones; track zone) { <option [value]="zone">{{ zone.replaceAll('_', ' ') }}</option> }
+                  </select>
+                </section>
                 <section class="rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <div>
                     <p class="text-xs font-black uppercase tracking-wide text-teal-700">Document headers</p>
@@ -627,7 +612,7 @@ type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
   styles: [`
     .field-label { display: block; margin-bottom: 0.25rem; font-size: 0.8rem; font-weight: 800; color: #334155; }
     .field-input { width: 100%; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.62rem 0.75rem; font-size: 0.92rem; color: #0f172a; outline: none; background: #fff; }
-    .field-input:focus { border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12); }
+    .field-input:focus { border-color: var(--tenant-primary); box-shadow: 0 0 0 3px var(--tenant-primary-soft); }
     .field-input:disabled { background: #f1f5f9; color: #94a3b8; }
     .color-control { display: flex; align-items: center; gap: 0.5rem; }
     .logo-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; }
@@ -637,8 +622,8 @@ type SettingsTab = 'profile' | 'branding' | 'invoice' | 'email' | 'settings';
     .report-logo-preview img { max-height: 100%; max-width: 100%; object-fit: contain; object-position: left center; }
     .settings-tab { border-radius: 0.45rem; padding: 0.55rem 0.75rem; color: #64748b; transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease; }
     .settings-tab:hover { color: #0f172a; background: rgba(255, 255, 255, 0.72); }
-    .settings-tab-active { background: #0f766e; color: #ffffff; box-shadow: 0 1px 4px rgba(15, 118, 110, 0.24); }
-    .settings-tab-active:hover { background: #0f766e; color: #ffffff; }
+    .settings-tab-active { background: var(--tenant-primary); color: var(--tenant-primary-contrast); box-shadow: 0 1px 4px var(--tenant-primary-soft); }
+    .settings-tab-active:hover { background: var(--tenant-primary-hover); color: var(--tenant-primary-contrast); }
     .option-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
     .option-choice { display: grid; cursor: pointer; gap: .15rem; border: 1px solid #cbd5e1; border-radius: .5rem; background: #fff; padding: .65rem; color: #334155; }
     .option-choice-active { border-color: var(--tenant-primary); box-shadow: 0 0 0 2px var(--tenant-primary-soft); color: var(--tenant-primary); }
@@ -714,6 +699,7 @@ export class TenantSettingsPageComponent {
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly form: UpdateTenantSettingsRequest = {};
+  protected readonly timezones = ['UTC', ...Intl.supportedValuesOf('timeZone')];
   protected readonly testEmailForm = {
     recipientEmail: '',
     subject: '',
@@ -945,7 +931,9 @@ export class TenantSettingsPageComponent {
   }
 
   private populate(settings: TenantSettingsRecord): void {
+    if (settings.timezone && !this.timezones.includes(settings.timezone)) this.timezones.push(settings.timezone);
     Object.assign(this.form, {
+      timezone: settings.timezone || 'America/Toronto',
       organizationName: settings.organizationName || settings.tenantName,
       portalSubdomain: settings.portalSubdomain || '',
       billingEmail: settings.billingEmail || '',

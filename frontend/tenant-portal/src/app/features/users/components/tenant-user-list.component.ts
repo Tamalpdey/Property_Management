@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { TenantDatePipe as DatePipe } from '../../../shared/tenant-date.pipe';
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 import type { TenantUserRecord } from '@lorne/contracts';
 import { MenuItem } from 'primeng/api';
@@ -117,6 +117,8 @@ import { DenseCollectionToolbarComponent } from '../../../shared/collection/dens
 })
 export class TenantUserListComponent {
   readonly users = input.required<TenantUserRecord[]>();
+  readonly currentUserId = input<string | null>(null);
+  readonly lastAdminId = input<string | null>(null);
   readonly editUser = output<TenantUserRecord>();
   readonly activateUser = output<TenantUserRecord>();
   readonly deactivateUser = output<TenantUserRecord>();
@@ -155,9 +157,9 @@ export class TenantUserListComponent {
       { label: 'Reset password', icon: 'pi pi-key', command: () => this.editUser.emit(user) },
       { separator: true },
       user.status === 'ACTIVE'
-        ? { label: 'Deactivate user', icon: 'pi pi-ban', command: () => this.deactivateUser.emit(user) }
+        ? { label: 'Deactivate user', icon: 'pi pi-ban', disabled: user.id === this.lastAdminId() || user.id === this.currentUserId(), command: () => this.deactivateUser.emit(user) }
         : { label: 'Activate user', icon: 'pi pi-check-circle', command: () => this.activateUser.emit(user) },
-      { label: 'Remove from tenant', icon: 'pi pi-trash', command: () => this.deleteUser.emit(user) }
+      { label: 'Remove from tenant', icon: 'pi pi-trash', disabled: user.id === this.lastAdminId() || user.id === this.currentUserId(), command: () => this.deleteUser.emit(user) }
     ]);
     menu.toggle(event);
   }

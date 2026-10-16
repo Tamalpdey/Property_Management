@@ -68,8 +68,8 @@ import type { WorkerJobAction } from '@lorne/contracts';
     }
 
     .worker-action--primary {
-      background: #10b981;
-      color: white;
+      background: var(--tenant-primary);
+      color: var(--tenant-primary-contrast);
       font-size: 1.05rem;
       min-height: 3.35rem;
     }
