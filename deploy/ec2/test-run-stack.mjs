@@ -45,6 +45,23 @@ function run(args, environment = {}) {
 }
 
 try {
+  const applicationServices = ['edge', 'lorne-modulith', 'public-site', 'tenant-portal', 'admin-portal', 'worker-app'];
+  let publish = run(['prod', 'push']);
+  assert.equal(publish.status, 0, publish.stderr);
+  assert.deepEqual(publish.calls[0].args, ['push', ...applicationServices]);
+  publish = run(['prod', 'build-push']);
+  assert.equal(publish.status, 0, publish.stderr);
+  assert.deepEqual(publish.calls[0].args, ['build', '--push', ...applicationServices]);
+  publish = run(['prod', 'push', 'worker-app']);
+  assert.equal(publish.status, 0, publish.stderr);
+  assert.deepEqual(publish.calls[0].args, ['push', 'worker-app']);
+  for (const action of ['push', 'build-push']) {
+    for (const service of ['redis', 'db-migration', 'unknown']) {
+      const denied = run(['prod', action, service]);
+      assert.equal(denied.status, 1);
+      assert.equal(denied.calls.length, 0);
+    }
+  }
   let result = run(['prod', 'website-build-push']);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.calls.map(call => call.args), [['build', '--push', 'public-site', 'edge']]);

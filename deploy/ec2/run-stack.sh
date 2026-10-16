@@ -24,6 +24,9 @@ Examples:
 
 Env:
 TARGET_PLATFORM=linux/amd64
+IMAGE_REPOSITORY=maplepropertyservices/maple-property-mgmt
+IMAGE_TAG=latest
+Application image tags are <IMAGE_TAG>-<service> in IMAGE_REPOSITORY.
 
 Actions:
 up            Build and deploy all services, or one service
@@ -69,6 +72,16 @@ else
 fi
 
 compose_cmd=(docker compose --env-file .env.prod -f docker-compose.yml)
+application_services=(edge lorne-modulith public-site tenant-portal admin-portal worker-app)
+
+if [[ "$ACTION" == "push" || "$ACTION" == "build-push" ]]; then
+  if [[ -n "$SERVICE" ]]; then
+    case "$SERVICE" in
+      edge|lorne-modulith|public-site|tenant-portal|admin-portal|worker-app) ;;
+      *) echo "ERROR: only application services can be published; redis and db-migration use upstream images."; exit 1 ;;
+    esac
+  fi
+fi
 
 deploy_website() {
   # Leave the current edge running if the new public site does not become healthy.
@@ -128,14 +141,14 @@ case "$ACTION" in
     if [[ -n "$SERVICE" ]]; then
       "${compose_cmd[@]}" push "$SERVICE"
     else
-      "${compose_cmd[@]}" push
+      "${compose_cmd[@]}" push "${application_services[@]}"
     fi
     ;;
   build-push)
     if [[ -n "$SERVICE" ]]; then
       "${compose_cmd[@]}" build --push "$SERVICE"
     else
-      "${compose_cmd[@]}" build --push
+      "${compose_cmd[@]}" build --push "${application_services[@]}"
     fi
     ;;
   rebuild)

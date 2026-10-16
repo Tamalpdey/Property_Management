@@ -3,7 +3,7 @@ name: ${COMPOSE_PROJECT_NAME:-maple-property-services}
 services:
   edge:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-edge:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-edge
     build:
       context: .
       dockerfile: Dockerfile.caddy
@@ -52,7 +52,7 @@ services:
 
   lorne-modulith:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-lorne-modulith:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-lorne-modulith
     build:
       context: ../../backend
       dockerfile: Dockerfile
@@ -72,7 +72,7 @@ services:
 
   public-site:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-public-site:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-public-site
     build:
       context: ../../frontend
       dockerfile: portal/Dockerfile
@@ -86,7 +86,7 @@ services:
 
   tenant-portal:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-tenant-portal:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-tenant-portal
     build:
       context: ../../frontend
       dockerfile: tenant-portal/Dockerfile
@@ -96,7 +96,7 @@ services:
 
   admin-portal:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-admin-portal:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-admin-portal
     build:
       context: ../../frontend
       dockerfile: admin-portal/Dockerfile
@@ -106,7 +106,7 @@ services:
 
   worker-app:
     platform: ${DOCKER_PLATFORM:-linux/amd64}
-    image: ${IMAGE_PREFIX:-maple-property-services}-worker-app:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REPOSITORY:-maplepropertyservices/maple-property-mgmt}:${IMAGE_TAG:-latest}-worker-app
     build:
       context: ../../frontend
       dockerfile: worker-app/Dockerfile
