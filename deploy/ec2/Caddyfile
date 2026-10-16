@@ -87,13 +87,11 @@ platinumservices.ca, www.platinumservices.ca {
   }
 
   handle /contact {
-    redir /#contact 308
+    redir /property-management/contact.html 308
   }
 
   handle {
-    root * /srv/platinum-site
-    try_files {path} /index.html
-    file_server
+    reverse_proxy platinum-website:4321
   }
 }
 
